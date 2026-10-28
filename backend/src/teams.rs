@@ -208,8 +208,8 @@ async fn list_teams(
             "id": row.try_get::<String, _>("id")?,
             "name": row.try_get::<String, _>("name")?,
             "description": row.try_get::<Option<String>, _>("description")?,
-            "created_at": row.try_get::<i64, _>("t_created")?,
-            "updated_at": row.try_get::<i64, _>("t_updated")?,
+            "created_at": row.try_get::<i64, _>("created_at")?,
+            "updated_at": row.try_get::<i64, _>("updated_at")?,
             "my_role": Role::parse(&row.try_get::<String, _>("role")?)?,
         }));
     }

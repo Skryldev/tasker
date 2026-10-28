@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 8%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 8%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 8%;
+    --primary: 243 62% 52%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 95%;
+    --secondary-foreground: 240 6% 12%;
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 44%;
+    --accent: 240 5% 94%;
+    --accent-foreground: 240 6% 10%;
+    --destructive: 0 72% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 6% 89%;
+    --input: 240 6% 88%;
+    --ring: 243 62% 52%;
+    --radius: 0.5rem;
+    --sidebar: 240 8% 98%;
+    --sidebar-foreground: 240 6% 20%;
+    --priority-urgent: 0 72% 48%;
+    --priority-high: 24 92% 48%;
+    --priority-medium: 44 92% 44%;
+    --priority-low: 240 4% 60%;
+    --status-backlog: 240 4% 56%;
+    --status-todo: 243 60% 58%;
+    --status-in-progress: 199 89% 44%;
+    --status-in-review: 271 76% 56%;
+    --status-done: 152 62% 40%;
+  }
+
+  .dark {
+    --background: 240 12% 6%;
+    --foreground: 240 8% 92%;
+    --card: 240 10% 8.5%;
+    --card-foreground: 240 8% 92%;
+    --popover: 240 11% 9%;
+    --popover-foreground: 240 8% 92%;
+    --primary: 243 80% 66%;
+    --primary-foreground: 240 20% 8%;
+    --secondary: 240 8% 15%;
+    --secondary-foreground: 240 6% 88%;
+    --muted: 240 8% 13%;
+    --muted-foreground: 240 5% 58%;
+    --accent: 240 8% 16%;
+    --accent-foreground: 240 6% 90%;
+    --destructive: 0 68% 56%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 7% 17%;
+    --input: 240 7% 19%;
+    --ring: 243 80% 66%;
+    --sidebar: 240 12% 5%;
+    --sidebar-foreground: 240 6% 74%;
+    --priority-urgent: 0 72% 58%;
+    --priority-high: 24 90% 58%;
+    --priority-medium: 44 90% 54%;
+    --priority-low: 240 5% 55%;
+    --status-backlog: 240 5% 55%;
+    --status-todo: 243 70% 66%;
+    --status-in-progress: 199 85% 55%;
+    --status-in-review: 271 70% 64%;
+    --status-done: 152 55% 46%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+
+  ::selection {
+    @apply bg-primary/20;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  }
+}
