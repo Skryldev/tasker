@@ -1,0 +1,22 @@
+# Rust
+backend/target/
+*.pdb
+
+# Node
+node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/coverage/
+
+# Local dev data
+.devtools/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.local
+
+# OS
+Thumbs.db
+.DS_Store

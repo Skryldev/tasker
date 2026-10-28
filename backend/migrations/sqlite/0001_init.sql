@@ -1,0 +1,132 @@
+-- Tasker initial schema (SQLite dialect).
+-- Timestamps: BIGINT unix epoch milliseconds (UTC), application-generated.
+-- Dates (due_date): TEXT ISO-8601 YYYY-MM-DD.
+
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE users (
+    id            TEXT PRIMARY KEY,
+    email         TEXT NOT NULL UNIQUE,
+    display_name  TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    is_active     INTEGER NOT NULL DEFAULT 1,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL
+);
+
+CREATE TABLE sessions (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    token_hash   TEXT NOT NULL UNIQUE,
+    created_at   INTEGER NOT NULL,
+    expires_at   INTEGER NOT NULL,
+    revoked_at   INTEGER,
+    last_seen_at INTEGER NOT NULL,
+    ip_address   TEXT,
+    user_agent   TEXT
+);
+
+CREATE INDEX idx_sessions_user_id ON sessions (user_id);
+
+CREATE TABLE teams (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT,
+    created_by  TEXT NOT NULL REFERENCES users (id),
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+
+CREATE TABLE team_members (
+    team_id    TEXT NOT NULL REFERENCES teams (id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    role       TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'manager', 'member')),
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (team_id, user_id)
+);
+
+CREATE INDEX idx_team_members_user ON team_members (user_id);
+
+CREATE TABLE projects (
+    id          TEXT PRIMARY KEY,
+    team_id     TEXT NOT NULL REFERENCES teams (id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    description TEXT,
+    status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+    owner_id    TEXT NOT NULL REFERENCES users (id),
+    created_by  TEXT NOT NULL REFERENCES users (id),
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+
+CREATE INDEX idx_projects_team ON projects (team_id, status);
+
+CREATE TABLE labels (
+    id         TEXT PRIMARY KEY,
+    team_id    TEXT NOT NULL REFERENCES teams (id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    color      TEXT NOT NULL DEFAULT '#6366f1',
+    created_at INTEGER NOT NULL,
+    UNIQUE (team_id, name)
+);
+
+CREATE TABLE tasks (
+    id             TEXT PRIMARY KEY,
+    team_id        TEXT NOT NULL REFERENCES teams (id) ON DELETE CASCADE,
+    project_id     TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    parent_task_id TEXT REFERENCES tasks (id) ON DELETE CASCADE,
+    title          TEXT NOT NULL,
+    description    TEXT,
+    status         TEXT NOT NULL DEFAULT 'backlog'
+        CHECK (status IN ('backlog', 'todo', 'in_progress', 'in_review', 'done')),
+    priority       TEXT NOT NULL DEFAULT 'medium'
+        CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+    assignee_id    TEXT REFERENCES users (id),
+    created_by     TEXT NOT NULL REFERENCES users (id),
+    due_date       TEXT,
+    position       REAL NOT NULL DEFAULT 0,
+    completed_at   INTEGER,
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL
+);
+
+CREATE INDEX idx_tasks_project_board ON tasks (project_id, status, position);
+CREATE INDEX idx_tasks_project_created ON tasks (project_id, created_at DESC);
+CREATE INDEX idx_tasks_assignee ON tasks (assignee_id, status);
+CREATE INDEX idx_tasks_team ON tasks (team_id);
+CREATE INDEX idx_tasks_parent ON tasks (parent_task_id);
+
+CREATE TABLE task_labels (
+    task_id  TEXT NOT NULL REFERENCES tasks (id) ON DELETE CASCADE,
+    label_id TEXT NOT NULL REFERENCES labels (id) ON DELETE CASCADE,
+    PRIMARY KEY (task_id, label_id)
+);
+
+CREATE INDEX idx_task_labels_label ON task_labels (label_id);
+
+CREATE TABLE comments (
+    id         TEXT PRIMARY KEY,
+    task_id    TEXT NOT NULL REFERENCES tasks (id) ON DELETE CASCADE,
+    author_id  TEXT NOT NULL REFERENCES users (id),
+    body       TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_comments_task ON comments (task_id, created_at);
+
+CREATE TABLE activities (
+    id         TEXT PRIMARY KEY,
+    team_id    TEXT NOT NULL REFERENCES teams (id) ON DELETE CASCADE,
+    project_id TEXT,
+    task_id    TEXT REFERENCES tasks (id) ON DELETE CASCADE,
+    actor_id   TEXT REFERENCES users (id) ON DELETE SET NULL,
+    event      TEXT NOT NULL,
+    field      TEXT,
+    old_value  TEXT,
+    new_value  TEXT,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_activities_task ON activities (task_id, created_at DESC);
+CREATE INDEX idx_activities_team ON activities (team_id, created_at DESC);
