@@ -122,6 +122,21 @@ status = ?`), so stale concurrent requests fail with 409 instead of
 corrupting state. Every transition writes its activity rows and
 notifications in the same transaction.
 
+## Phase 3: guests, dependencies, workload, templates
+
+- **Project guests**: `workspace.rs` + `ProjectActor` in `projects.rs`.
+  Guests hold an explicit `project_members` row (viewer) and no team
+  membership; every capability check denies them by construction. Internal
+  content is protected by `comments.guest_visible` (SQL-filtered) and an
+  activity-event whitelist.
+- **Dependencies**: `workspace.rs` with per-project serialization via
+  `db::ProjectDependencyLock` (SQLite single-writer / PG advisory xact
+  lock / MySQL GET_LOCK) around the cycle BFS + insert.
+- **Workload**: `GET /teams/:id/workload` — SQL GROUP BY aggregation,
+  membership-gated, distribution only (not capacity).
+- **Templates**: project-scoped defaults feeding the standard task
+  creation flow (no parallel creation path).
+
 ## Deliberate non-goals (Phase 1)
 
 Event sourcing, microservices, workflow builders, custom fields, e-mail

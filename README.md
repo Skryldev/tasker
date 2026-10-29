@@ -64,6 +64,10 @@ SQLite and MySQL profiles: `docker compose --profile sqlite up -d --build`,
   audited reason; resolution state and history
 - In-app notifications (assignments, mentions, review decisions) with unread
   badge, panel, and mark-as-read
+- Project guest access: read-only, project-scoped grants for external users
+- Task dependencies (finish-to-start) with cycle prevention
+- Team workload view (server-side aggregation, filters)
+- Project task templates (reusable defaults for new tasks)
 - List and Kanban (drag-and-drop) views, My Tasks across teams
 - Light/dark themes, responsive shell, loading/empty/error states
 - Health/readiness endpoints, graceful shutdown, Prometheus-style metrics

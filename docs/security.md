@@ -58,6 +58,18 @@ and what remains out of scope.
   exposes task content beyond the frozen event summary written while the
   recipient had access.
 
+## Project guests (Phase 3)
+
+Guests are external users granted read-only access to one project. The
+grant is a `project_members` row; it confers no team membership, no team
+data, and no mutation rights anywhere. Every mutation endpoint rejects
+guests with 403 (task/comment/workflow/guest/template); every team-level
+endpoint 404s them, exactly like outsiders. Internal comments are hidden
+by default (`guest_visible=false` — a member must explicitly mark a
+comment visible), and the guest activity feed is whitelisted to
+non-sensitive workflow events. Revocation is a row delete; the next
+request re-resolves and denies access.
+
 ## CSRF
 
 Cookie authentication requires cross-site request protection. Tasker layers

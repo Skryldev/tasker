@@ -84,6 +84,16 @@ as reporter when the creator is still a team member; otherwise the project
 owner (always a validated member). No rows are discarded and no destructive
 operations occur.
 
+## Migration 0003 (Phase 3)
+
+Adds `project_members` (guest grants, PK project+user, FK cascade),
+`task_dependencies` (PK prevents duplicate edges, FK cascade on task
+delete), `task_templates` + `task_template_labels`, and
+`comments.guest_visible` (NOT NULL DEFAULT false — non-destructive
+backfill: existing comments stay internal) with supporting indexes on all
+three engines. Applied by the same locked runner; verified fresh-install
+and upgrade paths on SQLite, PostgreSQL, and MariaDB.
+
 ## Backup and restore
 
 - **SQLite**: stop the server (or use `sqlite3 tasker.db ".backup …"` on a

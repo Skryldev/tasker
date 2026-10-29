@@ -44,6 +44,14 @@ Both queries are covered by the recipient/unread indexes added in migration
 baselines (list ~556 µs, search ~481 µs, board ~339 µs, insert ~130 µs,
 update ~75 µs) — no regression from the workflow/notification code paths.
 
+## Phase 3 additions
+
+The Phase 1/2 benchmarks re-measured within noise of their baselines
+after the Phase 3 code landed (list ~568 µs, search ~484 µs, board
+~344 µs, get ~9.3 µs, insert ~141 µs, update ~74 µs; notifications ~31 µs
+/ ~22 µs) — no regression from guest resolution (one extra indexed lookup
+only for non-members), dependencies, workload, or templates.
+
 ## HTTP load test
 
 Command: `scripts/loadtest.sh <port> <seconds> <sqlite|postgres|mysql>`
