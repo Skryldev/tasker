@@ -77,7 +77,10 @@ impl Role {
     /// the teams service; everything boolean lives here.
     #[must_use]
     pub fn can(self, capability: Capability) -> bool {
-        use Capability::*;
+        use Capability::{
+            AddMember, CreateLabel, CreateTask, DeleteAnyComment, DeleteAnyTask, EditAnyComment,
+            ManageProjects, UpdateAnyTask, UpdateTeam,
+        };
         match self {
             Self::Owner => true,
             Self::Admin => matches!(
@@ -162,9 +165,7 @@ pub async fn count_owners(conn: &mut Conn<'_>, team_id: &str) -> Result<i64, App
             args,
         )
         .await?;
-    Ok(row
-        .map(|r| r.try_get::<i64, _>("n").unwrap_or(0))
-        .unwrap_or(0))
+    Ok(row.map_or(0, |r| r.try_get::<i64, _>("n").unwrap_or(0)))
 }
 
 /// Count of owner-role members across all teams (used by admin bootstrap).
@@ -176,9 +177,7 @@ pub async fn count_owners_global(conn: &mut Conn<'_>) -> Result<i64, AppError> {
             args,
         )
         .await?;
-    Ok(row
-        .map(|r| r.try_get::<i64, _>("n").unwrap_or(0))
-        .unwrap_or(0))
+    Ok(row.map_or(0, |r| r.try_get::<i64, _>("n").unwrap_or(0)))
 }
 
 #[cfg(test)]

@@ -8,12 +8,12 @@ use axum::http::HeaderMap;
 /// note that X-Forwarded-For is client-controlled.
 #[must_use]
 pub fn client_ip(headers: &HeaderMap) -> String {
-    if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-        if let Some(first) = xff.split(',').next() {
-            let ip = first.trim();
-            if !ip.is_empty() {
-                return ip.to_string();
-            }
+    if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok())
+        && let Some(first) = xff.split(',').next()
+    {
+        let ip = first.trim();
+        if !ip.is_empty() {
+            return ip.to_string();
         }
     }
     if let Some(real) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {

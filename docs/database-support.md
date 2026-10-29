@@ -1,0 +1,94 @@
+# Database support
+
+Tasker treats **PostgreSQL, MySQL, and SQLite as first-class engines**
+selected purely by `TASKER_DATABASE_URL` — no code changes, no separate
+builds.
+
+## Status matrix
+
+| Engine | Status | Migrations | Integration tests | Load tested |
+| --- | --- | --- | --- | --- |
+| PostgreSQL 10+/17 | ✅ verified | `migrations/postgres/` | ✅ security matrix + smoke | ✅ |
+| MySQL 8.x protocol | ✅ verified via MariaDB 11.4 | `migrations/mysql/` | ✅ security matrix + smoke | ✅ |
+| SQLite 3.35+ | ✅ verified (bundled) | `migrations/sqlite/` | ✅ security matrix + smoke | ✅ |
+
+Honesty note: the MySQL-protocol verification ran on **MariaDB 11.4.5**
+(available locally). MySQL 8.x uses the same wire protocol and the same
+portable SQL subset (InnoDB, utf8mb4, CHECK constraints supported since
+8.0.16); it has *not* been executed against a real MySQL 8 server in this
+phase and is labeled accordingly.
+
+## Portability strategy
+
+One SQL codebase runs on all engines. The rules that make this work:
+
+1. **Placeholders**: statements use `?`; the query layer rewrites them to
+   numbered `$N` for PostgreSQL at execution time (`db::adapt_sql`, with a
+   unit test).
+2. **Types**: BIGINT epoch-millisecond timestamps (application-generated),
+   TEXT/CHAR ISO dates (`YYYY-MM-DD`, lexicographic = chronological),
+   VARCHAR for all indexed strings (MySQL utf8mb4 index limits), BOOLEAN
+   columns filtered in SQL rather than decoded into Rust (PG returns real
+   bools; MySQL/SQLite integers).
+3. **No dialect features in shared code**: no `RETURNING` (inserts re-select
+   by id), no `INSERT … ON CONFLICT/ON DUPLICATE KEY` (pre-checks +
+   unique-violation mapping to HTTP 409), portable `LIKE … ESCAPE '|'
+   (backslash is a MySQL string escape).
+4. **Schema differences live only in migrations**: three dialect directories
+   applied by one runner, each statement split conservatively (string/comment
+   aware), executed in a per-migration transaction and recorded in
+   `schema_migrations`.
+
+### Migration safety
+
+- Applied automatically at startup, deterministically ordered by version.
+- Concurrent startups serialize on an engine-appropriate lock:
+  `pg_advisory_lock`, MySQL `GET_LOCK`, and SQLite's native write locking
+  (plus a busy timeout).
+- Failures abort the process with a precise error — a half-migrated database
+  never serves traffic, and non-destructive DDL makes reruns safe.
+- Fresh-install and upgrade paths are the same code path; no destructive
+  resets are ever issued automatically.
+
+## Engine-specific notes
+
+### PostgreSQL (recommended for teams)
+- Row-level locking and MVCC handle concurrent writes well.
+- `LOWER(col) LIKE …` benefits from `pg_trgm`/`citext` indexes if search
+  grows — an operator-level addition, not an application change.
+
+### MySQL / MariaDB
+- `utf8mb4` everywhere; indexed strings are VARCHAR with explicit lengths.
+- CHECK constraints require MySQL ≥ 8.0.16 (MariaDB 10.2+ is fine).
+- `MEDIUMTEXT` was avoided deliberately: it decodes as BLOB through the
+  portable layer; text columns are sized VARCHARs.
+
+### SQLite (lightweight deployments)
+- Enabled pragmas on every pooled connection: `foreign_keys=ON`,
+  `journal_mode=WAL`, `busy_timeout=5000`, `synchronous=NORMAL`.
+- **Honest limits**: SQLite serializes writers. Under heavy concurrent
+  writes beyond the busy timeout the backend returns `503` (`type: busy`,
+  `Retry-After: 1`) instead of erroring or corrupting — clients may retry.
+  Single-team deployments are comfortably within its envelope; growing
+  teams should move to PostgreSQL (a URL change; the same migrations
+  discipline applies — migrate with a fresh database or a dump/restore).
+- The database file is created on first connect (`mode=rwc`).
+
+## Backup and restore
+
+- **SQLite**: stop the server (or use `sqlite3 tasker.db ".backup …"` on a
+  quiescent WAL database), copy the `tasker.db` (+ `-wal`/`-shm` while
+  stopped). Restore = place the file and start. *This procedure is
+  documented but was not exercised as part of Phase 1 verification.*
+- **PostgreSQL**: `pg_dump`/`pg_restore` on the `tasker` database.
+- **MySQL**: `mysqldump --single-transaction tasker`.
+- Migrations are idempotent on an existing schema (applied versions are
+  tracked), so restoring a backup from an older version then starting a
+  newer backend applies only the missing migrations.
+
+## Upgrade procedure
+
+1. Back up (above).
+2. Pull the new image / replace the binary.
+3. Start — migrations apply automatically at boot; readiness flips only
+   after they succeed.

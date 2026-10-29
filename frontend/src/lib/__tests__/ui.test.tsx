@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
+import type * as apiClientModule from "@/api/client";
 import { LoginPage } from "@/pages/LoginPage";
 import { ThemeProvider, useTheme } from "@/lib/theme";
 import { ToastProvider, useToast } from "@/components/ui/toast";
@@ -12,7 +13,7 @@ import { EmptyState, ErrorState } from "@/components/app/EmptyState";
 
 // api.login is network-bound; tests replace it entirely.
 vi.mock("@/api/client", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/api/client")>();
+  const original = (await importOriginal()) as typeof apiClientModule;
   return { ...original, api: { ...original.api, login: vi.fn() } };
 });
 

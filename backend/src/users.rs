@@ -80,8 +80,7 @@ pub async fn create_validated(
     if !field_errors.is_empty() {
         return Err(AppError::Validation(field_errors));
     }
-    let password_hash =
-        crate::security::password::hash(password).map_err(|e| AppError::internal(e))?;
+    let password_hash = crate::security::password::hash(password).map_err(AppError::internal)?;
     insert(
         conn,
         &NewUser {

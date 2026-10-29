@@ -17,9 +17,7 @@ path = "src/main.rs"
 [dependencies]
 axum = { version = "0.8", features = ["http2", "matched-path", "json"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
-tower = { version = "0.5", features = ["util", "timeout"] }
 tower-http = { version = "0.6", features = ["trace", "cors", "fs", "set-header", "timeout"] }
-hyper = "1"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -49,8 +47,12 @@ clap = { version = "4", features = ["derive", "env"] }
 rpassword = "7"
 
 [dev-dependencies]
-serde_yaml = "0.9"
-tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[[bench]]
+name = "db"
+harness = false
 
 [profile.release]
 lto = "thin"
@@ -67,3 +69,7 @@ module_name_repetitions = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 multiple_crate_versions = "allow"
+# String building via format-push is the clearest form for SQL fragments.
+format_push_string = "allow"
+# Long HTTP handlers are readable as request->service->response flows.
+too_many_lines = "allow"

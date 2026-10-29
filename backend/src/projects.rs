@@ -119,13 +119,13 @@ fn validate_project_input(
         ));
     }
     let description = description.map(str::trim).filter(|d| !d.is_empty());
-    if let Some(d) = description {
-        if d.chars().count() > 2000 {
-            errors.push(FieldError::new(
-                "description",
-                "description must be at most 2000 characters",
-            ));
-        }
+    if let Some(d) = description
+        && d.chars().count() > 2000
+    {
+        errors.push(FieldError::new(
+            "description",
+            "description must be at most 2000 characters",
+        ));
     }
     if errors.is_empty() {
         Ok((name, description.map(std::string::ToString::to_string)))

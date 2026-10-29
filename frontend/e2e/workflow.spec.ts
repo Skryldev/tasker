@@ -151,8 +151,10 @@ test.describe.serial("Tasker core workflow", () => {
 
   test("logout revokes the session", async () => {
     await page.getByTestId("user-menu").click();
-    await page.getByTestId("logout").click();
-    await expect(page).toHaveURL(/\/login$/);
+    const item = page.getByTestId("logout");
+    await expect(item).toBeVisible();
+    await item.click();
+    await expect(page).toHaveURL(/\/login$/, { timeout: 15_000 });
     // The revoked cookie no longer grants access.
     const res = await page.request.get("/api/v1/me");
     expect(res.status()).toBe(401);

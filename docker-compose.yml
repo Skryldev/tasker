@@ -1,0 +1,119 @@
+# Tasker — self-hosted team work management platform.
+#
+# Three deployment profiles select the database engine. Pick ONE profile:
+#
+#   docker compose --profile sqlite up -d     # single container, file-backed DB
+#   docker compose --profile postgres up -d   # recommended for teams
+#   docker compose --profile mysql up -d      # MySQL 8 compatible
+#
+# Configure via environment (see deploy/env.example). Do NOT put secrets in
+# this file; use an .env file next to it (gitignored).
+
+name: tasker
+
+x-backend-common: &backend-common
+  build:
+    context: ./backend
+  restart: unless-stopped
+  environment: &backend-env
+    TASKER_ENV: production
+    TASKER_HTTP_HOST: 0.0.0.0
+    TASKER_HTTP_PORT: "8080"
+    TASKER_SESSION_TTL_HOURS: "336"
+    TASKER_RATE_LIMIT_LOGIN_PER_MIN: "10"
+    TASKER_ALLOWED_ORIGINS: ${TASKER_ALLOWED_ORIGINS:-}
+    TASKER_PUBLIC_REGISTRATION: "false"
+    TASKER_LOG_FORMAT: json
+  depends_on: []
+  volumes: []
+  command: ["serve"]
+
+services:
+  backend:
+    <<: *backend-common
+    profiles: ["sqlite"]
+    environment:
+      <<: *backend-env
+      TASKER_DATABASE_URL: sqlite:/var/lib/tasker/data/tasker.db
+    volumes:
+      - sqlite-data:/var/lib/tasker/data
+
+  backend-postgres:
+    <<: *backend-common
+    profiles: ["postgres"]
+    environment:
+      <<: *backend-env
+      TASKER_DATABASE_URL: postgres://tasker:${TASKER_DB_PASSWORD:?set TASKER_DB_PASSWORD in .env}@postgres:5432/tasker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+
+  backend-mysql:
+    <<: *backend-common
+    profiles: ["mysql"]
+    environment:
+      <<: *backend-env
+      TASKER_DATABASE_URL: mysql://tasker:${TASKER_DB_PASSWORD:?set TASKER_DB_PASSWORD in .env}@mysql:3306/tasker
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks: [internal]
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    ports:
+      - "${TASKER_HTTP_PORT:-8088}:80"
+    environment:
+      TASKER_BACKEND_URL: http://backend:8080
+    depends_on:
+      - backend
+    networks: [default, internal]
+
+  postgres:
+    image: postgres:17-alpine
+    profiles: ["postgres"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tasker
+      POSTGRES_PASSWORD: ${TASKER_DB_PASSWORD:?set TASKER_DB_PASSWORD in .env}
+      POSTGRES_DB: tasker
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tasker -d tasker"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # No ports: reachable only from the backend on the internal network.
+    networks: [internal]
+
+  mysql:
+    image: mysql:8.4
+    profiles: ["mysql"]
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_USER: tasker
+      MYSQL_PASSWORD: ${TASKER_DB_PASSWORD:?set TASKER_DB_PASSWORD in .env}
+      MYSQL_DATABASE: tasker
+      MYSQL_ROOT_PASSWORD: ${TASKER_DB_ROOT_PASSWORD:?set TASKER_DB_ROOT_PASSWORD in .env}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "tasker", "-p${TASKER_DB_PASSWORD}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [internal]
+
+volumes:
+  sqlite-data:
+  postgres-data:
+  mysql-data:
+
+networks:
+  # Frontend <-> backend only.
+  internal:

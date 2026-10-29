@@ -18,6 +18,7 @@ use axum::routing::get;
 use serde::Serialize;
 use tower_http::services::fs::{ServeDir, ServeFile};
 use tower_http::timeout::TimeoutLayer;
+use tracing::Instrument;
 
 use crate::error::AppError;
 use crate::state::AppState;
@@ -26,7 +27,6 @@ use crate::{activity, auth, comments, projects, tasks, teams};
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Assemble the complete application router.
-#[must_use]
 pub fn build_router(state: AppState) -> Router {
     let api = Router::new()
         .route("/health/live", get(live))
@@ -43,7 +43,10 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/api/v1", api)
         .route("/metrics", get(metrics_endpoint))
         .layer(DefaultBodyLimit::max(state.config.body_limit_bytes))
-        .layer(TimeoutLayer::with_status_code(StatusCode::GATEWAY_TIMEOUT, REQUEST_TIMEOUT))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::GATEWAY_TIMEOUT,
+            REQUEST_TIMEOUT,
+        ))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             metrics_middleware,
@@ -99,6 +102,10 @@ fn cors_layer(allowed_origins: &[String]) -> tower_http::cors::CorsLayer {
 // ---------------------------------------------------------------------------
 
 /// Request correlation + structured request logging.
+///
+/// The span is attached with `Instrument` instead of `span.enter()`: holding
+/// an `Entered` guard across `.await` can exit the span on a different worker
+/// and panics the tracing registry under load.
 async fn request_context_middleware(request: Request, next: Next) -> Response {
     let request_id = crate::util::new_id();
     let method = request.method().clone();
@@ -111,16 +118,16 @@ async fn request_context_middleware(request: Request, next: Next) -> Response {
         method = %method,
         path = %path,
     );
-    let _guard = span.enter();
 
-    let mut response = next.run(request).await;
+    let mut response = next.run(request).instrument(span).await;
     response.headers_mut().insert(
         "x-request-id",
         HeaderValue::from_str(&request_id).unwrap_or_else(|_| HeaderValue::from_static("invalid")),
     );
+    let elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
     tracing::info!(
         status = %response.status(),
-        duration_ms = start.elapsed().as_millis() as u64,
+        duration_ms = elapsed_ms,
         "request completed"
     );
     response
@@ -189,12 +196,12 @@ async fn origin_check_middleware(
                     "request origin is not allowed for state-changing operations",
                 ));
             }
-        } else if let Some(site) = sec_fetch_site {
-            if !matches!(site.as_str(), "same-origin" | "none") {
-                return Err(AppError::Forbidden(
-                    "cross-site state-changing requests are not allowed",
-                ));
-            }
+        } else if let Some(site) = sec_fetch_site
+            && !matches!(site.as_str(), "same-origin" | "none")
+        {
+            return Err(AppError::Forbidden(
+                "cross-site state-changing requests are not allowed",
+            ));
         }
     }
     Ok(next.run(request).await)
@@ -214,8 +221,7 @@ fn origin_matches_host(request: &Request, origin: &str) -> bool {
     origin
         .strip_prefix("http://")
         .or_else(|| origin.strip_prefix("https://"))
-        .map(|authority| authority.eq_ignore_ascii_case(host))
-        .unwrap_or(false)
+        .is_some_and(|authority| authority.eq_ignore_ascii_case(host))
 }
 
 // ---------------------------------------------------------------------------

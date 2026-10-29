@@ -1,0 +1,29 @@
+# Caddy configuration for the Tasker frontend container.
+# Serves the SPA with history-API fallback and proxies the API to the backend.
+#
+# The backend enforces origin checks; the proxy preserves the original
+# Origin and Host headers (X-Forwarded-For is set for rate limiting).
+
+:80 {
+	encode gzip zstd
+
+	handle /api/* {
+		reverse_proxy {$TASKER_BACKEND_URL:backend:8080}
+	}
+
+	handle /metrics {
+		reverse_proxy {$TASKER_BACKEND_URL:backend:8080}
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		 X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}

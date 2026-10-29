@@ -116,13 +116,13 @@ fn validate_team_input(
         ));
     }
     let description = description.map(str::trim).filter(|d| !d.is_empty());
-    if let Some(d) = description {
-        if d.chars().count() > 1000 {
-            errors.push(FieldError::new(
-                "description",
-                "description must be at most 1000 characters",
-            ));
-        }
+    if let Some(d) = description
+        && d.chars().count() > 1000
+    {
+        errors.push(FieldError::new(
+            "description",
+            "description must be at most 1000 characters",
+        ));
     }
     if errors.is_empty() {
         Ok((name, description.map(std::string::ToString::to_string)))
@@ -348,9 +348,10 @@ async fn add_member(
     let mut conn = state.db.begin().await?;
 
     let now = util::now_ms();
-    let (user_id, display_name) = match users::find_active_by_email(&mut conn, &email).await? {
-        Some((existing, _)) => (existing.id, existing.display_name),
-        None => {
+    let (user_id, display_name) =
+        if let Some((existing, _)) = users::find_active_by_email(&mut conn, &email).await? {
+            (existing.id, existing.display_name)
+        } else {
             let temp_password = body.temp_password.clone().unwrap_or_default();
             let new_user = users::create_validated(
                 &mut conn,
@@ -362,8 +363,7 @@ async fn add_member(
             )
             .await?;
             (new_user.id, new_user.display_name)
-        }
-    };
+        };
 
     let mut args = Args::new();
     args.s(&team_id).s(&user_id).s(role.as_str()).i(now);
@@ -410,12 +410,7 @@ async fn change_member_role(
     let mut conn = state.db.begin().await?;
     let actor = require_membership(&mut conn, &team_id, &user.id).await?;
 
-    let is_authorized = match actor.role {
-        Role::Owner => true,
-        Role::Admin => true,
-        _ => false,
-    };
-    if !is_authorized {
+    if !matches!(actor.role, Role::Owner | Role::Admin) {
         return Err(AppError::Forbidden("your role does not permit this action"));
     }
 
@@ -436,12 +431,10 @@ async fn change_member_role(
             "you cannot change your own role".into(),
         ));
     }
-    if actor.role != Role::Owner {
-        if current_role == Role::Owner || new_role == Role::Owner {
-            return Err(AppError::Forbidden(
-                "only the team owner can manage owner-level roles",
-            ));
-        }
+    if actor.role != Role::Owner && (current_role == Role::Owner || new_role == Role::Owner) {
+        return Err(AppError::Forbidden(
+            "only the team owner can manage owner-level roles",
+        ));
     }
     if current_role == Role::Owner && new_role != Role::Owner {
         let owners = authorization::count_owners(&mut conn, &team_id).await?;

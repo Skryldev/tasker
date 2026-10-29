@@ -277,13 +277,13 @@ fn validate_task_fields(
         errors.push(FieldError::new("title", "title must be 1-250 characters"));
     }
     let description = description.map(str::trim).filter(|d| !d.is_empty());
-    if let Some(d) = description {
-        if d.chars().count() > 10_000 {
-            errors.push(FieldError::new(
-                "description",
-                "description must be at most 10000 characters",
-            ));
-        }
+    if let Some(d) = description
+        && d.chars().count() > 10_000
+    {
+        errors.push(FieldError::new(
+            "description",
+            "description must be at most 10000 characters",
+        ));
     }
     let status = match validate_status(status) {
         Ok(s) => s,
@@ -304,13 +304,13 @@ fn validate_task_fields(
         }
     };
     let due_date = due_date.map(str::trim).filter(|d| !d.is_empty());
-    if let Some(d) = due_date {
-        if util::parse_iso_date(d).is_err() {
-            errors.push(FieldError::new(
-                "due_date",
-                "due date must be a valid YYYY-MM-DD date",
-            ));
-        }
+    if let Some(d) = due_date
+        && util::parse_iso_date(d).is_err()
+    {
+        errors.push(FieldError::new(
+            "due_date",
+            "due date must be a valid YYYY-MM-DD date",
+        ));
     }
     if errors.is_empty() {
         Ok(TaskInput {
@@ -519,10 +519,7 @@ async fn create_task_inner(
             args,
         )
         .await?;
-    let position = max_row
-        .map(|r| r.try_get::<f64, _>("max_pos").unwrap_or(0.0))
-        .unwrap_or(0.0)
-        + 1024.0;
+    let position = max_row.map_or(0.0, |r| r.try_get::<f64, _>("max_pos").unwrap_or(0.0)) + 1024.0;
 
     let id = util::new_id();
     let now = util::now_ms();
@@ -666,11 +663,11 @@ fn pagination(query_page: Option<u32>, query_page_size: Option<u32>) -> (u32, u3
 
 /// CSV filter values, validated against a canonical list.
 fn csv_filter(
-    raw: &Option<String>,
+    raw: Option<&String>,
     allowed: &[&str],
     field: &str,
 ) -> Result<Vec<String>, AppError> {
-    let Some(raw) = raw.as_deref().filter(|s| !s.is_empty()) else {
+    let Some(raw) = raw.filter(|s| !s.is_empty()) else {
         return Ok(Vec::new());
     };
     raw.split(',')
@@ -691,8 +688,8 @@ const SORT_DUE_DATE: &str = "due_date";
 const SORT_PRIORITY: &str = "priority";
 const SORT_TITLE: &str = "title";
 
-fn sort_expression(sort: &Option<String>) -> Result<&'static str, AppError> {
-    match sort.as_deref() {
+fn sort_expression(sort: Option<&str>) -> Result<&'static str, AppError> {
+    match sort {
         None | Some(SORT_CREATED_AT) => Ok("t.created_at"),
         Some(SORT_UPDATED_AT) => Ok("t.updated_at"),
         Some(SORT_DUE_DATE) => Ok("t.due_date"),
@@ -709,8 +706,8 @@ fn sort_expression(sort: &Option<String>) -> Result<&'static str, AppError> {
     }
 }
 
-fn sort_direction(order: &Option<String>) -> Result<&'static str, AppError> {
-    match order.as_deref() {
+fn sort_direction(order: Option<&str>) -> Result<&'static str, AppError> {
+    match order {
         None | Some("desc") => Ok("DESC"),
         Some("asc") => Ok("ASC"),
         Some(other) => Err(AppError::validation(
@@ -731,16 +728,16 @@ fn build_list_filters(
     project_id: &str,
     query: &ListTasksQuery,
 ) -> Result<(String, Vec<FilterValue>), AppError> {
-    let statuses = csv_filter(&query.status, &STATUSES, "status")?;
-    let priorities = csv_filter(&query.priority, &PRIORITIES, "priority")?;
+    let statuses = csv_filter(query.status.as_ref(), &STATUSES, "status")?;
+    let priorities = csv_filter(query.priority.as_ref(), &PRIORITIES, "priority")?;
     if let Some(d) = query.due_before.as_deref().filter(|s| !s.is_empty()) {
         util::parse_iso_date(d).map_err(|e| AppError::validation("due_before", e))?;
     }
     if let Some(d) = query.due_after.as_deref().filter(|s| !s.is_empty()) {
         util::parse_iso_date(d).map_err(|e| AppError::validation("due_after", e))?;
     }
-    sort_expression(&query.sort)?;
-    sort_direction(&query.order)?;
+    sort_expression(query.sort.as_deref())?;
+    sort_direction(query.order.as_deref())?;
 
     let mut where_clause = String::from("t.project_id = ? AND t.parent_task_id IS NULL");
     let mut values = vec![FilterValue::S(project_id.to_string())];
@@ -812,8 +809,8 @@ async fn list_tasks(
     require_project_access(&mut conn, &project_id, &user.id).await?;
 
     let (where_clause, values) = build_list_filters(&project_id, &query)?;
-    let sort_sql = sort_expression(&query.sort)?;
-    let dir_sql = sort_direction(&query.order)?;
+    let sort_sql = sort_expression(query.sort.as_deref())?;
+    let dir_sql = sort_direction(query.order.as_deref())?;
     let (page, page_size, offset) = pagination(query.page, query.page_size);
 
     // Total count for pagination metadata.
@@ -823,8 +820,7 @@ async fn list_tasks(
     let total = conn
         .fetch_optional(&count_sql, count_args)
         .await?
-        .map(|r| r.try_get::<i64, _>("n").unwrap_or(0))
-        .unwrap_or(0);
+        .map_or(0, |r| r.try_get::<i64, _>("n").unwrap_or(0));
 
     // Page of ids, then full rows preserving order.
     let page_sql = format!(
@@ -984,7 +980,7 @@ async fn update_task(
     // claim a task for themselves. Clearing an assignment is allowed when the
     // task is currently assigned to the caller or the caller created it.
     let assignee_id = match body.assignee_id.as_deref() {
-        Some(id) if id.is_empty() => {
+        Some("") => {
             if !can_update_any
                 && task.assignee_id.as_deref() != Some(&user.id)
                 && task.created_by != user.id
@@ -1205,10 +1201,10 @@ async fn my_tasks(
     Query(query): Query<MyTasksQuery>,
 ) -> Result<Json<PaginatedMyTasks>, AppError> {
     let mut conn = state.db.conn();
-    let statuses = csv_filter(&query.status, &STATUSES, "status")?;
-    let priorities = csv_filter(&query.priority, &PRIORITIES, "priority")?;
-    let sort_sql = sort_expression(&query.sort)?;
-    let dir_sql = sort_direction(&query.order)?;
+    let statuses = csv_filter(query.status.as_ref(), &STATUSES, "status")?;
+    let priorities = csv_filter(query.priority.as_ref(), &PRIORITIES, "priority")?;
+    let sort_sql = sort_expression(query.sort.as_deref())?;
+    let dir_sql = sort_direction(query.order.as_deref())?;
     let (page, page_size, offset) = pagination(query.page, query.page_size);
 
     let mut where_clause = String::from(
@@ -1241,8 +1237,7 @@ async fn my_tasks(
     let total = conn
         .fetch_optional(&count_sql, count_args)
         .await?
-        .map(|r| r.try_get::<i64, _>("n").unwrap_or(0))
-        .unwrap_or(0);
+        .map_or(0, |r| r.try_get::<i64, _>("n").unwrap_or(0));
 
     // Unset due dates sort after all set dates on every engine.
     let order_sql = if sort_sql == "t.due_date" {

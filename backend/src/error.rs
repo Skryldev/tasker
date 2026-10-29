@@ -40,6 +40,10 @@ pub enum AppError {
     Conflict(String),
     #[error("too many requests")]
     RateLimited { retry_after_secs: u64 },
+    /// The database is temporarily unavailable for writes (e.g. `SQLite`'s
+    /// single-writer lock under heavy contention). Clients may retry.
+    #[error("temporarily unavailable")]
+    Busy { retry_after_secs: u64 },
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -49,9 +53,21 @@ impl From<sqlx::Error> for AppError {
         tracing::error!(error = %err, "database error");
         match err {
             sqlx::Error::RowNotFound => AppError::NotFound("resource not found"),
+            // SQLite reports write contention as `database is locked` after
+            // the busy timeout. Surface it as a retryable 503, not a 500.
+            other if is_busy_message(&other.to_string()) => AppError::Busy {
+                retry_after_secs: 1,
+            },
             other => AppError::Internal(other.to_string()),
         }
     }
+}
+
+/// Detect engine "temporarily busy" errors (`SQLite` locking).
+fn is_busy_message(message: &str) -> bool {
+    message.contains("database is locked")
+        || message.contains("database table is locked")
+        || message.contains("database schema is locked")
 }
 
 impl AppError {
@@ -66,6 +82,7 @@ impl AppError {
             Self::Validation(_) => "validation-failed",
             Self::Conflict(_) => "conflict",
             Self::RateLimited { .. } => "rate-limited",
+            Self::Busy { .. } => "busy",
             Self::Internal(_) => "internal-error",
         }
     }
@@ -80,6 +97,7 @@ impl AppError {
             Self::Validation(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::RateLimited { .. } => StatusCode::TOO_MANY_REQUESTS,
+            Self::Busy { .. } => StatusCode::SERVICE_UNAVAILABLE,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -101,7 +119,7 @@ impl AppError {
 #[derive(Serialize)]
 struct Problem {
     #[serde(rename = "type")]
-    problem_type: String,
+    slug_of_type: String,
     title: String,
     status: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -117,11 +135,10 @@ impl IntoResponse for AppError {
         let detail = match &self {
             Self::Internal(_) => Some("an unexpected error occurred".to_string()),
             Self::Unauthenticated => Some("authentication is required".to_string()),
-            Self::Forbidden(d) => Some((*d).to_string()),
-            Self::NotFound(d) => Some((*d).to_string()),
-            Self::BadRequest(d) => Some(d.clone()),
-            Self::Conflict(d) => Some(d.clone()),
+            Self::Forbidden(d) | Self::NotFound(d) => Some((*d).to_string()),
+            Self::BadRequest(d) | Self::Conflict(d) => Some(d.clone()),
             Self::RateLimited { .. } => Some("request rate limit exceeded".to_string()),
+            Self::Busy { .. } => Some("the database is busy; retry shortly".to_string()),
             Self::Validation(_) => Some("request validation failed".to_string()),
         };
         let errors = match &self {
@@ -129,7 +146,7 @@ impl IntoResponse for AppError {
             _ => None,
         };
         let problem = Problem {
-            problem_type: format!("https://tasker.dev/problems/{}", self.slug()),
+            slug_of_type: format!("https://tasker.dev/problems/{}", self.slug()),
             title: status.canonical_reason().unwrap_or("error").to_string(),
             status: status.as_u16(),
             detail,
@@ -137,10 +154,10 @@ impl IntoResponse for AppError {
         };
 
         let mut response = (status, Json(problem)).into_response();
-        if let Self::RateLimited { retry_after_secs } = &self {
-            if let Ok(value) = retry_after_secs.to_string().parse() {
-                response.headers_mut().insert("retry-after", value);
-            }
+        if let Self::RateLimited { retry_after_secs } = &self
+            && let Ok(value) = retry_after_secs.to_string().parse()
+        {
+            response.headers_mut().insert("retry-after", value);
         }
         response
     }

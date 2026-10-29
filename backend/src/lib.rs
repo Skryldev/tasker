@@ -35,7 +35,7 @@ pub mod util {
         }
     }
 
-    /// Generate a new UUIDv7 identifier (time-ordered) as a hyphenated string.
+    /// Generate a new `UUIDv7` identifier (time-ordered) as a hyphenated string.
     #[must_use]
     pub fn new_id() -> String {
         Uuid::now_v7().to_string()
@@ -68,7 +68,7 @@ pub mod util {
     }
 
     /// Escape user input for use inside a `LIKE` pattern. The escape char is
-    /// `|` — deliberately *not* backslash, which MySQL treats as a string
+    /// `|` — deliberately *not* backslash, which `MySQL` treats as a string
     /// escape even inside literals.
     #[must_use]
     pub fn escape_like(input: &str) -> String {

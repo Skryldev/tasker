@@ -37,19 +37,19 @@ impl Metrics {
     }
 
     /// Record one completed request.
-    pub fn observe_request(&self, route: &str, method: &str, status: u16, duration_ms: f64) {
+    pub fn observe_request(&self, route: &str, method: &str, status: u16, took_ms: f64) {
         let key = RouteKey {
             route: route.to_string(),
             method: method.to_string(),
-            status_class: status_class(status),
+            status_class: class_of(status),
         };
         if let Ok(mut routes) = self.routes.lock() {
-            let stats = routes.entry(key).or_default();
-            stats.count += 1;
-            stats.duration_ms_total += duration_ms;
+            let entry = routes.entry(key).or_default();
+            entry.count += 1;
+            entry.duration_ms_total += took_ms;
             for (idx, bound) in DURATION_BUCKETS_MS.iter().enumerate() {
-                if duration_ms <= *bound {
-                    stats.histogram[idx] += 1;
+                if took_ms <= *bound {
+                    entry.histogram[idx] += 1;
                 }
             }
         }
@@ -108,7 +108,7 @@ impl Metrics {
     }
 }
 
-fn status_class(status: u16) -> &'static str {
+fn class_of(status: u16) -> &'static str {
     match status {
         200..=299 => "2xx",
         300..=399 => "3xx",

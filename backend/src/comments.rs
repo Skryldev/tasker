@@ -117,8 +117,7 @@ async fn list_comments(
     let total = conn
         .fetch_optional("SELECT COUNT(*) AS n FROM comments WHERE task_id = ?", args)
         .await?
-        .map(|r| r.try_get::<i64, _>("n").unwrap_or(0))
-        .unwrap_or(0);
+        .map_or(0, |r| r.try_get::<i64, _>("n").unwrap_or(0));
 
     let mut args = Args::new();
     args.s(&task_id).i(i64::from(page_size)).i(offset);

@@ -36,8 +36,8 @@ enum Command {
     Serve,
     /// Create the initial administrator account and team-owner membership.
     /// Idempotent: refuses cleanly when an administrator already exists.
-    /// Credentials come from --email/--password, TASKER_ADMIN_EMAIL/
-    /// TASKER_ADMIN_PASSWORD, or interactive prompts; never from defaults.
+    /// Credentials come from --email/--password, `TASKER_ADMIN_EMAIL`/
+    /// `TASKER_ADMIN_PASSWORD`, or interactive prompts; never from defaults.
     BootstrapAdmin {
         #[arg(long, env = "TASKER_ADMIN_EMAIL")]
         email: Option<String>,
@@ -73,9 +73,8 @@ async fn main() {
 fn init_tracing() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,sqlx=warn"));
-    let json_format = std::env::var("TASKER_LOG_FORMAT")
-        .map(|v| v.eq_ignore_ascii_case("json"))
-        .unwrap_or(false);
+    let json_format =
+        std::env::var("TASKER_LOG_FORMAT").is_ok_and(|v| v.eq_ignore_ascii_case("json"));
     let registry = tracing_subscriber::registry().with(filter);
     if json_format {
         registry
@@ -171,8 +170,8 @@ async fn wait_for_shutdown() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
+        () = ctrl_c => {},
+        () = terminate => {},
     }
 }
 
@@ -310,15 +309,12 @@ async fn user_count_check_by_email(conn: &mut tasker::db::Conn<'_>, email: &str)
     args.s(email.trim().to_lowercase());
     conn.fetch_optional("SELECT id FROM users WHERE email = ?", args)
         .await
-        .map(|r| r.is_some())
-        .unwrap_or(false)
+        .is_ok_and(|r| r.is_some())
 }
 
 async fn count_users(conn: &mut tasker::db::Conn<'_>) -> Result<i64, AppError> {
     let row = conn
         .fetch_optional("SELECT COUNT(*) AS n FROM users", tasker::db::Args::new())
         .await?;
-    Ok(row
-        .map(|r| r.try_get::<i64, _>("n").unwrap_or(0))
-        .unwrap_or(0))
+    Ok(row.map_or(0, |r| r.try_get::<i64, _>("n").unwrap_or(0)))
 }

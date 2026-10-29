@@ -3,7 +3,7 @@
 //!
 //! Design notes:
 //! - Queries are runtime-checked (`sqlx::any`) so one SQL codebase serves
-//!   PostgreSQL, MySQL, and SQLite. SQL is restricted to the portable subset:
+//!   `PostgreSQL`, `MySQL`, and `SQLite`. SQL is restricted to the portable subset:
 //!   no `RETURNING`, no dialect-specific upserts, `LOWER(col) LIKE ?` for
 //!   search, BIGINT epoch-millisecond timestamps, TEXT ISO dates.
 //! - Schema differences live exclusively in per-dialect migration files
@@ -136,9 +136,7 @@ impl Database {
     pub async fn begin(&self) -> Result<Conn<'static>, AppError> {
         Ok(Conn {
             driver: self.driver,
-            inner: ConnInner::Tx(Box::new(
-                self.pool.begin().await.map_err(AppError::from)?,
-            )),
+            inner: ConnInner::Tx(Box::new(self.pool.begin().await.map_err(AppError::from)?)),
         })
     }
 
@@ -187,18 +185,18 @@ impl MigrationLock {
     }
 
     async fn acquire(&self, conn: &mut sqlx::AnyConnection) {
-        if let Some(sql) = self.acquire_sql {
-            if let Err(e) = conn.execute(sql).await {
-                tracing::error!(error = %e, "failed to acquire migration lock");
-            }
+        if let Some(sql) = self.acquire_sql
+            && let Err(e) = conn.execute(sql).await
+        {
+            tracing::error!(error = %e, "failed to acquire migration lock");
         }
     }
 
     async fn release(&self, conn: &mut sqlx::AnyConnection) {
-        if let Some(sql) = self.release_sql {
-            if let Err(e) = conn.execute(sql).await {
-                tracing::error!(error = %e, "failed to release migration lock");
-            }
+        if let Some(sql) = self.release_sql
+            && let Err(e) = conn.execute(sql).await
+        {
+            tracing::error!(error = %e, "failed to release migration lock");
         }
     }
 }
@@ -355,39 +353,51 @@ pub struct Args<'q> {
     inner: AnyArguments<'q>,
 }
 
-impl<'q> Args<'q> {
+impl Args<'_> {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     pub fn s(&mut self, v: impl Into<String>) -> &mut Self {
-        self.inner.add(v.into()).expect("AnyArguments::add is infallible for supported scalar types");
+        self.inner
+            .add(v.into())
+            .expect("AnyArguments::add is infallible for supported scalar types");
         self
     }
 
     pub fn opt_s(&mut self, v: Option<impl Into<String>>) -> &mut Self {
-        self.inner.add(v.map(Into::into)).expect("AnyArguments::add is infallible for supported scalar types");
+        self.inner
+            .add(v.map(Into::into))
+            .expect("AnyArguments::add is infallible for supported scalar types");
         self
     }
 
     pub fn i(&mut self, v: i64) -> &mut Self {
-        self.inner.add(v).expect("AnyArguments::add is infallible for supported scalar types");
+        self.inner
+            .add(v)
+            .expect("AnyArguments::add is infallible for supported scalar types");
         self
     }
 
     pub fn opt_i(&mut self, v: Option<i64>) -> &mut Self {
-        self.inner.add(v).expect("AnyArguments::add is infallible for supported scalar types");
+        self.inner
+            .add(v)
+            .expect("AnyArguments::add is infallible for supported scalar types");
         self
     }
 
     pub fn f(&mut self, v: f64) -> &mut Self {
-        self.inner.add(v).expect("AnyArguments::add is infallible for supported scalar types");
+        self.inner
+            .add(v)
+            .expect("AnyArguments::add is infallible for supported scalar types");
         self
     }
 
     pub fn b(&mut self, v: bool) -> &mut Self {
-        self.inner.add(v).expect("AnyArguments::add is infallible for supported scalar types");
+        self.inner
+            .add(v)
+            .expect("AnyArguments::add is infallible for supported scalar types");
         self
     }
 }
@@ -475,8 +485,8 @@ impl<'a> Conn<'a> {
     }
 }
 
-/// Adapt portable `?` placeholders to the engine's native form. PostgreSQL
-/// requires numbered `$N` placeholders; MySQL and SQLite use `?`.
+/// Adapt portable `?` placeholders to the engine's native form. `PostgreSQL`
+/// requires numbered `$N` placeholders; `MySQL` and `SQLite` use `?`.
 fn adapt_sql(sql: &str, driver: Driver) -> std::borrow::Cow<'_, str> {
     if driver != Driver::Postgres || !sql.contains('?') {
         return std::borrow::Cow::Borrowed(sql);
@@ -498,6 +508,7 @@ fn adapt_sql(sql: &str, driver: Driver) -> std::borrow::Cow<'_, str> {
 /// Map a unique-constraint violation to a friendly conflict error, leaving
 /// other database errors untouched. Works across all three engines because
 /// sqlx normalizes the error kind.
+#[must_use]
 pub fn map_unique_violation(err: AppError, conflict: String) -> AppError {
     match &err {
         AppError::Internal(msg)
@@ -528,7 +539,7 @@ fn detect_driver(url: &str) -> Result<Driver, AppError> {
     }
 }
 
-/// SQLite database file path from a `sqlite:` URL, if any. Handles both
+/// `SQLite` database file path from a `sqlite:` URL, if any. Handles both
 /// `sqlite:relative.db`, `sqlite:/abs/path`, `sqlite:///D:/win/path` and the
 /// Windows-friendly opaque form `sqlite:D:/win/path`.
 fn sqlite_path(url: &str) -> Option<String> {
@@ -541,10 +552,10 @@ fn sqlite_path(url: &str) -> Option<String> {
     }
     // A leading "/D:/" style prefix is a Windows drive with a stray slash
     // from URL normalization; keep "/C:/x" as "C:/x".
-    if let Some(win) = path.strip_prefix('/') {
-        if win.as_bytes().get(1) == Some(&b':') {
-            return Some(win.to_string());
-        }
+    if let Some(win) = path.strip_prefix('/')
+        && win.as_bytes().get(1) == Some(&b':')
+    {
+        return Some(win.to_string());
     }
     Some(path.to_string())
 }

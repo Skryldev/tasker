@@ -1,7 +1,7 @@
 //! Authentication: sessions, login/logout, registration, password change.
 //!
 //! Session architecture (see docs/security.md):
-//! - Opaque 256-bit random token delivered in an HttpOnly, SameSite=Lax cookie
+//! - Opaque 256-bit random token delivered in an `HttpOnly`, SameSite=Lax cookie
 //!   (Secure in production). Never stored in browser localStorage.
 //! - Only the SHA-256 hash of the token is persisted; raw tokens are not
 //!   recoverable from the database.
@@ -173,10 +173,11 @@ fn read_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     let raw = headers.get(header::COOKIE)?.to_str().ok()?;
     for pair in raw.split(';') {
         let pair = pair.trim();
-        if let Some((k, v)) = pair.split_once('=') {
-            if k == name && !v.is_empty() {
-                return Some(v.to_string());
-            }
+        if let Some((k, v)) = pair.split_once('=')
+            && k == name
+            && !v.is_empty()
+        {
+            return Some(v.to_string());
         }
     }
     None
@@ -248,7 +249,7 @@ async fn login(
         std::time::Duration::from_secs(60),
     ) {
         return Err(AppError::RateLimited {
-            retry_after_secs: u64::try_from(retry_after.as_secs()).unwrap_or(60).max(1),
+            retry_after_secs: retry_after.as_secs().max(1),
         });
     }
 
@@ -378,7 +379,7 @@ async fn change_password(
         ));
     }
     let new_hash =
-        crate::security::password::hash(&body.new_password).map_err(|e| AppError::internal(e))?;
+        crate::security::password::hash(&body.new_password).map_err(AppError::internal)?;
     users::update_password(&mut conn, &user.id, &new_hash).await?;
     revoke_other_sessions(&mut conn, &user.id, Some(&user.session_id)).await?;
     Ok(StatusCode::NO_CONTENT)
