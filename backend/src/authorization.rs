@@ -69,6 +69,10 @@ pub enum Capability {
     EditAnyComment,
     /// Delete any comment.
     DeleteAnyComment,
+    /// Accept or reject any task awaiting review (reviewer override). Held by
+    /// Owner and Admin only: reviewers may not review their own assigned work,
+    /// and acceptance authority stays out of the day-to-day execution roles.
+    ReviewAnyTask,
 }
 
 impl Role {
@@ -79,7 +83,7 @@ impl Role {
     pub fn can(self, capability: Capability) -> bool {
         use Capability::{
             AddMember, CreateLabel, CreateTask, DeleteAnyComment, DeleteAnyTask, EditAnyComment,
-            ManageProjects, UpdateAnyTask, UpdateTeam,
+            ManageProjects, ReviewAnyTask, UpdateAnyTask, UpdateTeam,
         };
         match self {
             Self::Owner => true,
@@ -94,6 +98,7 @@ impl Role {
                     | CreateLabel
                     | EditAnyComment
                     | DeleteAnyComment
+                    | ReviewAnyTask
             ),
             Self::Manager => matches!(
                 capability,
@@ -203,6 +208,7 @@ mod tests {
             Capability::CreateLabel,
             Capability::EditAnyComment,
             Capability::DeleteAnyComment,
+            Capability::ReviewAnyTask,
         ] {
             assert!(Role::Owner.can(cap));
         }
@@ -215,6 +221,7 @@ mod tests {
         assert!(Role::Admin.can(Capability::EditAnyComment));
         assert!(Role::Admin.can(Capability::ManageProjects));
         assert!(Role::Admin.can(Capability::DeleteAnyTask));
+        assert!(Role::Admin.can(Capability::ReviewAnyTask));
     }
 
     #[test]
@@ -225,6 +232,8 @@ mod tests {
         assert!(Role::Manager.can(Capability::UpdateAnyTask));
         assert!(Role::Manager.can(Capability::DeleteAnyComment));
         assert!(!Role::Manager.can(Capability::EditAnyComment));
+        // Acceptance authority stays with Owner/Admin only.
+        assert!(!Role::Manager.can(Capability::ReviewAnyTask));
     }
 
     #[test]

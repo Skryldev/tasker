@@ -59,7 +59,11 @@ SQLite and MySQL profiles: `docker compose --profile sqlite up -d --build`,
 - Tasks: statuses (Backlog → Todo → In Progress → In Review → Done),
   priorities, assignees (team members only), due dates, labels, subtasks
   (one level), search/filter/sort, server-side pagination
-- Comments and a transactional activity history per task
+- Comments with @mentions and a transactional activity history per task
+- Reporter acceptance workflow: submit for review, accept, reject with an
+  audited reason; resolution state and history
+- In-app notifications (assignments, mentions, review decisions) with unread
+  badge, panel, and mark-as-read
 - List and Kanban (drag-and-drop) views, My Tasks across teams
 - Light/dark themes, responsive shell, loading/empty/error states
 - Health/readiness endpoints, graceful shutdown, Prometheus-style metrics

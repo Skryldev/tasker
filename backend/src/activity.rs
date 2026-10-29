@@ -23,6 +23,11 @@ pub mod events {
     pub const TASK_PRIORITY_CHANGED: &str = "task_priority_changed";
     pub const TASK_ASSIGNEE_CHANGED: &str = "task_assignee_changed";
     pub const TASK_DUE_DATE_CHANGED: &str = "task_due_date_changed";
+    pub const TASK_REPORTER_CHANGED: &str = "task_reporter_changed";
+    pub const TASK_SUBMITTED: &str = "task_submitted";
+    pub const TASK_ACCEPTED: &str = "task_accepted";
+    pub const TASK_REJECTED: &str = "task_rejected";
+    pub const TASK_REJECTION_REASON: &str = "task_rejection_reason";
     pub const TASK_DELETED: &str = "task_deleted";
     pub const COMMENT_ADDED: &str = "comment_added";
     pub const COMMENT_EDITED: &str = "comment_edited";

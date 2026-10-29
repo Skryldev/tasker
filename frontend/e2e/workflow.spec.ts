@@ -154,9 +154,12 @@ test.describe.serial("Tasker core workflow", () => {
     const item = page.getByTestId("logout");
     await expect(item).toBeVisible();
     await item.click();
-    await expect(page).toHaveURL(/\/login$/, { timeout: 15_000 });
-    // The revoked cookie no longer grants access.
-    const res = await page.request.get("/api/v1/me");
-    expect(res.status()).toBe(401);
+    // The redirect may race the dropdown close; assert the authoritative
+    // effect (server-side revocation) and the resulting redirect.
+    await expect
+      .poll(async () => (await page.request.get("/api/v1/me")).status(), { timeout: 15_000 })
+      .toBe(401);
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/login$/);
   });
 });

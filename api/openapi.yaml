@@ -34,6 +34,7 @@ servers:
   - url: /api/v1
 tags:
   - name: auth
+  - name: notifications
   - name: users
   - name: teams
   - name: projects
@@ -848,6 +849,150 @@ paths:
         "404":
           $ref: "#/components/responses/Problem404"
 
+  /tasks/{task_id}/submit:
+    post:
+      tags: [tasks]
+      summary: Submit the task for the reporter's acceptance
+      description: |
+        Moves an In Progress task to In Review. Allowed for the assignee,
+        the task creator (for unassigned work), or Manager roles and above.
+        The reporter is notified. Clears any previous resolution: a new
+        review cycle never inherits an old decision.
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task is now In Review.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "403":
+          $ref: "#/components/responses/Problem403"
+        "404":
+          $ref: "#/components/responses/Problem404"
+        "409":
+          $ref: "#/components/responses/Problem409"
+  /tasks/{task_id}/accept:
+    post:
+      tags: [tasks]
+      summary: Accept a task awaiting review (In Review -> Done)
+      description: |
+        Only the designated reporter, or an Owner/Admin reviewer override,
+        may accept — never the assignee, even when they are also the
+        reporter (that reporter role is not independent). Records
+        `resolution=accepted`, the resolver, and the timestamp.
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "403":
+          $ref: "#/components/responses/Problem403"
+        "404":
+          $ref: "#/components/responses/Problem404"
+        "409":
+          $ref: "#/components/responses/Problem409"
+  /tasks/{task_id}/reject:
+    post:
+      tags: [tasks]
+      summary: Reject a task awaiting review (In Review -> In Progress)
+      description: |
+        The mirror of accept: the reporter (or Owner/Admin override, never
+        the assignee) returns the work with a required, audited reason.
+        Records `resolution=rejected`, the note, resolver, and timestamp;
+        the assignee is notified with the reason.
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskReject"
+      responses:
+        "200":
+          description: Task returned to In Progress.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "403":
+          $ref: "#/components/responses/Problem403"
+        "404":
+          $ref: "#/components/responses/Problem404"
+        "409":
+          $ref: "#/components/responses/Problem409"
+        "422":
+          $ref: "#/components/responses/Problem422"
+
+  /notifications:
+    get:
+      tags: [notifications]
+      summary: List the authenticated user's notifications
+      parameters:
+        - name: unread
+          in: query
+          schema: { type: boolean, default: false }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Recipient-scoped notifications, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedNotifications"
+        "401":
+          $ref: "#/components/responses/Problem401"
+  /notifications/unread-count:
+    get:
+      tags: [notifications]
+      summary: Unread notification count for the authenticated user
+      responses:
+        "200":
+          description: Current unread count.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count]
+                properties:
+                  count: { type: integer, minimum: 0 }
+        "401":
+          $ref: "#/components/responses/Problem401"
+  /notifications/read-all:
+    post:
+      tags: [notifications]
+      summary: Mark every unread notification of the caller as read
+      responses:
+        "204":
+          description: All notifications marked read.
+        "401":
+          $ref: "#/components/responses/Problem401"
+  /notifications/{notification_id}/read:
+    post:
+      tags: [notifications]
+      summary: Mark one notification as read (idempotent)
+      description: Scoped to the authenticated recipient; foreign or unknown
+        ids return 404 without disclosing existence.
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Marked read (or already read).
+        "401":
+          $ref: "#/components/responses/Problem401"
+        "404":
+          $ref: "#/components/responses/Problem404"
+
   /health/live:
     get:
       tags: [ops]
@@ -1089,7 +1234,15 @@ components:
       properties:
         title: { type: string, minLength: 1, maxLength: 250 }
         description: { type: string, maxLength: 10000 }
-        status: { type: string, enum: [backlog, todo, in_progress, in_review, done] }
+        status:
+          type: string
+          enum: [backlog, todo, in_progress]
+          description: New tasks start in an actionable state; Done requires review acceptance.
+        reporter_id:
+          type: [string, "null"]
+          description: |
+            Acceptance reviewer. Defaults to the caller; selecting another
+            user requires the Manager role or above and must be a team member.
         priority: { type: string, enum: [low, medium, high, urgent] }
         assignee_id:
           type: [string, "null"]
@@ -1110,11 +1263,24 @@ components:
       properties:
         title: { type: string, minLength: 1, maxLength: 250 }
         description: { type: [string, "null"], maxLength: 10000 }
-        status: { type: string, enum: [backlog, todo, in_progress, in_review, done] }
+        status:
+          type: string
+          enum: [backlog, todo, in_progress, in_review, done]
+          description: |
+            Validated against the workflow: In Progress -> In Review is a
+            submission; In Review -> Done is an acceptance (reporter or
+            Owner/Admin, never the assignee); In Review -> In Progress is a
+            rejection/return; Done -> actionable states reopen the task
+            (clearing the resolution).
         priority: { type: string, enum: [low, medium, high, urgent] }
         assignee_id:
           type: [string, "null"]
           description: Team member id; empty string clears the assignment.
+        reporter_id:
+          type: [string, "null"]
+          description: |
+            Acceptance reviewer; empty string resets to the caller. Changes
+            require the Manager role or above and must reference a member.
         due_date:
           type: [string, "null"]
           format: date
@@ -1136,7 +1302,17 @@ components:
         status: { type: string, enum: [backlog, todo, in_progress, in_review, done] }
         priority: { type: string, enum: [low, medium, high, urgent] }
         assignee: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
+        reporter:
+          description: User responsible for accepting or rejecting the work.
+          oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }]
         created_by: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
+        resolution:
+          description: Latest acceptance decision; absent during active work or a new cycle.
+          type: [string, "null"]
+          enum: [accepted, rejected, null]
+        resolution_note: { type: [string, "null"] }
+        resolved_by: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
+        resolved_at: { type: [integer, "null"], description: "epoch ms of the latest decision" }
         due_date: { type: [string, "null"], format: date }
         position: { type: number }
         completed_at: { type: [integer, "null"], description: "epoch ms; set while status is done" }
@@ -1173,6 +1349,48 @@ components:
                 properties:
                   team_name: { type: string }
                   project_name: { type: string }
+        page: { type: integer }
+        page_size: { type: integer }
+        total: { type: integer }
+    TaskReject:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Audited with the rejection decision.
+    Notification:
+      type: object
+      required: [id, event, summary, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        event:
+          type: string
+          enum:
+            - task_assigned
+            - comment_mention
+            - task_submitted
+            - task_accepted
+            - task_rejected
+            - task_status_changed
+            - task_reporter_changed
+        task_id: { type: [string, "null"], format: uuid }
+        actor: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
+        summary:
+          type: string
+          maxLength: 300
+          description: Frozen, human-readable summary captured when the event happened.
+        created_at: { type: integer }
+        read_at: { type: [integer, "null"] }
+    PaginatedNotifications:
+      type: object
+      required: [items, page, page_size, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Notification" }
         page: { type: integer }
         page_size: { type: integer }
         total: { type: integer }

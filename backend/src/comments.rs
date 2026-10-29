@@ -75,6 +75,86 @@ async fn find_comment(conn: &mut Conn<'_>, comment_id: &str) -> Result<Comment, 
     row_to_comment(&row)
 }
 
+/// Extract mention candidate tokens from a comment body. A mention is
+/// `@` immediately followed by an email-like token (`name@domain`); unknown or
+/// malformed tokens resolve to nobody. Deliberately not display-name matching:
+/// emails are unique and unambiguous.
+pub(crate) fn mention_tokens(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for (idx, _) in body.match_indices('@') {
+        let rest = &body[idx + 1..];
+        let token: String = rest
+            .chars()
+            .take_while(|c| {
+                !c.is_whitespace() && !matches!(c, ',' | ';' | ')' | ']' | '!' | '?' | ':' | '"')
+            })
+            .collect();
+        // Trailing sentence punctuation is not part of the address (dots
+        // inside the address are kept).
+        let trimmed = token.trim_end_matches(['.', '!', '?', ',', ';', ':', ')', ']', '"']);
+        if trimmed.contains('@') && trimmed.len() <= 255 {
+            out.push(trimmed.to_lowercase());
+        }
+        if out.len() >= 20 {
+            break; // bounded work per comment
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Resolve mention tokens to **active team members only**. Emails that do not
+/// belong to the task's team resolve to nothing — a mention can never cross
+/// the team boundary or reach a nonexistent user.
+async fn resolve_mentions(
+    conn: &mut Conn<'_>,
+    team_id: &str,
+    body: &str,
+) -> Result<Vec<(String, String)>, AppError> {
+    let tokens = mention_tokens(body);
+    if tokens.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = vec!["?"; tokens.len()].join(", ");
+    let mut args = Args::new();
+    args.s(team_id);
+    for token in &tokens {
+        args.s(token.clone());
+    }
+    let rows = conn
+        .fetch_all(
+            &format!(
+                "SELECT u.id, u.email FROM users u \
+                 JOIN team_members tm ON tm.user_id = u.id \
+                 WHERE tm.team_id = ? AND u.email IN ({placeholders}) AND u.is_active = TRUE"
+            ),
+            args,
+        )
+        .await?;
+    let mut resolved = Vec::with_capacity(rows.len());
+    for row in rows {
+        resolved.push((row.try_get("id")?, row.try_get("email")?));
+    }
+    Ok(resolved)
+}
+
+/// Mentions in `new_body` that were not present in `previous_body`, so editing
+/// a comment does not re-notify untouched people.
+async fn new_mentions_only(
+    conn: &mut Conn<'_>,
+    team_id: &str,
+    new_body: &str,
+    previous_body: &str,
+) -> Result<Vec<(String, String)>, AppError> {
+    let previous = mention_tokens(previous_body);
+    let all = resolve_mentions(conn, team_id, new_body).await?;
+    Ok(all
+        .into_iter()
+        .filter(|(_, email)| !previous.contains(email))
+        .collect())
+}
+
 fn validate_body(body: &str) -> Result<String, AppError> {
     let body = body.trim().to_string();
     if body.is_empty() {
@@ -175,6 +255,18 @@ async fn create_comment(
         Some(&util::truncate(&body, 120)),
     )
     .await?;
+
+    let mut batch: Vec<crate::notifications::NewNotification> = Vec::new();
+    for (mentioned_id, _email) in resolve_mentions(&mut conn, &task.team_id, &body).await? {
+        batch.push(crate::notifications::NewNotification {
+            event: crate::notifications::events::COMMENT_MENTION,
+            recipient_id: mentioned_id,
+            task_id: task_id.clone(),
+            actor_id: user.id.clone(),
+            summary: format!("{} mentioned you on \"{}\"", user.display_name, task.title),
+        });
+    }
+    crate::notifications::record_batch(&mut conn, &batch).await?;
     conn.commit().await?;
 
     Ok((
@@ -235,6 +327,20 @@ async fn update_comment(
         Some(&util::truncate(&body, 120)),
     )
     .await?;
+
+    let mut batch: Vec<crate::notifications::NewNotification> = Vec::new();
+    for (mentioned_id, _email) in
+        new_mentions_only(&mut conn, &task.team_id, &body, &comment.body).await?
+    {
+        batch.push(crate::notifications::NewNotification {
+            event: crate::notifications::events::COMMENT_MENTION,
+            recipient_id: mentioned_id,
+            task_id: task.id.clone(),
+            actor_id: user.id.clone(),
+            summary: format!("{} mentioned you on \"{}\"", user.display_name, task.title),
+        });
+    }
+    crate::notifications::record_batch(&mut conn, &batch).await?;
     conn.commit().await?;
 
     Ok(Json(Comment {
@@ -277,4 +383,19 @@ async fn delete_comment(
         .await?;
     conn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod mention_tests {
+    use super::*;
+
+    #[test]
+    fn tokens_parse_emails_only() {
+        let body = "ping @member@example.com and @not-an-email plus @second@example.com twice @member@example.com";
+        let tokens = mention_tokens(body);
+        assert_eq!(tokens, ["member@example.com", "second@example.com"]);
+        assert!(mention_tokens("no mentions here").is_empty());
+        // Trailing punctuation does not become part of the address.
+        assert_eq!(mention_tokens("thanks @a@b.co!"), ["a@b.co"]);
+    }
 }

@@ -74,6 +74,16 @@ One SQL codebase runs on all engines. The rules that make this work:
   discipline applies — migrate with a fresh database or a dump/restore).
 - The database file is created on first connect (`mode=rwc`).
 
+## Migration 0002 (Phase 2)
+
+Adds `tasks.reporter_id` (nullable FK), acceptance metadata
+(`resolution`/`resolution_note`/`resolved_by`/`resolved_at`), and the
+`notifications` table with recipient and unread indexes on all three
+engines. The reporter backfill is deterministic: tasks inherit their creator
+as reporter when the creator is still a team member; otherwise the project
+owner (always a validated member). No rows are discarded and no destructive
+operations occur.
+
 ## Backup and restore
 
 - **SQLite**: stop the server (or use `sqlite3 tasker.db ".backup …"` on a

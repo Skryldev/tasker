@@ -131,6 +131,39 @@ async fn seed(db: &Database, task_count: usize) -> (String, String, String) {
     (team_id, project_id, user.id)
 }
 
+/// Seed `count` notifications (half unread) for the bench user.
+async fn seed_notifications(
+    db: &Database,
+    recipient: &str,
+    actor: &str,
+    task_id: &str,
+    count: usize,
+) {
+    let mut conn = db.begin().await.unwrap();
+    let now = tasker::util::now_ms();
+    for i in 0..count {
+        let id = tasker::util::new_id();
+        let mut args = Args::new();
+        args.s(&id)
+            .s(recipient)
+            .s("task_assigned")
+            .s(task_id)
+            .s(actor)
+            .s(format!("Bench notification number {i} about fixture {i}"))
+            .i(now - i64::try_from(count - i).unwrap_or(0));
+        if i % 2 == 0 {
+            args.i(now);
+        }
+        conn.execute(
+            "INSERT INTO notifications (id, recipient_id, event, task_id, actor_id, summary, created_at, read_at)              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            args,
+        )
+        .await
+        .unwrap();
+    }
+    conn.commit().await.unwrap();
+}
+
 fn db_benchmarks(c: &mut Criterion) {
     const TASKS: usize = 5_000;
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -268,6 +301,90 @@ fn db_benchmarks(c: &mut Criterion) {
                 .await
                 .unwrap();
             }
+        });
+    });
+
+    // ---- Notification queries (Phase 2) --------------------------------
+    let notif_user = runtime.block_on(async {
+        let mut conn = db.begin().await.unwrap();
+        let hash = tasker::security::password::hash("bench-password-123").unwrap();
+        let user = users::insert(
+            &mut conn,
+            &users::NewUser {
+                email: "notif-bench@tasker.local",
+                display_name: "Notif Bench",
+                password_hash: &hash,
+            },
+        )
+        .await
+        .unwrap();
+        conn.commit().await.unwrap();
+        user.id
+    });
+    let bench_task_id = runtime.block_on(async {
+        let mut conn = db.begin().await.unwrap();
+        let id = tasker::util::new_id();
+        let now = tasker::util::now_ms();
+        let mut args = Args::new();
+        args.s(&id)
+            .s(&team_id)
+            .s(&project_id)
+            .opt_s(None::<String>)
+            .s("Notification bench task")
+            .opt_s(None::<String>)
+            .s("todo")
+            .s("medium")
+            .opt_s(None::<String>)
+            .opt_s(None::<String>)
+            .s(&user_id)
+            .opt_s(None::<String>)
+            .f(9_999.0)
+            .opt_i(None)
+            .i(now)
+            .i(now);
+        conn.execute(
+            "INSERT INTO tasks (id, team_id, project_id, parent_task_id, title, description, status, priority,              assignee_id, reporter_id, created_by, due_date, position, completed_at, created_at, updated_at)              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            args,
+        )
+        .await
+        .unwrap();
+        conn.commit().await.unwrap();
+        id
+    });
+    runtime.block_on(async {
+        seed_notifications(&db, &notif_user, &user_id, &bench_task_id, 1_000).await;
+    });
+
+    group.throughput(Throughput::Bytes(1_000));
+    group.bench_function(BenchmarkId::new("notifications_list", 1_000), |b| {
+        b.to_async(&runtime).iter(|| async {
+            let mut conn = db.conn();
+            let mut args = Args::new();
+            args.s(&notif_user).i(20i64).i(0i64);
+            let rows = conn
+                .fetch_all(
+                    "SELECT n.id FROM notifications n WHERE n.recipient_id = ?                      ORDER BY n.created_at DESC, n.id DESC LIMIT ? OFFSET ?",
+                    args,
+                )
+                .await
+                .unwrap();
+            black_box(rows.len());
+        });
+    });
+
+    group.bench_function(BenchmarkId::new("notifications_unread_count", 1_000), |b| {
+        b.to_async(&runtime).iter(|| async {
+            let mut conn = db.conn();
+            let mut args = Args::new();
+            args.s(&notif_user);
+            let row = conn
+                .fetch_optional(
+                    "SELECT COUNT(*) AS n FROM notifications WHERE recipient_id = ? AND read_at IS NULL",
+                    args,
+                )
+                .await
+                .unwrap();
+            black_box(row.map_or(0, |r| r.try_get::<i64, _>("n").unwrap_or(0)));
         });
     });
 

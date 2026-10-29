@@ -201,18 +201,36 @@ impl MigrationLock {
     }
 }
 
-const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[(
-    "0001_init",
-    include_str!("../migrations/postgres/0001_init.sql"),
-)];
-const MYSQL_MIGRATIONS: &[(&str, &str)] = &[(
-    "0001_init",
-    include_str!("../migrations/mysql/0001_init.sql"),
-)];
-const SQLITE_MIGRATIONS: &[(&str, &str)] = &[(
-    "0001_init",
-    include_str!("../migrations/sqlite/0001_init.sql"),
-)];
+const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "0001_init",
+        include_str!("../migrations/postgres/0001_init.sql"),
+    ),
+    (
+        "0002_workflow_notifications",
+        include_str!("../migrations/postgres/0002_workflow_notifications.sql"),
+    ),
+];
+const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "0001_init",
+        include_str!("../migrations/mysql/0001_init.sql"),
+    ),
+    (
+        "0002_workflow_notifications",
+        include_str!("../migrations/mysql/0002_workflow_notifications.sql"),
+    ),
+];
+const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "0001_init",
+        include_str!("../migrations/sqlite/0001_init.sql"),
+    ),
+    (
+        "0002_workflow_notifications",
+        include_str!("../migrations/sqlite/0002_workflow_notifications.sql"),
+    ),
+];
 
 #[must_use]
 pub fn migrations_for(driver: Driver) -> &'static [(&'static str, &'static str)] {

@@ -42,6 +42,22 @@ and what remains out of scope.
   task assignments atomically (their assignments are cleared in the same
   transaction).
 
+## Workflow authorization (Phase 2)
+
+- The assignee can never accept or reject their own work — even when they
+  are also the task's reporter, because that reporter role is not
+  independent. The Owner/Admin reviewer override (`ReviewAnyTask`
+  capability) exists but is likewise denied to the assignee.
+- Task creators do not gain acceptance rights by creation alone.
+- Reporter selection at creation or edit requires the Manager role or above
+  and must reference an eligible team member.
+- Cross-team actors receive 404s (no existence disclosure); workflow state
+  conflicts return 409 with a stale-state message rather than mutating.
+- Notifications are strictly recipient-scoped: foreign ids are 404, unread
+  counts and lists are keyed on the authenticated user, and no endpoint
+  exposes task content beyond the frozen event summary written while the
+  recipient had access.
+
 ## CSRF
 
 Cookie authentication requires cross-site request protection. Tasker layers

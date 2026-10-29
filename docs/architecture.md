@@ -23,6 +23,8 @@ src/
 ├── tasks.rs            tasks, subtasks, board, list filters, my-tasks
 ├── comments.rs         comment CRUD with ownership policy
 ├── activity.rs         event recording + task history endpoint
+├── notifications.rs    persistent in-app notifications (transactional writes,
+│                       recipient-scoped listing/count/read endpoints)
 ├── users.rs            user entity, provisioning/validation
 └── http/
     ├── mod.rs          router assembly, middleware (request id, metrics, origin
@@ -98,6 +100,27 @@ types are never hand-maintained. The design system is a small set of
 shadcn-style primitives on Radix primitives with semantic CSS-variable
 tokens (light/dark). Kanban drag-and-drop uses dnd-kit with optimistic
 reordering and rollback on failure.
+
+## Task acceptance workflow (Phase 2)
+
+Tasks carry three independent responsibilities: `created_by` (who created
+it), `reporter_id` (who accepts or rejects the work), and `assignee_id` (who
+does the work). Transitions are validated business operations
+(`tasks::plan_transition`, unit-tested), not free-form status writes:
+
+- `In Progress -> In Review` (submit): assignee, creator (unassigned work),
+  or Manager+.
+- `In Review -> Done` (accept): the reporter, or the Owner/Admin reviewer
+  override — never the assignee; a reporter who is also the assignee is not
+  independent and must let an administrator accept.
+- `In Review -> In Progress` (reject): reporter or Manager+; the dedicated
+  endpoint requires an audited reason.
+- `Done -> actionable` (reopen): reporter or Manager+; clears the resolution.
+
+Transitions persist through compare-and-update (`WHERE id = ? AND
+status = ?`), so stale concurrent requests fail with 409 instead of
+corrupting state. Every transition writes its activity rows and
+notifications in the same transaction.
 
 ## Deliberate non-goals (Phase 1)
 

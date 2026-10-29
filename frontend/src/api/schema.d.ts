@@ -1342,6 +1342,308 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{task_id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit the task for the reporter's acceptance
+         * @description Moves an In Progress task to In Review. Allowed for the assignee,
+         *     the task creator (for unassigned work), or Manager roles and above.
+         *     The reporter is notified. Clears any previous resolution: a new
+         *     review cycle never inherits an old decision.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    task_id: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Task is now In Review. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Task"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept a task awaiting review (In Review -> Done)
+         * @description Only the designated reporter, or an Owner/Admin reviewer override,
+         *     may accept — never the assignee, even when they are also the
+         *     reporter (that reporter role is not independent). Records
+         *     `resolution=accepted`, the resolver, and the timestamp.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    task_id: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Task accepted. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Task"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject a task awaiting review (In Review -> In Progress)
+         * @description The mirror of accept: the reporter (or Owner/Admin override, never
+         *     the assignee) returns the work with a required, audited reason.
+         *     Records `resolution=rejected`, the note, resolver, and timestamp;
+         *     the assignee is notified with the reason.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    task_id: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TaskReject"];
+                };
+            };
+            responses: {
+                /** @description Task returned to In Progress. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Task"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the authenticated user's notifications */
+        get: {
+            parameters: {
+                query?: {
+                    unread?: boolean;
+                    page?: components["parameters"]["Page"];
+                    page_size?: components["parameters"]["PageSize"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Recipient-scoped notifications, newest first. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PaginatedNotifications"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/unread-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Unread notification count for the authenticated user */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current unread count. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            count: number;
+                        };
+                    };
+                };
+                401: components["responses"]["Problem401"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark every unread notification of the caller as read */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description All notifications marked read. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/{notification_id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark one notification as read (idempotent)
+         * @description Scoped to the authenticated recipient; foreign or unknown ids return 404 without disclosing existence.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    notification_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Marked read (or already read). */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live": {
         parameters: {
             query?: never;
@@ -1523,8 +1825,16 @@ export interface components {
         TaskCreate: {
             title: string;
             description?: string;
-            /** @enum {string} */
-            status?: "backlog" | "todo" | "in_progress" | "in_review" | "done";
+            /**
+             * @description New tasks start in an actionable state; Done requires review acceptance.
+             * @enum {string}
+             */
+            status?: "backlog" | "todo" | "in_progress";
+            /**
+             * @description Acceptance reviewer. Defaults to the caller; selecting another
+             *     user requires the Manager role or above and must be a team member.
+             */
+            reporter_id?: string | null;
             /** @enum {string} */
             priority?: "low" | "medium" | "high" | "urgent";
             /** @description Must be a team member. */
@@ -1538,12 +1848,24 @@ export interface components {
         TaskUpdate: {
             title?: string;
             description?: string | null;
-            /** @enum {string} */
+            /**
+             * @description Validated against the workflow: In Progress -> In Review is a
+             *     submission; In Review -> Done is an acceptance (reporter or
+             *     Owner/Admin, never the assignee); In Review -> In Progress is a
+             *     rejection/return; Done -> actionable states reopen the task
+             *     (clearing the resolution).
+             * @enum {string}
+             */
             status?: "backlog" | "todo" | "in_progress" | "in_review" | "done";
             /** @enum {string} */
             priority?: "low" | "medium" | "high" | "urgent";
             /** @description Team member id; empty string clears the assignment. */
             assignee_id?: string | null;
+            /**
+             * @description Acceptance reviewer; empty string resets to the caller. Changes
+             *     require the Manager role or above and must reference a member.
+             */
+            reporter_id?: string | null;
             /** Format: date */
             due_date?: string | null;
             label_ids?: string[];
@@ -1563,7 +1885,18 @@ export interface components {
             /** @enum {string} */
             priority: "low" | "medium" | "high" | "urgent";
             assignee?: components["schemas"]["UserBrief"] | null;
+            /** @description User responsible for accepting or rejecting the work. */
+            reporter?: components["schemas"]["UserBrief"] | null;
             created_by?: components["schemas"]["UserBrief"] | null;
+            /**
+             * @description Latest acceptance decision; absent during active work or a new cycle.
+             * @enum {string|null}
+             */
+            resolution?: "accepted" | "rejected" | null;
+            resolution_note?: string | null;
+            resolved_by?: components["schemas"]["UserBrief"] | null;
+            /** @description epoch ms of the latest decision */
+            resolved_at?: number | null;
             /** Format: date */
             due_date?: string | null;
             position: number;
@@ -1586,6 +1919,29 @@ export interface components {
                 team_name: string;
                 project_name: string;
             })[];
+            page: number;
+            page_size: number;
+            total: number;
+        };
+        TaskReject: {
+            /** @description Audited with the rejection decision. */
+            reason: string;
+        };
+        Notification: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            event: "task_assigned" | "comment_mention" | "task_submitted" | "task_accepted" | "task_rejected" | "task_status_changed" | "task_reporter_changed";
+            /** Format: uuid */
+            task_id?: string | null;
+            actor?: components["schemas"]["UserBrief"] | null;
+            /** @description Frozen, human-readable summary captured when the event happened. */
+            summary: string;
+            created_at: number;
+            read_at?: number | null;
+        };
+        PaginatedNotifications: {
+            items: components["schemas"]["Notification"][];
             page: number;
             page_size: number;
             total: number;

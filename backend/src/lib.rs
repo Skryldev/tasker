@@ -12,6 +12,7 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod http;
+pub mod notifications;
 pub mod projects;
 pub mod security;
 pub mod state;

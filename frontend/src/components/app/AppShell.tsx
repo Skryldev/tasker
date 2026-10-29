@@ -10,6 +10,7 @@ import {
   Sun,
   UserRound,
 } from "lucide-react";
+import { NotificationBell } from "@/components/app/NotificationBell";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -136,6 +137,7 @@ function Topbar() {
         Tasker
       </div>
       <div className="flex items-center gap-1.5">
+        <NotificationBell />
         <Button
           variant="ghost"
           size="icon"

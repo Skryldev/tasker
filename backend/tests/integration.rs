@@ -474,3 +474,540 @@ async fn expired_sessions_are_rejected() {
     let (status, _) = get_json(&app.app, "/api/v1/me", &cookie).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 2: reporter acceptance workflow + in-app notifications
+// ---------------------------------------------------------------------------
+
+/// Full Phase 2 verification: workflow transitions, authorization, resolution
+/// consistency, activity, and notification behavior on every engine.
+#[tokio::test]
+async fn workflow_and_notifications_matrix() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let suffix = Uuid::now_v7();
+        let admin_email = format!("admin-{suffix}@test.local");
+        let member_email = format!("member-{suffix}@test.local");
+        let outsider_email = format!("outsider-{suffix}@test.local");
+        seed_user(&app.db, &admin_email, "Admin").await;
+        seed_user(&app.db, &member_email, "Member").await;
+        seed_user(&app.db, &outsider_email, "Outsider").await;
+
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let outsider = login_as(&app.app, &outsider_email, "test-password-123").await;
+
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name":"T"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role":"member", "temp_password":"member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name":"P"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap();
+
+        let admin_id = {
+            let (code, members) = get_json(
+                &app.app,
+                &format!("/api/v1/teams/{team_id}/members"),
+                &admin,
+            )
+            .await;
+            assert_eq!(code, StatusCode::OK);
+            members["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["role"] == "owner")
+                .unwrap()["user"]["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let member_id = {
+            let (code, members) = get_json(
+                &app.app,
+                &format!("/api/v1/teams/{team_id}/members"),
+                &admin,
+            )
+            .await;
+            assert_eq!(code, StatusCode::OK);
+            members["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["role"] == "member")
+                .unwrap()["user"]["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+
+        // Reporter defaults to the creator (admin here).
+        let (code, t1) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title":"Reviewed task","assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] create");
+        assert_eq!(
+            t1["reporter"]["id"].as_str().unwrap(),
+            t1["created_by"]["id"].as_str().unwrap(),
+            "[{engine}] default reporter is creator"
+        );
+        let task_id = t1["id"].as_str().unwrap().to_string();
+
+        // A plain member cannot select a different reporter.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&member),
+            json!({"title":"Nope","reporter_id": admin_id}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] member picks other reporter"
+        );
+
+        // A reporter outside the team is rejected even for admins.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title":"Nope2","reporter_id":"00000000-0000-0000-0000-000000000000"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] foreign reporter"
+        );
+
+        // Creation straight into done is rejected: acceptance requires review.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title":"Instant done","status":"done"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] create as done"
+        );
+
+        // Member self-assigns and moves to in_progress.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{task_id}"),
+            Some(&member),
+            json!({"assignee_id": member_id, "status":"in_progress"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] claim + start");
+
+        // Outsider cannot submit (404: cross-team isolation).
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/submit"),
+            Some(&outsider),
+            json!({}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] outsider submit");
+
+        // Assignee submits; reporter (admin, not assignee) is notified.
+        let (code, t) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/submit"),
+            Some(&member),
+            json!({}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] submit");
+        assert_eq!(t["status"], "in_review");
+
+        // The assignee cannot accept their own work even though they are not
+        // the reporter; acceptance belongs to the reporter.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/accept"),
+            Some(&member),
+            json!({}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] assignee self-accept"
+        );
+
+        // Rejection requires a meaningful reason.
+        let (code, problem) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/reject"),
+            Some(&admin),
+            json!({"reason":"   "}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] blank reject"
+        );
+        assert_eq!(problem["errors"][0]["field"], "reason");
+
+        // Reporter accepts: resolution recorded.
+        let (code, t) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/accept"),
+            Some(&admin),
+            json!({}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] accept");
+        assert_eq!(t["status"], "done");
+        assert_eq!(t["resolution"], "accepted");
+        assert_eq!(t["resolved_by"]["id"].as_str().unwrap(), admin_id);
+        assert!(t["resolved_at"].is_number());
+        assert!(t["completed_at"].is_number());
+
+        // Stale accept is a conflict; resolution stays consistent.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/accept"),
+            Some(&admin),
+            json!({}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] stale accept");
+        let (code, t) = get_json(&app.app, &format!("/api/v1/tasks/{task_id}"), &admin).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(t["resolution"], "accepted");
+
+        // Non-member cannot act even with the task id.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/reject"),
+            Some(&outsider),
+            json!({"reason":"nope"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] outsider reject");
+
+        // Reopen clears the resolution; member resubmits; admin rejects with reason.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{task_id}"),
+            Some(&admin),
+            json!({"status":"in_progress"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] reopen");
+        let (_code, t) = get_json(&app.app, &format!("/api/v1/tasks/{task_id}"), &admin).await;
+        assert_eq!(
+            t["resolution"],
+            Value::Null,
+            "[{engine}] reopen clears resolution"
+        );
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/submit"),
+            Some(&member),
+            json!({}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let (code, t) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/reject"),
+            Some(&admin),
+            json!({"reason":"fix the intro"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] reject");
+        assert_eq!(t["status"], "in_progress");
+        assert_eq!(t["resolution"], "rejected");
+        assert_eq!(t["resolution_note"], "fix the intro");
+        assert_eq!(t["completed_at"], Value::Null);
+
+        // Patch cannot skip review: in_progress -> done forbidden even for admins.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{task_id}"),
+            Some(&admin),
+            json!({"status":"done"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] skip review");
+
+        // Activity trail records the workflow decisions and the reason.
+        let (code, activity) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/activity"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let events: Vec<&str> = activity["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["event"].as_str().unwrap())
+            .collect();
+        for expected in [
+            "task_submitted",
+            "task_accepted",
+            "task_rejected",
+            "task_rejection_reason",
+        ] {
+            assert!(
+                events.contains(&expected),
+                "[{engine}] missing {expected} in {events:?}"
+            );
+        }
+        let rejection = activity["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["event"] == "task_rejected")
+            .unwrap();
+        assert_eq!(
+            rejection["new_value"], "in_progress",
+            "[{engine}] rejection records transition"
+        );
+        let reason_row = activity["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["event"] == "task_rejection_reason")
+            .unwrap();
+        assert_eq!(
+            reason_row["new_value"], "fix the intro",
+            "[{engine}] reason persisted"
+        );
+
+        // -- Notifications ---------------------------------------------------
+        // The reporter (admin) was notified of the submission; the assignee
+        // (member) of acceptance and rejection; nobody was self-notified.
+        let (code, member_notifs) =
+            get_json(&app.app, "/api/v1/notifications?unread=true", &member).await;
+        assert_eq!(code, StatusCode::OK);
+        let member_events: Vec<&str> = member_notifs["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["event"].as_str().unwrap())
+            .collect();
+        assert!(
+            member_events.contains(&"task_accepted"),
+            "[{engine}] accept notif: {member_events:?}"
+        );
+        assert!(
+            member_events.contains(&"task_rejected"),
+            "[{engine}] reject notif"
+        );
+        assert!(
+            !member_events.contains(&"task_submitted"),
+            "[{engine}] no self submission notif"
+        );
+
+        let (_code, admin_notifs) =
+            get_json(&app.app, "/api/v1/notifications?unread=true", &admin).await;
+        let admin_events: Vec<&str> = admin_notifs["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["event"].as_str().unwrap())
+            .collect();
+        assert!(
+            admin_events.contains(&"task_submitted"),
+            "[{engine}] reporter submit notif: {admin_events:?}"
+        );
+
+        let (code, c1) = get_json(&app.app, "/api/v1/notifications/unread-count", &member).await;
+        assert_eq!(code, StatusCode::OK);
+        let member_count = c1["count"].as_i64().unwrap();
+        assert!(member_count > 0, "[{engine}] member has unread");
+
+        // Mark one read: idempotent; the count decrements exactly once.
+        let nid = member_notifs["items"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let read_uri = format!("/api/v1/notifications/{nid}/read");
+        let response = app
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&read_uri)
+                    .header(header::COOKIE, &member)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let response = app
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&read_uri)
+                    .header(header::COOKIE, &member)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::NO_CONTENT,
+            "[{engine}] idempotent read"
+        );
+        let (_code, c3) = get_json(&app.app, "/api/v1/notifications/unread-count", &member).await;
+        assert_eq!(
+            c3["count"].as_i64().unwrap(),
+            member_count - 1,
+            "[{engine}] count decrements once"
+        );
+
+        // Cross-user isolation: another user cannot mark someone else's
+        // notification read.
+        let response = app
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&read_uri)
+                    .header(header::COOKIE, &admin)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "[{engine}] foreign mark-read"
+        );
+
+        // Mention dedup: one comment mentioning the same member twice yields
+        // exactly one mention notification; an unknown address notifies nobody.
+        let mention_count = |notifs: &Value| {
+            notifs["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|n| n["event"] == "comment_mention")
+                .count()
+        };
+        let (_code, n) = get_json(&app.app, "/api/v1/notifications?unread=true", &member).await;
+        let before = mention_count(&n);
+        let (code, _) = send_json(&app.app, "POST", &format!("/api/v1/tasks/{task_id}/comments"),
+            Some(&admin),
+            json!({"body": format!("hey @{member_email} and again @{member_email} — ping @ghost@nowhere.example")})).await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (_code, n) = get_json(&app.app, "/api/v1/notifications?unread=true", &member).await;
+        assert_eq!(
+            mention_count(&n),
+            before + 1,
+            "[{engine}] mention dedup + team scoping"
+        );
+
+        // Editing without adding new mentions does not re-notify.
+        let (_code, comments) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/comments"),
+            &admin,
+        )
+        .await;
+        let comment_id = comments["items"][0]["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/comments/{comment_id}"),
+            Some(&admin),
+            json!({"body": format!("hey @{member_email} and again @{member_email} — edited")}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let (_code, n) = get_json(&app.app, "/api/v1/notifications?unread=true", &member).await;
+        assert_eq!(
+            mention_count(&n),
+            before + 1,
+            "[{engine}] edit does not re-notify"
+        );
+
+        // Read-all resets the unread count and filter.
+        let response = app
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/notifications/read-all")
+                    .header(header::COOKIE, &member)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let (_code, c) = get_json(&app.app, "/api/v1/notifications/unread-count", &member).await;
+        assert_eq!(c["count"].as_i64().unwrap(), 0, "[{engine}] read-all");
+        let (_code, unread) =
+            get_json(&app.app, "/api/v1/notifications?unread=true", &member).await;
+        assert_eq!(
+            unread["total"].as_i64().unwrap(),
+            0,
+            "[{engine}] unread filter"
+        );
+    }
+}

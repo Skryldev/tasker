@@ -30,6 +30,20 @@ and priorities (SQLite).
 | insert (with UUIDv7 + commit) | ~130 µs | single transaction |
 | update_status | ~76 µs | single-row UPDATE |
 
+## Notification benchmarks (Phase 2)
+
+Same harness, dataset: 1,000 notifications for one recipient (half unread).
+
+| Benchmark | Median time |
+| --- | --- |
+| notifications_list (page of 20 of 1,000) | ~30 µs |
+| notifications_unread_count | ~22 µs |
+
+Both queries are covered by the recipient/unread indexes added in migration
+0002. The Phase 1 task benchmarks re-measured within noise of the recorded
+baselines (list ~556 µs, search ~481 µs, board ~339 µs, insert ~130 µs,
+update ~75 µs) — no regression from the workflow/notification code paths.
+
 ## HTTP load test
 
 Command: `scripts/loadtest.sh <port> <seconds> <sqlite|postgres|mysql>`

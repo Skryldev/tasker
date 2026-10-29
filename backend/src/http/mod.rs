@@ -37,7 +37,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(projects::routes())
         .merge(tasks::routes())
         .merge(comments::routes())
-        .merge(activity::routes());
+        .merge(activity::routes())
+        .merge(crate::notifications::routes());
 
     let mut app = Router::new()
         .nest("/api/v1", api)

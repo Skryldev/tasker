@@ -21,6 +21,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES, STATUS_LABELS, type Priority, type TaskStatus } from "@/lib/utils";
 import { useLabels, useMembers } from "@/api/hooks";
+import { useWorkspace } from "@/lib/workspace";
 
 export interface TaskDialogProps {
   open: boolean;
@@ -39,6 +40,7 @@ interface FormState {
   status: TaskStatus;
   priority: Priority;
   assignee_id: string;
+  reporter_id: string;
   due_date: string;
 }
 
@@ -48,12 +50,21 @@ export function TaskDialog(props: TaskDialogProps) {
   const qc = useQueryClient();
   const members = useMembers(teamId);
   const labels = useLabels(teamId);
+  const { myRole } = useWorkspace();
+  const canPickReporter =
+    myRole !== undefined && ["owner", "admin", "manager"].includes(myRole);
+  // New tasks always start in an actionable state; review states are reached
+  // through the workflow operations.
+  const selectableStatuses = task
+    ? TASK_STATUSES
+    : (["backlog", "todo", "in_progress"] as const);
   const [form, setForm] = useState<FormState>({
     title: "",
     description: "",
     status: "backlog",
     priority: "medium",
     assignee_id: "none",
+    reporter_id: "creator",
     due_date: "",
   });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -69,6 +80,7 @@ export function TaskDialog(props: TaskDialogProps) {
         status: (task?.status as TaskStatus) ?? (parentTaskId ? "todo" : "backlog"),
         priority: (task?.priority as Priority) ?? "medium",
         assignee_id: task?.assignee?.id ?? "none",
+        reporter_id: task?.reporter?.id ?? (canPickReporter ? "creator" : "none"),
         due_date: task?.due_date ?? "",
       });
     }
@@ -76,12 +88,24 @@ export function TaskDialog(props: TaskDialogProps) {
 
   const mutation = useMutation({
     mutationFn: async () => {
+      const reporter =
+        canPickReporter && form.reporter_id !== "creator" && form.reporter_id !== "none"
+          ? form.reporter_id
+          : undefined;
+      const CREATION_STATUSES = ["backlog", "todo", "in_progress"] as const;
+      type CreationStatus = (typeof CREATION_STATUSES)[number];
+      const creationStatus: CreationStatus = CREATION_STATUSES.includes(
+        form.status as CreationStatus,
+      )
+        ? (form.status as CreationStatus)
+        : "todo";
       const body = {
         title: form.title,
         description: form.description || undefined,
-        status: form.status,
+        status: creationStatus,
         priority: form.priority,
         assignee_id: form.assignee_id === "none" ? undefined : form.assignee_id,
+        reporter_id: reporter,
         due_date: form.due_date || undefined,
         label_ids: selectedLabels.length > 0 ? selectedLabels : undefined,
       };
@@ -92,6 +116,11 @@ export function TaskDialog(props: TaskDialogProps) {
           status: body.status,
           priority: body.priority,
           assignee_id: form.assignee_id === "none" ? "" : form.assignee_id,
+          reporter_id: canPickReporter
+            ? form.reporter_id === "creator" || form.reporter_id === "none"
+              ? ""
+              : form.reporter_id
+            : undefined,
           due_date: form.due_date,
           label_ids: selectedLabels,
         });
@@ -178,7 +207,7 @@ export function TaskDialog(props: TaskDialogProps) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {TASK_STATUSES.map((s) => (
+                  {selectableStatuses.map((s) => (
                     <SelectItem key={s} value={s}>
                       {STATUS_LABELS[s]}
                     </SelectItem>
@@ -226,6 +255,30 @@ export function TaskDialog(props: TaskDialogProps) {
                 <p className="text-2xs text-destructive" role="alert">{fieldErrors.assignee_id}</p>
               ) : null}
             </div>
+            {canPickReporter ? (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="task-reporter">Reporter</Label>
+                <Select
+                  value={form.reporter_id}
+                  onValueChange={(v) => setForm((f) => ({ ...f, reporter_id: v }))}
+                >
+                  <SelectTrigger id="task-reporter">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="creator">Me (creator)</SelectItem>
+                    {members.data?.items.map((m) => (
+                      <SelectItem key={m.user.id} value={m.user.id}>
+                        {m.user.display_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {fieldErrors.reporter_id ? (
+                  <p className="text-2xs text-destructive" role="alert">{fieldErrors.reporter_id}</p>
+                ) : null}
+              </div>
+            ) : null}
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="task-due">Due date</Label>
               <Input

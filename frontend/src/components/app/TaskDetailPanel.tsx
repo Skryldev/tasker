@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/badge";
 import { StatusBadge, PriorityBadge } from "./TaskBadges";
 import { TaskDialog } from "./TaskDialog";
+import { WorkflowActions } from "./WorkflowActions";
+import { CommentBody, CommentComposer } from "./Mentions";
 import { useToast } from "@/components/ui/toast";
 import { cn, formatDate, timeAgo } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
@@ -114,6 +116,9 @@ export function TaskDetailPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin p-4">
+        <div className="mb-2">
+          <WorkflowActions task={task} />
+        </div>
         <h2 className="text-base font-semibold leading-snug">{task.title}</h2>
         {task.description ? (
           <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{task.description}</p>
@@ -133,7 +138,38 @@ export function TaskDetailPanel({
           ) : (
             <span>Unassigned</span>
           )}
+          {task.reporter ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-muted-foreground">Reporter:</span>
+              <Avatar name={task.reporter.display_name} size="xs" />
+              {task.reporter.display_name}
+            </span>
+          ) : null}
         </div>
+
+        {task.resolution ? (
+          <div
+            className={cn(
+              "mt-3 rounded-md border px-3 py-2 text-xs",
+              task.resolution === "accepted"
+                ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+                : "border-destructive/30 bg-destructive/5 text-destructive",
+            )}
+            data-testid="resolution-banner"
+          >
+            {task.resolution === "accepted" ? (
+              <>
+                Accepted{task.resolved_by ? ` by ${task.resolved_by.display_name}` : ""}
+                {task.resolved_at ? ` · ${timeAgo(task.resolved_at)}` : ""}
+              </>
+            ) : (
+              <>
+                Rejected
+                {task.resolution_note ? ` — "${task.resolution_note}"` : ""}
+              </>
+            )}
+          </div>
+        ) : null}
 
         {task.labels.length > 0 ? (
           <div className="mt-3 flex flex-wrap gap-1.5">
@@ -174,18 +210,22 @@ export function TaskDetailPanel({
           <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
             <MessageSquare className="h-3.5 w-3.5" /> Comments ({comments.data?.total ?? 0})
           </h3>
-          <form onSubmit={submitComment} className="mb-4 flex flex-col gap-2">
-            <textarea
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitComment(e);
+            }}
+            className="mb-4"
+          >
+            <CommentComposer
+              teamId={task.team_id}
               value={commentDraft}
-              onChange={(e) => setCommentDraft(e.target.value)}
-              placeholder="Leave a comment…"
-              rows={2}
-              className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              data-testid="comment-input"
+              onChange={setCommentDraft}
+              onSubmit={() => {
+                if (commentDraft.trim()) void createComment.mutateAsync(commentDraft.trim()).then(() => setCommentDraft(""));
+              }}
+              pending={createComment.isPending}
             />
-            <Button type="submit" size="sm" className="self-start" disabled={!commentDraft.trim() || createComment.isPending} data-testid="comment-submit">
-              Comment
-            </Button>
           </form>
           <div className="flex flex-col gap-3">
             {comments.isLoading ? (
@@ -253,7 +293,7 @@ export function TaskDetailPanel({
                       </div>
                     </form>
                   ) : (
-                    <p className="mt-1.5 whitespace-pre-wrap text-sm">{comment.body}</p>
+                    <CommentBody body={comment.body} teamId={task.team_id} />
                   )}
                 </article>
               ))

@@ -5,10 +5,10 @@
 | Layer | Location | What it covers |
 | --- | --- | --- |
 | Rust unit tests | `backend/src/**` | permission matrix, password/token handling, rate limiter, SQL splitter, placeholder adaptation, driver detection (13 tests) |
-| Rust HTTP integration | `backend/tests/integration.rs` | full security matrix (unauthenticated access, cross-team 404s, self-escalation, cross-assignment, validation shapes, subtask nesting, archival boundary, logout revocation) over real engines |
+| Rust HTTP integration | `backend/tests/integration.rs` | security matrix (unauthenticated access, cross-team 404s, self-escalation, cross-assignment, validation shapes, subtask nesting, archival boundary, logout revocation) **plus the Phase 2 workflow/notification matrix** (submit/accept/reject permissions, reviewer independence, rejection reason, resolution consistency, stale transitions, notification generation, mention dedup, cross-user isolation) over real engines |
 | API smoke | `scripts/smoke_api.sh` | 32-check end-to-end product workflow over HTTP |
 | Frontend unit | `frontend/src/**/*.test.tsx` | login validation/API errors, badges, empty/error states, theme toggle, toasts (11 tests) |
-| End-to-end | `frontend/e2e/workflow.spec.ts` | real-browser workflow incl. drag-and-drop persistence and negative authorization (8 tests) |
+| End-to-end | `frontend/e2e/workflow.spec.ts`, `frontend/e2e/workflow-p2.spec.ts` | real-browser workflows: drag-and-drop persistence, negative authorization, and Phase 2 submission → acceptance/rejection through the UI with notification navigation (14 tests total) |
 | Benchmarks | `backend/benches/db.rs`, `scripts/loadtest.sh` | performance baselines (see docs/performance.md) |
 
 ## Exact commands

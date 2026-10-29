@@ -10,6 +10,8 @@ export type TaskCreate = components["schemas"]["TaskCreate"];
 export type TaskUpdate = components["schemas"]["TaskUpdate"];
 export type Comment = components["schemas"]["Comment"];
 export type Activity = components["schemas"]["Activity"];
+export type Notification = components["schemas"]["Notification"];
+export type Resolution = NonNullable<Task["resolution"]>;
 export type Board = components["schemas"]["Board"];
 export type BoardColumn = NonNullable<Board["columns"]>[number];
 export type PaginatedTasks = components["schemas"]["PaginatedTasks"];
@@ -204,6 +206,17 @@ export const api = {
       body,
     }) as Promise<Task>;
   },
+  submitForReview(taskId: string): Promise<Task> {
+    return request("post", `/tasks/${taskId}/submit`) as Promise<Task>;
+  },
+  acceptTask(taskId: string): Promise<Task> {
+    return request("post", `/tasks/${taskId}/accept`) as Promise<Task>;
+  },
+  rejectTask(taskId: string, reason: string): Promise<Task> {
+    return request("post", `/tasks/${taskId}/reject`, {
+      body: { reason },
+    }) as Promise<Task>;
+  },
   board(projectId: string, pageSize?: number): Promise<Board> {
     return request("get", "/projects/{project_id}/board".replace("{project_id}", projectId), {
       query: { page_size: pageSize },
@@ -211,6 +224,26 @@ export const api = {
   },
   myTasks(query: Record<string, string | number | undefined>): Promise<PaginatedMyTasks> {
     return request("get", "/me/tasks", { query }) as Promise<PaginatedMyTasks>;
+  },
+
+  // notifications --------------------------------------------------------------
+  listNotifications(
+    unread: boolean,
+    page?: number,
+    pageSize?: number,
+  ): Promise<{ items: Notification[]; page: number; page_size: number; total: number }> {
+    return request("get", "/notifications", {
+      query: { unread: unread || undefined, page, page_size: pageSize },
+    }) as Promise<{ items: Notification[]; page: number; page_size: number; total: number }>;
+  },
+  unreadCount(): Promise<{ count: number }> {
+    return request("get", "/notifications/unread-count") as Promise<{ count: number }>;
+  },
+  markNotificationRead(id: string): Promise<void> {
+    return request("post", `/notifications/${id}/read`) as Promise<void>;
+  },
+  markAllNotificationsRead(): Promise<void> {
+    return request("post", "/notifications/read-all") as Promise<void>;
   },
 
   // comments & activity ---------------------------------------------------

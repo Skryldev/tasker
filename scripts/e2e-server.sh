@@ -26,4 +26,5 @@ echo "==> Starting server on :$PORT"
 exec env TASKER_DATABASE_URL="sqlite:$DB_WIN/e2e.db" \
   TASKER_HTTP_PORT="$PORT" \
   TASKER_STATIC_DIR="$ROOT/frontend/dist" \
+  TASKER_RATE_LIMIT_LOGIN_PER_MIN=100 \
   "$ROOT/backend/target/debug/tasker" serve
