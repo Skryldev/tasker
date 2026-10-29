@@ -34,6 +34,7 @@ servers:
   - url: /api/v1
 tags:
   - name: auth
+  - name: templates
   - name: notifications
   - name: users
   - name: teams
@@ -993,6 +994,288 @@ paths:
         "404":
           $ref: "#/components/responses/Problem404"
 
+  /tasks/{task_id}/dependencies:
+    get:
+      tags: [tasks]
+      summary: List dependency relations for a task
+      description: |
+        `blockers` are tasks that must finish before this task;
+        `blocked` are tasks waiting on this one. Read-only for guests.
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Dependency relations.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DependencyList"
+        "404":
+          $ref: "#/components/responses/Problem404"
+    post:
+      tags: [tasks]
+      summary: Add a finish-to-start dependency
+      description: |
+        The predecessor must finish before this task starts. Both tasks must
+        belong to the same project. Self-dependencies, duplicates and cycles
+        are rejected with 422/409. Team members only (guests read-only).
+        Dependency mutations serialize per project; the cycle check is
+        therefore race-free.
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [predecessor_task_id]
+              properties:
+                predecessor_task_id: { type: string, format: uuid }
+      responses:
+        "201":
+          description: Dependency created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DependencyEdge"
+        "403":
+          $ref: "#/components/responses/Problem403"
+        "404":
+          $ref: "#/components/responses/Problem404"
+        "409":
+          $ref: "#/components/responses/Problem409"
+        "422":
+          $ref: "#/components/responses/Problem422"
+  /tasks/{task_id}/dependencies/{predecessor_task_id}:
+    delete:
+      tags: [tasks]
+      summary: Remove a dependency edge
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+        - name: predecessor_task_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Edge removed.
+        "403":
+          $ref: "#/components/responses/Problem403"
+        "404":
+          $ref: "#/components/responses/Problem404"
+
+  /teams/{team_id}/workload:
+    get:
+      tags: [teams]
+      summary: Team workload aggregation (assigned task distribution)
+      description: |
+        Server-side SQL aggregation grouped by assignee. Counts open tasks by
+        status and priority plus an overdue count (due date before today UTC
+        and status not done). This is task distribution, NOT effort or
+        capacity. Requires team membership; guests receive 404.
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+        - name: project_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: due_before
+          in: query
+          schema: { type: string, format: date }
+        - name: due_after
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Per-member aggregates and unassigned summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workload"
+        "404":
+          $ref: "#/components/responses/Problem404"
+        "422":
+          $ref: "#/components/responses/Problem422"
+
+  /projects/{project_id}/templates:
+    get:
+      tags: [templates]
+      summary: List project task templates (team members only)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Templates ordered by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/TaskTemplate" }
+        "404":
+          $ref: "#/components/responses/Problem404"
+    post:
+      tags: [templates]
+      summary: Create a template (Manager+)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TemplateUpsert"
+      responses:
+        "201":
+          description: Template created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskTemplate" }
+        "403":
+          $ref: "#/components/responses/Problem403"
+        "404":
+          $ref: "#/components/responses/Problem404"
+        "422":
+          $ref: "#/components/responses/Problem422"
+  /templates/{template_id}:
+    get:
+      tags: [templates]
+      summary: Template detail (team members only)
+      parameters:
+        - $ref: "#/components/parameters/TemplateId"
+      responses:
+        "200":
+          description: Template with label defaults.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskTemplate" }
+        "404":
+          $ref: "#/components/responses/Problem404"
+    patch:
+      tags: [templates]
+      summary: Update a template (Manager+)
+      parameters:
+        - $ref: "#/components/parameters/TemplateId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TemplateUpsert" }
+      responses:
+        "200":
+          description: Updated template. Existing tasks are unaffected.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskTemplate" }
+        "403":
+          $ref: "#/components/responses/Problem403"
+        "404":
+          $ref: "#/components/responses/Problem404"
+        "422":
+          $ref: "#/components/responses/Problem422"
+    delete:
+      tags: [templates]
+      summary: Delete a template (Manager+). Created tasks are unaffected.
+      parameters:
+        - $ref: "#/components/parameters/TemplateId"
+      responses:
+        "204":
+          description: Deleted.
+        "403":
+          $ref: "#/components/responses/Problem403"
+        "404":
+          $ref: "#/components/responses/Problem404"
+
+  /projects/{project_id}/guests:
+    get:
+      tags: [projects]
+      summary: List project guests (Manager+; 404 for guests)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Guest roster.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ProjectGuest" }
+        "403":
+          $ref: "#/components/responses/Problem403"
+        "404":
+          $ref: "#/components/responses/Problem404"
+    post:
+      tags: [projects]
+      summary: Grant read-only access to an existing user (Manager+)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "201":
+          description: Guest granted viewer access.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectGuest" }
+        "403":
+          $ref: "#/components/responses/Problem403"
+        "404":
+          $ref: "#/components/responses/Problem404"
+        "409":
+          $ref: "#/components/responses/Problem409"
+        "422":
+          $ref: "#/components/responses/Problem422"
+  /projects/{project_id}/guests/{user_id}:
+    delete:
+      tags: [projects]
+      summary: Revoke guest access (Manager+). Takes effect immediately.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Revoked.
+        "403":
+          $ref: "#/components/responses/Problem403"
+        "404":
+          $ref: "#/components/responses/Problem404"
+
+  /me/projects:
+    get:
+      tags: [users]
+      summary: Projects explicitly shared with the caller (guest access)
+      responses:
+        "200":
+          description: Guest-visible projects, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Project" }
+        "401":
+          $ref: "#/components/responses/Problem401"
+
   /health/live:
     get:
       tags: [ops]
@@ -1056,6 +1339,11 @@ components:
       schema: { type: string, format: uuid }
     TaskId:
       name: task_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TemplateId:
+      name: template_id
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -1228,6 +1516,9 @@ components:
         updated_at: { type: integer }
         open_task_count: { type: integer }
         my_role: { type: [string, "null"], enum: [owner, admin, manager, member, null] }
+        is_guest:
+          type: boolean
+          description: True when the caller reaches this project through a guest grant (read-only).
     TaskCreate:
       type: object
       required: [title]
@@ -1394,6 +1685,106 @@ components:
         page: { type: integer }
         page_size: { type: integer }
         total: { type: integer }
+    DependencyEdge:
+      type: object
+      required: [predecessor_task_id, successor_task_id, created_at]
+      properties:
+        predecessor_task_id: { type: string, format: uuid }
+        successor_task_id: { type: string, format: uuid }
+        created_at: { type: integer }
+    DependencyTaskRef:
+      type: object
+      required: [task_id, title, status]
+      properties:
+        task_id: { type: string, format: uuid }
+        title: { type: string }
+        status: { type: string, enum: [backlog, todo, in_progress, in_review, done] }
+        due_date: { type: [string, "null"], format: date }
+    DependencyList:
+      type: object
+      required: [blockers, blocked, can_manage]
+      properties:
+        blockers:
+          type: array
+          description: Tasks that must finish before this task.
+          items: { $ref: "#/components/schemas/DependencyTaskRef" }
+        blocked:
+          type: array
+          description: Tasks waiting on this task.
+          items: { $ref: "#/components/schemas/DependencyTaskRef" }
+        can_manage:
+          type: boolean
+          description: False for project guests.
+    Workload:
+      type: object
+      required: [members, unassigned, generated_at]
+      properties:
+        members:
+          type: array
+          items:
+            type: object
+            required: [user, by_status, by_priority, overdue, total]
+            properties:
+              user: { $ref: "#/components/schemas/UserBrief" }
+              by_status:
+                type: object
+                description: Status -> open task count.
+                additionalProperties: { type: integer }
+              by_priority:
+                type: object
+                description: Priority -> open task count.
+                additionalProperties: { type: integer }
+              overdue: { type: integer }
+              total: { type: integer }
+        unassigned:
+          type: object
+          required: [by_status, by_priority, overdue, total]
+          properties:
+            by_status:
+              type: object
+              additionalProperties: { type: integer }
+            by_priority:
+              type: object
+              additionalProperties: { type: integer }
+            overdue: { type: integer }
+            total: { type: integer }
+        generated_at: { type: integer }
+    TaskTemplate:
+      type: object
+      required: [id, project_id, name, default_title, default_priority, label_ids, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        name: { type: string }
+        default_title: { type: string }
+        default_description: { type: [string, "null"] }
+        default_priority: { type: string, enum: [low, medium, high, urgent] }
+        label_ids:
+          type: array
+          items: { type: string, format: uuid }
+        created_by: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
+        created_at: { type: integer }
+        updated_at: { type: integer }
+    TemplateUpsert:
+      type: object
+      required: [name, default_title]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 160 }
+        default_title: { type: string, minLength: 1, maxLength: 250 }
+        default_description: { type: string, maxLength: 10000 }
+        default_priority: { type: string, enum: [low, medium, high, urgent] }
+        label_ids:
+          type: array
+          maxItems: 20
+          items: { type: string, format: uuid }
+    ProjectGuest:
+      type: object
+      required: [user, role, created_at]
+      properties:
+        user: { $ref: "#/components/schemas/UserBrief" }
+        role: { type: string, enum: [viewer] }
+        created_at: { type: integer }
+        granted_by: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
     Board:
       type: object
       required: [project_id, columns]

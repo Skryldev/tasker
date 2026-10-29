@@ -210,6 +210,10 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
         "0002_workflow_notifications",
         include_str!("../migrations/postgres/0002_workflow_notifications.sql"),
     ),
+    (
+        "0003_guests_dependencies_templates",
+        include_str!("../migrations/postgres/0003_guests_dependencies_templates.sql"),
+    ),
 ];
 const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -219,6 +223,10 @@ const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
     (
         "0002_workflow_notifications",
         include_str!("../migrations/mysql/0002_workflow_notifications.sql"),
+    ),
+    (
+        "0003_guests_dependencies_templates",
+        include_str!("../migrations/mysql/0003_guests_dependencies_templates.sql"),
     ),
 ];
 const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
@@ -230,7 +238,85 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
         "0002_workflow_notifications",
         include_str!("../migrations/sqlite/0002_workflow_notifications.sql"),
     ),
+    (
+        "0003_guests_dependencies_templates",
+        include_str!("../migrations/sqlite/0003_guests_dependencies_templates.sql"),
+    ),
 ];
+
+#[must_use]
+/// Project-scoped advisory lock used to serialize task-dependency mutations.
+/// The cycle check + insert pair must not interleave between concurrent
+/// requests. Strategy per engine:
+/// - `SQLite`: no-op — WAL allows a single writer at a time, so the write
+///   transaction that checks and inserts is already serialized.
+/// - `PostgreSQL`: `pg_advisory_xact_lock(hashtext(key))`, released at
+///   transaction end.
+/// - MySQL/MariaDB: `GET_LOCK(key, 10)` on the pooled connection, released
+///   explicitly before the transaction commits.
+pub struct ProjectDependencyLock {
+    driver: Driver,
+    acquired: bool,
+}
+
+impl ProjectDependencyLock {
+    pub fn for_driver(driver: Driver) -> Self {
+        Self {
+            driver,
+            acquired: false,
+        }
+    }
+
+    pub async fn acquire(&mut self, conn: &mut Conn<'_>, project_id: &str) {
+        match self.driver {
+            Driver::Sqlite => {} // single-writer: the write tx is the lock
+            Driver::Postgres => {
+                let mut args = Args::new();
+                args.s(format!("tasker:dep:{project_id}"));
+                if let Err(e) = conn
+                    .execute("SELECT pg_advisory_xact_lock(hashtext(?))", args)
+                    .await
+                {
+                    tracing::error!(error = %e, "dependency lock acquire failed");
+                } else {
+                    self.acquired = true;
+                }
+            }
+            Driver::MySql => {
+                let mut args = Args::new();
+                args.s(format!("tasker:dep:{project_id}"));
+                if let Err(e) = conn.execute("SELECT GET_LOCK(?, 10)", args).await {
+                    tracing::error!(error = %e, "dependency lock acquire failed");
+                } else {
+                    self.acquired = true;
+                }
+            }
+        }
+    }
+
+    pub async fn release(&mut self, conn: &mut Conn<'_>, project_id: &str) {
+        if !self.acquired || self.driver != Driver::MySql {
+            return; // SQLite serializes inherently; PG releases at commit
+        }
+        let mut args = Args::new();
+        args.s(format!("tasker:dep:{project_id}"));
+        if let Err(e) = conn.execute("DO RELEASE_LOCK(?)", args).await {
+            tracing::error!(error = %e, "dependency lock release failed");
+        }
+        self.acquired = false;
+    }
+}
+
+impl Drop for ProjectDependencyLock {
+    fn drop(&mut self) {
+        // MySQL locks are connection-scoped: dropping without release would
+        // leak the lock until the connection closes. Release runs on the
+        // happy path; this warns if a path ever forgets it.
+        if self.acquired {
+            tracing::warn!("dependency lock dropped without explicit release");
+        }
+    }
+}
 
 #[must_use]
 pub fn migrations_for(driver: Driver) -> &'static [(&'static str, &'static str)] {
@@ -433,6 +519,12 @@ enum ConnInner<'a> {
 }
 
 impl<'a> Conn<'a> {
+    /// The driver this handle runs against (used for engine-specific locks).
+    #[must_use]
+    pub fn driver(&self) -> Driver {
+        self.driver
+    }
+
     #[must_use]
     fn from_pool(pool: &'a AnyPool, driver: Driver) -> Self {
         Self {

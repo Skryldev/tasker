@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { KanbanSquare, ListFilter, ListTodo, Plus, Search } from "lucide-react";
 import { api } from "@/api/client";
+import { TemplateManager } from "@/components/app/TemplateManager";
 import { useLabels, useMembers, useBoard, useTasks, useProject } from "@/api/hooks";
 import type { Task } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -64,6 +65,8 @@ export function ProjectPage() {
 
   const tasks = useTasks(view === "list" ? projectId : undefined, filters);
   const board = useBoard(projectId);
+
+  const isGuestProject = project.data?.is_guest === true;
 
   if (project.isLoading) {
     return (
@@ -223,19 +226,32 @@ export function ProjectPage() {
               <span className="text-2xs text-muted-foreground">
                 {tasks.data ? `${tasks.data.total} task${tasks.data.total === 1 ? "" : "s"}` : ""}
               </span>
-              <Button size="sm" onClick={() => openCreate()} data-testid="create-task">
-                <Plus /> New task
-              </Button>
+              {isGuestProject ? null : (
+                <Button size="sm" onClick={() => openCreate()} data-testid="create-task">
+                  <Plus /> New task
+                </Button>
+              )}
             </div>
           </div>
         ) : (
           <div className="mt-3 flex justify-end">
-            <Button size="sm" onClick={() => openCreate()} data-testid="create-task-board">
-              <Plus /> New task
-            </Button>
+            {isGuestProject ? null : (
+              <Button size="sm" onClick={() => openCreate()} data-testid="create-task-board">
+                <Plus /> New task
+              </Button>
+            )}
           </div>
         )}
       </header>
+
+      {isGuestProject ? (
+        <div
+          className="border-b bg-primary/5 px-6 py-2 text-xs text-muted-foreground"
+          data-testid="guest-banner"
+        >
+          You have read-only guest access to this project.
+        </div>
+      ) : null}
 
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1 overflow-y-auto scrollbar-thin p-4">
@@ -295,6 +311,9 @@ export function ProjectPage() {
               onOpenTask={(task) => void openTaskDetail(task)}
               onCreateTask={(status) => openCreate(status)}
             />
+          )}
+          {isGuestProject ? null : (
+            <TemplateManager projectId={projectId!} />
           )}
         </div>
 

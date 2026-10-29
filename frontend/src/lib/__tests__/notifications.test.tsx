@@ -11,8 +11,8 @@ import { ToastProvider } from "@/components/ui/toast";
 import { ThemeProvider } from "@/lib/theme";
 
 vi.mock("@/api/client", async (importOriginal) => {
-  const original = (await importOriginal()) as typeof import("@/api/client");
-  return { ...original, api: { ...original.api } };
+  const original = (await importOriginal()) as Record<string, unknown>;
+  return { ...original, api: { ...(original.api as object) } };
 });
 
 vi.mock("@/api/hooks", () => ({

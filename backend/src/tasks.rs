@@ -14,7 +14,7 @@ use sqlx::Row;
 
 use crate::activity::{self, events};
 use crate::auth::AuthedUser;
-use crate::authorization::{Capability, Membership};
+use crate::authorization::Capability;
 use crate::db::{Args, Conn};
 use crate::error::{AppError, FieldError};
 use crate::projects::require_project_access;
@@ -245,11 +245,13 @@ fn core_to_task(
 
 /// Resolve a task and the caller's team membership; outsiders get a 404 so
 /// task existence is not disclosed across team boundaries.
+/// Resolve a task and the caller's access to it: team membership or an
+/// explicit project-guest grant (read-only). Outsiders get the standard 404.
 pub async fn require_task_access(
     conn: &mut Conn<'_>,
     task_id: &str,
     user_id: &str,
-) -> Result<(TaskCore, Membership), AppError> {
+) -> Result<(TaskCore, crate::projects::ProjectActor), AppError> {
     let mut args = Args::new();
     args.s(task_id);
     let row = conn
@@ -260,8 +262,22 @@ pub async fn require_task_access(
         .await?
         .ok_or(AppError::NotFound("task not found"))?;
     let task = row_to_task_core(&row)?;
-    let membership = crate::teams::require_membership(conn, &task.team_id, user_id).await?;
-    Ok((task, membership))
+    let actor = if let Some(membership) =
+        crate::authorization::get_membership(conn, &task.team_id, user_id).await?
+    {
+        crate::projects::ProjectActor {
+            membership: Some(membership),
+            is_guest: false,
+        }
+    } else if crate::projects::is_project_guest(conn, &task.project_id, user_id).await? {
+        crate::projects::ProjectActor {
+            membership: None,
+            is_guest: true,
+        }
+    } else {
+        return Err(AppError::NotFound("task not found"));
+    };
+    Ok((task, actor))
 }
 
 /// Attach labels, assignee, and creator to a batch of task cores.
@@ -448,7 +464,7 @@ async fn validate_parent(
     Ok(())
 }
 
-async fn validate_label_ids(
+pub(crate) async fn validate_label_ids(
     conn: &mut Conn<'_>,
     team_id: &str,
     label_ids: &[String],
@@ -574,8 +590,8 @@ async fn create_task_inner(
     }
 
     let mut conn = state.db.begin().await?;
-    let (project, membership) = require_project_access(&mut conn, &project_id, &user.id).await?;
-    if !membership.role.can(Capability::CreateTask) {
+    let (project, actor) = require_project_access(&mut conn, &project_id, &user.id).await?;
+    if !actor.can(Capability::CreateTask) {
         return Err(AppError::Forbidden(
             "your role does not permit creating tasks",
         ));
@@ -596,7 +612,7 @@ async fn create_task_inner(
 
     // Reporter: defaults to the creator. Selecting someone else requires the
     // Manager+ permission (UpdateAnyTask); the reporter must be a team member.
-    let can_update_any = membership.role.can(Capability::UpdateAnyTask);
+    let can_update_any = actor.can(Capability::UpdateAnyTask);
     let reporter_id = match body.reporter_id.as_deref() {
         Some(id) if !id.is_empty() => {
             if !can_update_any && id != user.id {
@@ -1361,8 +1377,8 @@ async fn update_task(
     Json(body): Json<UpdateTaskRequest>,
 ) -> Result<Json<Task>, AppError> {
     let mut conn = state.db.begin().await?;
-    let (task, membership) = require_task_access(&mut conn, &task_id, &user.id).await?;
-    let can_update_any = membership.role.can(Capability::UpdateAnyTask);
+    let (task, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
+    let can_update_any = actor.can(Capability::UpdateAnyTask);
     let is_own = task.created_by == user.id || task.assignee_id.as_deref() == Some(&user.id);
     if !can_update_any && !is_own {
         return Err(AppError::Forbidden(
@@ -1383,7 +1399,7 @@ async fn update_task(
             validate_status(to)?,
             is_assignee,
             is_reporter,
-            membership.role.can(Capability::ReviewAnyTask),
+            actor.can(Capability::ReviewAnyTask),
             can_update_any,
         )?,
         None => (TransitionKind::None, task.status.as_str()),
@@ -1709,7 +1725,7 @@ async fn run_workflow_step(
         }
     }
     let mut conn = state.db.begin().await?;
-    let (task, membership) = require_task_access(&mut conn, &task_id, &user.id).await?;
+    let (task, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
 
     let project = crate::projects::find_project(&mut conn, &task.project_id).await?;
     if project.status == "archived" {
@@ -1722,14 +1738,14 @@ async fn run_workflow_step(
             // work) and managers may submit on their behalf.
             let is_assignee = task.assignee_id.as_deref() == Some(&user.id);
             let is_creator = task.created_by == user.id;
-            if !is_assignee && !is_creator && !membership.role.can(Capability::UpdateAnyTask) {
+            if !is_assignee && !is_creator && !actor.can(Capability::UpdateAnyTask) {
                 return Err(AppError::Forbidden(
                     "only the assignee, the creator, or a manager can submit a task for review",
                 ));
             }
         }
         "done" | "in_progress" => {
-            require_review_authority(&task, &user, membership.role.can(Capability::ReviewAnyTask))?;
+            require_review_authority(&task, &user, actor.can(Capability::ReviewAnyTask))?;
         }
         _ => unreachable!("workflow endpoint targets a fixed status"),
     }
@@ -1739,8 +1755,8 @@ async fn run_workflow_step(
         to_status,
         task.assignee_id.as_deref() == Some(&user.id),
         task.reporter_id.as_deref() == Some(&user.id),
-        membership.role.can(Capability::ReviewAnyTask),
-        membership.role.can(Capability::UpdateAnyTask),
+        actor.can(Capability::ReviewAnyTask),
+        actor.can(Capability::UpdateAnyTask),
     )?;
     if matches!(kind, TransitionKind::None | TransitionKind::Planning) {
         return Err(AppError::Conflict(
@@ -1840,8 +1856,8 @@ async fn delete_task(
     Path(task_id): Path<String>,
 ) -> Result<StatusCode, AppError> {
     let mut conn = state.db.begin().await?;
-    let (task, membership) = require_task_access(&mut conn, &task_id, &user.id).await?;
-    let can_delete_any = membership.role.can(Capability::DeleteAnyTask);
+    let (task, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
+    let can_delete_any = actor.can(Capability::DeleteAnyTask);
     let is_creator = task.created_by == user.id;
     if !can_delete_any && !is_creator {
         return Err(AppError::Forbidden("you can only delete tasks you created"));

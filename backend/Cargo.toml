@@ -47,6 +47,7 @@ clap = { version = "4", features = ["derive", "env"] }
 rpassword = "7"
 
 [dev-dependencies]
+tracing-subscriber = "0.3"
 tower = { version = "0.5", features = ["util"] }
 criterion = { version = "0.5", features = ["async_tokio"] }
 

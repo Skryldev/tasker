@@ -90,20 +90,26 @@ async fn list_task_activity(
     Path(task_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let mut conn = state.db.conn();
-    let (task, _) = require_task_access(&mut conn, &task_id, &user.id).await?;
+    let (task, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
     require_project_access(&mut conn, &task.project_id, &user.id).await?;
 
+    // Guests see only non-sensitive workflow events. Internal collaboration
+    // detail (comment events, description updates, rejection reasons,
+    // deletions) stays internal: the whitelist is enforced in SQL.
+    let event_filter = if actor.is_guest() {
+        " AND a.event IN ('task_created','task_status_changed','task_priority_changed','task_due_date_changed','task_submitted','task_accepted','task_rejected') "
+    } else {
+        ""
+    };
     let mut args = Args::new();
     args.s(&task_id);
-    let rows = conn
-        .fetch_all(
-            "SELECT a.id, a.task_id, a.event, a.field, a.old_value, a.new_value, a.created_at, \
-                    u.id AS actor_id, u.display_name AS actor_name, u.email AS actor_email \
-             FROM activities a LEFT JOIN users u ON u.id = a.actor_id \
-             WHERE a.task_id = ? ORDER BY a.created_at DESC, a.id DESC LIMIT 100",
-            args,
-        )
-        .await?;
+    let sql = format!(
+        "SELECT a.id, a.task_id, a.event, a.field, a.old_value, a.new_value, a.created_at, \
+            u.id AS actor_id, u.display_name AS actor_name, u.email AS actor_email \
+         FROM activities a LEFT JOIN users u ON u.id = a.actor_id \
+         WHERE a.task_id = ?{event_filter} ORDER BY a.created_at DESC, a.id DESC LIMIT 100"
+    );
+    let rows = conn.fetch_all(&sql, args).await?;
     let items = rows
         .iter()
         .map(|row| {

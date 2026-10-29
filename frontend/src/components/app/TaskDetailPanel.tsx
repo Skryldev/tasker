@@ -16,6 +16,7 @@ import { StatusBadge, PriorityBadge } from "./TaskBadges";
 import { TaskDialog } from "./TaskDialog";
 import { WorkflowActions } from "./WorkflowActions";
 import { CommentBody, CommentComposer } from "./Mentions";
+import { DependenciesPanel } from "./DependenciesPanel";
 import { useToast } from "@/components/ui/toast";
 import { cn, formatDate, timeAgo } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
@@ -203,6 +204,8 @@ export function TaskDetailPanel({
             </ul>
           </section>
         ) : null}
+
+        <DependenciesPanel task={task} />
 
         <Separator className="my-5" />
 

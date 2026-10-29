@@ -13,7 +13,6 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
   let context: BrowserContext;
   let page: Page;
   let teamId = "";
-  let projectId = "";
   let taskId = "";
 
   test.beforeAll(async ({ browser }) => {
@@ -51,16 +50,11 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
     await page.getByTestId("project-name-input").fill("P2 Project");
     await page.getByTestId("project-submit").click();
     await page.getByRole("link", { name: /P2 Project/ }).first().click();
-    projectId = new URL(await page.url()).pathname.split("/").pop() ?? "";
 
     // The admin assigns the member at creation so the member can work it.
     await page.getByTestId("create-task").click();
     await page.getByTestId("task-title-input").fill("Workflow task");
-    const memberResponse = await page.request.get(`/api/v1/teams/${teamId}/members`);
-    const membersBody = await memberResponse.json();
-    const memberId = membersBody.items.find(
-      (m: { role: string }) => m.role === "member",
-    ).user.id;
+    await page.request.get(`/api/v1/teams/${teamId}/members`);
     await page.getByRole("combobox", { name: "Assignee" }).click();
     await page.getByRole("option", { name: "member", exact: false }).first().click();
     await page.getByTestId("task-submit").click();

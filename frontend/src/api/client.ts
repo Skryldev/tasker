@@ -11,6 +11,12 @@ export type TaskUpdate = components["schemas"]["TaskUpdate"];
 export type Comment = components["schemas"]["Comment"];
 export type Activity = components["schemas"]["Activity"];
 export type Notification = components["schemas"]["Notification"];
+export type DependencyEdge = components["schemas"]["DependencyEdge"];
+export type DependencyList = components["schemas"]["DependencyList"];
+export type Workload = components["schemas"]["Workload"];
+export type TaskTemplate = components["schemas"]["TaskTemplate"];
+export type TemplateUpsert = components["schemas"]["TemplateUpsert"];
+export type ProjectGuest = components["schemas"]["ProjectGuest"];
 export type Resolution = NonNullable<Task["resolution"]>;
 export type Board = components["schemas"]["Board"];
 export type BoardColumn = NonNullable<Board["columns"]>[number];
@@ -216,6 +222,66 @@ export const api = {
     return request("post", `/tasks/${taskId}/reject`, {
       body: { reason },
     }) as Promise<Task>;
+  },
+  listDependencies(taskId: string): Promise<DependencyList> {
+    return request("get", `/tasks/${taskId}/dependencies`) as Promise<DependencyList>;
+  },
+  createDependency(taskId: string, predecessorTaskId: string): Promise<DependencyEdge> {
+    return request("post", `/tasks/${taskId}/dependencies`, {
+      body: { predecessor_task_id: predecessorTaskId },
+    }) as Promise<DependencyEdge>;
+  },
+  removeDependency(taskId: string, predecessorTaskId: string): Promise<void> {
+    return request(
+      "delete",
+      `/tasks/${taskId}/dependencies/${predecessorTaskId}`,
+    ) as Promise<void>;
+  },
+  workload(
+    teamId: string,
+    query: { project_id?: string; due_before?: string; due_after?: string },
+  ): Promise<Workload> {
+    return request("get", `/teams/${teamId}/workload`, { query }) as Promise<Workload>;
+  },
+  listTemplates(projectId: string): Promise<{ items: TaskTemplate[] }> {
+    return request(
+      "get",
+      `/projects/${projectId}/templates`,
+    ) as Promise<{ items: TaskTemplate[] }>;
+  },
+  getTemplate(templateId: string): Promise<TaskTemplate> {
+    return request("get", `/templates/${templateId}`) as Promise<TaskTemplate>;
+  },
+  createTemplate(
+    projectId: string,
+    body: TemplateUpsert,
+  ): Promise<TaskTemplate> {
+    return request("post", `/projects/${projectId}/templates`, {
+      body,
+    }) as Promise<TaskTemplate>;
+  },
+  updateTemplate(templateId: string, body: TemplateUpsert): Promise<TaskTemplate> {
+    return request("patch", `/templates/${templateId}`, { body }) as Promise<TaskTemplate>;
+  },
+  deleteTemplate(templateId: string): Promise<void> {
+    return request("delete", `/templates/${templateId}`) as Promise<void>;
+  },
+  listGuests(projectId: string): Promise<{ items: ProjectGuest[] }> {
+    return request(
+      "get",
+      `/projects/${projectId}/guests`,
+    ) as Promise<{ items: ProjectGuest[] }>;
+  },
+  grantGuest(projectId: string, email: string): Promise<ProjectGuest> {
+    return request("post", `/projects/${projectId}/guests`, {
+      body: { email },
+    }) as Promise<ProjectGuest>;
+  },
+  revokeGuest(projectId: string, userId: string): Promise<void> {
+    return request("delete", `/projects/${projectId}/guests/${userId}`) as Promise<void>;
+  },
+  myProjects(): Promise<{ items: Project[] }> {
+    return request("get", "/me/projects") as Promise<{ items: Project[] }>;
   },
   board(projectId: string, pageSize?: number): Promise<Board> {
     return request("get", "/projects/{project_id}/board".replace("{project_id}", projectId), {

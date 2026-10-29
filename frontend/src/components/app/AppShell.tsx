@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   ClipboardList,
   FolderKanban,
+  ListTree,
   ListTodo,
   LogOut,
   Moon,
@@ -79,6 +80,12 @@ function Sidebar() {
               icon={<FolderKanban />}
               label="Projects"
               matchPrefix="/projects"
+            />
+            <SidebarLink
+              to={`/teams/${teamId}/workload`}
+              icon={<ListTree />}
+              label="Workload"
+              matchPrefix="/teams"
             />
             <SidebarLink
               to={`/teams/${teamId}/settings`}

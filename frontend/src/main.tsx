@@ -15,6 +15,8 @@ import { TeamSettingsPage } from "@/pages/TeamSettingsPage";
 import { CreateTeamPage } from "@/pages/CreateTeamPage";
 import { AccountPage } from "@/pages/AccountPage";
 import { TaskPage } from "@/pages/TaskPage";
+import { WorkloadPage } from "@/pages/WorkloadPage";
+import { ProjectGuestsPage } from "@/pages/ProjectGuestsPage";
 import type { ReactNode } from "react";
 
 const queryClient = new QueryClient({
@@ -57,7 +59,9 @@ const router = createBrowserRouter([
       { path: "projects", element: <ProjectsPage /> },
       { path: "projects/:projectId", element: <ProjectPage /> },
       { path: "teams/new", element: <CreateTeamPage /> },
+      { path: "teams/:teamId/workload", element: <WorkloadPage /> },
       { path: "teams/:teamId/settings", element: <TeamSettingsPage /> },
+      { path: "projects/:projectId/guests", element: <ProjectGuestsPage /> },
       { path: "tasks/:taskId", element: <TaskPage /> },
       { path: "account", element: <AccountPage /> },
       { path: "*", element: <Navigate to="/" replace /> },

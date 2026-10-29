@@ -70,6 +70,11 @@ struct TestApp {
 }
 
 async fn spawn_app(url: &str) -> TestApp {
+    // Surface internal error details (incl. sqlx messages) during test runs.
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::ERROR)
+        .with_test_writer()
+        .try_init();
     let config = test_config(url.to_string());
     let db = Database::connect(&config).await.expect("connect");
     db.migrate().await.expect("migrate");
@@ -159,6 +164,25 @@ async fn send_json(
     let response = app
         .clone()
         .oneshot(builder.body(Body::from(body.to_string())).unwrap())
+        .await
+        .unwrap();
+    to_response(response).await
+}
+
+/// Issue a request without a JSON body (DELETE etc.).
+async fn send_request(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    cookie: Option<&str>,
+) -> (StatusCode, Value) {
+    let mut builder = Request::builder().method(method).uri(uri);
+    if let Some(c) = cookie {
+        builder = builder.header(header::COOKIE, c);
+    }
+    let response = app
+        .clone()
+        .oneshot(builder.body(Body::empty()).unwrap())
         .await
         .unwrap();
     to_response(response).await
@@ -1009,5 +1033,1054 @@ async fn workflow_and_notifications_matrix() {
             0,
             "[{engine}] unread filter"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: guests, dependencies, workload, templates
+// ---------------------------------------------------------------------------
+
+/// Comprehensive Phase 3 verification on every engine.
+#[tokio::test]
+async fn phase3_matrix() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let suffix = Uuid::now_v7();
+        let admin_email = format!("admin-{suffix}@test.local");
+        let member_email = format!("member-{suffix}@test.local");
+        let guest_email = format!("guest-{suffix}@test.local");
+        let outsider_email = format!("outsider-{suffix}@test.local");
+        seed_user(&app.db, &admin_email, "Admin").await;
+        seed_user(&app.db, &member_email, "Member").await;
+        seed_user(&app.db, &guest_email, "Guest").await;
+        seed_user(&app.db, &outsider_email, "Outsider").await;
+
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let guest = login_as(&app.app, &guest_email, "test-password-123").await;
+        let outsider = login_as(&app.app, &outsider_email, "test-password-123").await;
+
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name":"T"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role":"member", "temp_password":"member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name":"Shared"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap();
+        let (code, other_project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name":"Private"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let other_project_id = other_project["id"].as_str().unwrap();
+
+        let member_id = {
+            let (code, members) = get_json(
+                &app.app,
+                &format!("/api/v1/teams/{team_id}/members"),
+                &admin,
+            )
+            .await;
+            assert_eq!(code, StatusCode::OK);
+            members["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["role"] == "member")
+                .unwrap()["user"]["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let admin_id = {
+            let (_code, members) = get_json(
+                &app.app,
+                &format!("/api/v1/teams/{team_id}/members"),
+                &admin,
+            )
+            .await;
+            members["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["role"] == "owner")
+                .unwrap()["user"]["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let guest_id = {
+            // fetch the guest user id by logging in and reading /me
+            let (code, me) = get_json(&app.app, "/api/v1/me", &guest).await;
+            assert_eq!(code, StatusCode::OK);
+            me["id"].as_str().unwrap().to_string()
+        };
+
+        // Two tasks in the shared project, one in the private project.
+        let (code, t1) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title":"First","assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let t1_id = t1["id"].as_str().unwrap();
+        let (code, t2) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title":"Second"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let t2_id = t2["id"].as_str().unwrap();
+        let (code, t3) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{other_project_id}/tasks"),
+            Some(&admin),
+            json!({"title":"Private task"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let t3_id = t3["id"].as_str().unwrap();
+
+        // ---- Guest management ------------------------------------------------
+        // Outsiders and guests cannot manage; only Owner/Admin/Manager.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/guests"),
+            Some(&outsider),
+            json!({"email": guest_email}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] outsider grant");
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/guests"),
+            Some(&member),
+            json!({"email": guest_email}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] member grant (needs Manager+)"
+        );
+
+        // Granting to a team member is rejected (pointless/privilege confusion).
+        let (code, problem) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/guests"),
+            Some(&admin),
+            json!({"email": member_email}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] member as guest");
+        assert!(problem["detail"].as_str().unwrap().contains("team member"));
+
+        // Unknown user rejected as validation.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/guests"),
+            Some(&admin),
+            json!({"email": "nobody@nowhere.example"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] unknown guest"
+        );
+
+        // Duplicate grant rejected.
+        let (code, guest_entry) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/guests"),
+            Some(&admin),
+            json!({"email": guest_email}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] grant");
+        assert_eq!(guest_entry["role"], "viewer");
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/guests"),
+            Some(&admin),
+            json!({"email": guest_email}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] duplicate grant");
+
+        // Guest list requires Manager+.
+        // Guests get 404 for the roster (non-disclosure) rather than 403.
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/guests"),
+            &guest,
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] guest lists guests");
+        let (_code, guests) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/guests"),
+            &admin,
+        )
+        .await;
+        assert_eq!(
+            guests["items"].as_array().unwrap().len(),
+            1,
+            "[{engine}] one guest"
+        );
+
+        // ---- Guest read access -----------------------------------------------
+        let (code, p) = get_json(&app.app, &format!("/api/v1/projects/{project_id}"), &guest).await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] guest reads project");
+        assert_eq!(p["is_guest"], true, "[{engine}] guest flag");
+        let (code, tasks) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            &guest,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(
+            tasks["total"].as_i64().unwrap(),
+            2,
+            "[{engine}] guest sees both tasks"
+        );
+        let (code, board) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/board"),
+            &guest,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] guest board");
+        let _ = board;
+
+        // Cross-project/cross-team isolation.
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{other_project_id}"),
+            &guest,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] guest other project"
+        );
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            &outsider,
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] outsider tasks");
+        let (code, _) = get_json(&app.app, &format!("/api/v1/tasks/{t3_id}"), &guest).await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] guest private task");
+
+        // ---- Guest mutations rejected ----------------------------------------
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&guest),
+            json!({"title":"Guest task"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] guest create task");
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{t1_id}"),
+            Some(&guest),
+            json!({"title":"Hacked"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] guest patch task");
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t1_id}/submit"),
+            Some(&guest),
+            json!({}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] guest submit");
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t1_id}/accept"),
+            Some(&guest),
+            json!({}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] guest accept");
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/tasks/{t1_id}"),
+            Some(&guest),
+        )
+        .await;
+        assert!(
+            matches!(code, StatusCode::FORBIDDEN | StatusCode::NOT_FOUND),
+            "[{engine}] guest delete task: {code}"
+        );
+
+        // Comments: internal by default, guests cannot write.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t1_id}/comments"),
+            Some(&guest),
+            json!({"body":"guest comment"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] guest comment");
+        let (code, internal) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t1_id}/comments"),
+            Some(&admin),
+            json!({"body":"internal secret note"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        assert_eq!(
+            internal["guest_visible"], false,
+            "[{engine}] comments internal by default"
+        );
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/comments/{}", internal["id"].as_str().unwrap()),
+            Some(&guest),
+            json!({"body":"hacked"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] guest edit comment");
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/comments/{}", internal["id"].as_str().unwrap()),
+            Some(&guest),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] guest delete comment"
+        );
+
+        // A guest-visible comment IS visible to the guest.
+        let (code, gv) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t1_id}/comments"),
+            Some(&admin),
+            json!({"body":"status note for the guest","guest_visible": true}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        assert_eq!(gv["guest_visible"], true);
+        let (_code, guest_comments) =
+            get_json(&app.app, &format!("/api/v1/tasks/{t1_id}/comments"), &guest).await;
+        assert!(
+            !guest_comments["items"].is_null(),
+            "[debug] guest comments: {guest_comments}"
+        );
+        let seen: Vec<&str> = guest_comments["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["body"].as_str().unwrap())
+            .collect();
+        assert!(
+            seen.contains(&"status note for the guest"),
+            "[{engine}] guest sees visible comment"
+        );
+        assert!(
+            !seen.contains(&"internal secret note"),
+            "[{engine}] internal comment hidden"
+        );
+
+        // Activity: guest sees the whitelist only (no comment events, no
+        // rejection reasons). Internal events remain for members.
+        let (_code, guest_activity) =
+            get_json(&app.app, &format!("/api/v1/tasks/{t1_id}/activity"), &guest).await;
+        let guest_events: Vec<&str> = guest_activity["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["event"].as_str().unwrap())
+            .collect();
+        assert!(
+            !guest_events.contains(&"comment_added"),
+            "[{engine}] comment events hidden"
+        );
+        assert!(
+            !guest_events.contains(&"task_rejection_reason"),
+            "[{engine}] rejection reasons hidden"
+        );
+        assert!(
+            guest_events.contains(&"task_created"),
+            "[{engine}] whitelist present: {guest_events:?}"
+        );
+        let (_code, member_activity) =
+            get_json(&app.app, &format!("/api/v1/tasks/{t1_id}/activity"), &admin).await;
+        let member_events: Vec<&str> = member_activity["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["event"].as_str().unwrap())
+            .collect();
+        assert!(
+            member_events.contains(&"comment_added"),
+            "[{engine}] members see internal events"
+        );
+
+        // Team settings + guests management + workload remain out of reach.
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/members"),
+            &guest,
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] guest team members");
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/teams/{team_id}"),
+            Some(&guest),
+            json!({"name":"Hacked"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] guest team settings"
+        );
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/workload"),
+            &guest,
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] guest workload");
+
+        // Templates hidden from guests.
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/templates"),
+            &guest,
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] guest templates");
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/templates"),
+            Some(&guest),
+            json!({"name":"T","default_title":"X"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] guest create template"
+        );
+
+        // ---- Revocation is immediate ------------------------------------------
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/projects/{project_id}/guests/{guest_id}"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] revoke");
+        let (code, _) = get_json(&app.app, &format!("/api/v1/projects/{project_id}"), &guest).await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] revoked project read"
+        );
+        let (code, _) = get_json(&app.app, &format!("/api/v1/tasks/{t1_id}"), &guest).await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] revoked task read");
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/projects/{project_id}/guests/{guest_id}"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] double revoke");
+
+        // Re-grant for dependency tests.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/guests"),
+            Some(&admin),
+            json!({"email": guest_email}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, _) = get_json(&app.app, &format!("/api/v1/tasks/{t1_id}"), &guest).await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] re-granted read");
+
+        // ---- Dependencies ------------------------------------------------------
+        // Guest cannot create; can read.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t2_id}/dependencies"),
+            Some(&guest),
+            json!({"predecessor_task_id": t1_id}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] guest dependency create"
+        );
+        let (code, deps) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{t2_id}/dependencies"),
+            &guest,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] guest dependency list");
+        assert_eq!(deps["can_manage"], false);
+
+        // Valid edge: t1 blocks t2.
+        let (code, edge) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t2_id}/dependencies"),
+            Some(&member),
+            json!({"predecessor_task_id": t1_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] create edge");
+        assert_eq!(edge["predecessor_task_id"].as_str().unwrap(), t1_id);
+
+        // Duplicate rejected.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t2_id}/dependencies"),
+            Some(&member),
+            json!({"predecessor_task_id": t1_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] duplicate edge");
+
+        // Self-dependency rejected.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t1_id}/dependencies"),
+            Some(&member),
+            json!({"predecessor_task_id": t1_id}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] self edge"
+        );
+
+        // Two-node cycle rejected.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t1_id}/dependencies"),
+            Some(&member),
+            json!({"predecessor_task_id": t2_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] two-node cycle");
+
+        // Cross-project predecessor rejected.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t2_id}/dependencies"),
+            Some(&member),
+            json!({"predecessor_task_id": t3_id}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] cross-project"
+        );
+
+        // Unknown predecessor rejected.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t2_id}/dependencies"),
+            Some(&member),
+            json!({"predecessor_task_id":"00000000-0000-0000-0000-000000000000"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] unknown predecessor"
+        );
+
+        // Multi-node cycle: create t2→t3' chain inside shared project with a
+        // third task, then attempt the closing edge.
+        let (_code, t4) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title":"Third"}),
+        )
+        .await;
+        let t4_id = t4["id"].as_str().unwrap();
+        // t1 → t4 (t1 before t4)
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t4_id}/dependencies"),
+            Some(&member),
+            json!({"predecessor_task_id": t1_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] chain 1");
+        // t4 → t2: now t2 depends on t4 depends on t1.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t2_id}/dependencies"),
+            Some(&member),
+            json!({"predecessor_task_id": t4_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] chain 2");
+        // Closing edge t2 → t1 would make: t2→t1, t1→t4→t2 → cycle.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t1_id}/dependencies"),
+            Some(&member),
+            json!({"predecessor_task_id": t2_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] multi-node cycle");
+
+        // Blockers/successors listing correct.
+        let (_code, deps) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{t2_id}/dependencies"),
+            &member,
+        )
+        .await;
+        let blockers = deps["blockers"].as_array().unwrap();
+        assert_eq!(blockers.len(), 2, "[{engine}] t2 has 2 blockers");
+        let (_code, deps) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{t1_id}/dependencies"),
+            &member,
+        )
+        .await;
+        // t1 blocks t2 (the first edge) and t4.
+        let blocked_ids: Vec<&str> = deps["blocked"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| b["task_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(blocked_ids.len(), 2, "[{engine}] t1 blocks t2 and t4");
+        assert!(blocked_ids.contains(&t4_id));
+
+        // Deleting a task cascades its edges.
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/tasks/{t4_id}"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] delete t4");
+        let (_code, deps) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{t2_id}/dependencies"),
+            &member,
+        )
+        .await;
+        let blockers = deps["blockers"].as_array().unwrap();
+        assert_eq!(blockers.len(), 1, "[{engine}] t4 edges cascaded");
+        assert_eq!(blockers[0]["task_id"].as_str().unwrap(), t1_id);
+
+        // Outsider cannot create dependencies.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t2_id}/dependencies"),
+            Some(&outsider),
+            json!({"predecessor_task_id": t1_id}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] outsider dependency"
+        );
+
+        // Removing the edge works.
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/tasks/{t2_id}/dependencies/{t1_id}"),
+            Some(&member),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] remove edge");
+        let (_code, deps) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{t2_id}/dependencies"),
+            &member,
+        )
+        .await;
+        assert_eq!(
+            deps["blockers"].as_array().unwrap().len(),
+            0,
+            "[{engine}] edge removed"
+        );
+
+        // ---- Workload -----------------------------------------------------------
+        let (code, workload) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/workload"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] workload");
+        let members_list = workload["members"].as_array().unwrap();
+        // t2 is unassigned (created by admin) — workload counts ASSIGNED tasks
+        // per member, so only the member row exists with t1.
+        assert!(
+            members_list
+                .iter()
+                .all(|m| m["user"]["id"] != json!(admin_id)),
+            "[{engine}] admin has no assigned tasks"
+        );
+        let member_row = members_list
+            .iter()
+            .find(|m| m["user"]["id"] == json!(member_id))
+            .expect("member row");
+        assert_eq!(
+            member_row["total"].as_i64().unwrap(),
+            1,
+            "[{engine}] member owns t1"
+        );
+        assert_eq!(member_row["by_status"]["backlog"].as_i64().unwrap(), 1);
+        // No overdue: no due dates set.
+        assert_eq!(member_row["overdue"].as_i64().unwrap(), 0);
+
+        // Unassigned: t2 (t1 assigned to member). Private project task excluded
+        // only when filtering by project; team-wide includes all team tasks.
+        assert!(
+            workload["unassigned"]["total"].as_i64().unwrap() >= 1,
+            "[{engine}] unassigned present"
+        );
+
+        // Project filter scopes the aggregation.
+        let (code, scoped) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/workload?project_id={project_id}"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(
+            scoped["unassigned"]["total"].as_i64().unwrap(),
+            1,
+            "[{engine}] project filter"
+        );
+
+        // Date filter: due today → overdue when due_before is today and open.
+        let today = "2026-01-15";
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{t1_id}"),
+            Some(&admin),
+            json!({"due_date": today}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let (code, dated) = get_json(
+            &app.app,
+            &format!(
+                "/api/v1/teams/{team_id}/workload?due_before=2026-01-15&project_id={project_id}"
+            ),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let member_row = dated["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["user"]["id"] == json!(member_id))
+            .expect("member row");
+        // due_before 2026-01-15 includes due 2026-01-15; status backlog ≠ done → counted in the bucket
+        assert_eq!(member_row["by_status"]["backlog"].as_i64().unwrap(), 1);
+
+        // Guest workload → 404 (team-scoped).
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/workload"),
+            &guest,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] guest workload after regrant"
+        );
+
+        // Invalid date filter rejected.
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/workload?due_before=not-a-date"),
+            &admin,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] bad date"
+        );
+
+        // ---- Templates -----------------------------------------------------------
+        let label = {
+            let (code, l) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/teams/{team_id}/labels"),
+                Some(&admin),
+                json!({"name":"from-template"}),
+            )
+            .await;
+            assert_eq!(code, StatusCode::CREATED);
+            l["id"].as_str().unwrap().to_string()
+        };
+
+        // Member (role member) cannot manage; admin can.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/templates"),
+            Some(&member),
+            json!({"name":"M","default_title":"T"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] member template create"
+        );
+
+        let (code, template) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/templates"),
+            Some(&admin),
+            json!({
+                "name":"Bug report",
+                "default_title":"[Bug] ",
+                "default_description":"Steps to reproduce:\n1. ",
+                "default_priority":"high",
+                "label_ids":[label],
+            }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] template create");
+        assert_eq!(template["default_priority"], "high");
+        assert_eq!(template["label_ids"].as_array().unwrap().len(), 1);
+        let template_id = template["id"].as_str().unwrap().to_string();
+
+        // Invalid priority rejected.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/templates"),
+            Some(&admin),
+            json!({"name":"X","default_title":"T","default_priority":"bogus"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] bad priority"
+        );
+
+        // Unknown label rejected.
+        let (code, _) = send_json(&app.app, "POST", &format!("/api/v1/projects/{project_id}/templates"),
+            Some(&admin), json!({"name":"X","default_title":"T","label_ids":["00000000-0000-0000-0000-000000000000"]})).await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] bad label"
+        );
+
+        // List is project-scoped.
+        let (_code, templates) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{other_project_id}/templates"),
+            &admin,
+        )
+        .await;
+        assert_eq!(
+            templates["items"].as_array().unwrap().len(),
+            0,
+            "[{engine}] project scoping"
+        );
+        let (_code, templates) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/templates"),
+            &admin,
+        )
+        .await;
+        assert_eq!(
+            templates["items"].as_array().unwrap().len(),
+            1,
+            "[{engine}] template listed"
+        );
+
+        // Update the template: priority back to medium, drop labels.
+        let (code, updated) = send_json(&app.app, "PATCH", &format!("/api/v1/templates/{template_id}"),
+            Some(&admin), json!({"name":"Bug report v2","default_title":"[Bug] ","default_priority":"medium","label_ids":[]})).await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] template update");
+        assert_eq!(updated["name"], "Bug report v2");
+        assert_eq!(updated["default_priority"], "medium");
+
+        // Create a task from the template (member allowed) with an edited title.
+        let (code, from_template) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&member),
+            json!({
+                "title":"[Bug] Login page explodes",
+                "description":"Steps to reproduce:\n1. Open /login",
+                "priority":"medium",
+                "label_ids":[label],
+                "assignee_id": member_id,
+            }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] task from template");
+        assert_eq!(
+            from_template["priority"], "medium",
+            "[{engine}] edited priority honored"
+        );
+        assert_eq!(
+            from_template["labels"].as_array().unwrap().len(),
+            1,
+            "[{engine}] labels applied"
+        );
+        assert_eq!(
+            from_template["reporter"]["id"].as_str().unwrap(),
+            member_id,
+            "[{engine}] default reporter is creator"
+        );
+
+        // Template updates never touch created tasks.
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/templates/{template_id}"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] template delete");
+        let (code, task_after) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{}", from_template["id"].as_str().unwrap()),
+            &member,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::OK,
+            "[{engine}] created task survives template delete"
+        );
+        assert_eq!(task_after["title"], "[Bug] Login page explodes");
+
+        // Template status restrictions: creation via normal flow, so done is
+        // rejected (already covered in Phase 2 matrix; asserted once here).
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&member),
+            json!({"title":"X","status":"done"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] workflow restriction intact"
+        );
+
+        // Members retain normal task permissions (regression guard).
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{t1_id}"),
+            Some(&member),
+            json!({"priority":"low"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] member update regression");
+        let (code, _) =
+            get_json(&app.app, &format!("/api/v1/projects/{project_id}"), &member).await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] member read regression");
     }
 }

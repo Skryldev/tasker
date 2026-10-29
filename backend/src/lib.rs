@@ -19,6 +19,7 @@ pub mod state;
 pub mod tasks;
 pub mod teams;
 pub mod users;
+pub mod workspace;
 
 pub mod util {
     //! Small shared helpers (time, ids, validation).
@@ -81,6 +82,19 @@ pub mod util {
             out.push(c);
         }
         out
+    }
+
+    /// Today's date as an ISO `YYYY-MM-DD` string (UTC), for overdue checks
+    /// against the TEXT `due_date` column.
+    #[must_use]
+    pub fn parse_today_iso() -> String {
+        let now = time::OffsetDateTime::now_utc().date();
+        format!(
+            "{:04}-{:02}-{:02}",
+            now.year(),
+            u8::from(now.month()),
+            now.day()
+        )
     }
 
     /// Truncate a string at a char boundary (used to bound stored metadata).

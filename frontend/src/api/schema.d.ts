@@ -1644,6 +1644,491 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{task_id}/dependencies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List dependency relations for a task
+         * @description `blockers` are tasks that must finish before this task;
+         *     `blocked` are tasks waiting on this one. Read-only for guests.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    task_id: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Dependency relations. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DependencyList"];
+                    };
+                };
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /**
+         * Add a finish-to-start dependency
+         * @description The predecessor must finish before this task starts. Both tasks must
+         *     belong to the same project. Self-dependencies, duplicates and cycles
+         *     are rejected with 422/409. Team members only (guests read-only).
+         *     Dependency mutations serialize per project; the cycle check is
+         *     therefore race-free.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    task_id: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        predecessor_task_id: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Dependency created. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DependencyEdge"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/dependencies/{predecessor_task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a dependency edge */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    task_id: components["parameters"]["TaskId"];
+                    predecessor_task_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Edge removed. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/workload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Team workload aggregation (assigned task distribution)
+         * @description Server-side SQL aggregation grouped by assignee. Counts open tasks by
+         *     status and priority plus an overdue count (due date before today UTC
+         *     and status not done). This is task distribution, NOT effort or
+         *     capacity. Requires team membership; guests receive 404.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    project_id?: string;
+                    due_before?: string;
+                    due_after?: string;
+                };
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Per-member aggregates and unassigned summary. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Workload"];
+                    };
+                };
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List project task templates (team members only) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    project_id: components["parameters"]["ProjectId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Templates ordered by name. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["TaskTemplate"][];
+                        };
+                    };
+                };
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /** Create a template (Manager+) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    project_id: components["parameters"]["ProjectId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TemplateUpsert"];
+                };
+            };
+            responses: {
+                /** @description Template created. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskTemplate"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/templates/{template_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Template detail (team members only) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    template_id: components["parameters"]["TemplateId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Template with label defaults. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskTemplate"];
+                    };
+                };
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        /** Delete a template (Manager+). Created tasks are unaffected. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    template_id: components["parameters"]["TemplateId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Update a template (Manager+) */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    template_id: components["parameters"]["TemplateId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TemplateUpsert"];
+                };
+            };
+            responses: {
+                /** @description Updated template. Existing tasks are unaffected. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskTemplate"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        trace?: never;
+    };
+    "/projects/{project_id}/guests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List project guests (Manager+; 404 for guests) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    project_id: components["parameters"]["ProjectId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Guest roster. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["ProjectGuest"][];
+                        };
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /** Grant read-only access to an existing user (Manager+) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    project_id: components["parameters"]["ProjectId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: email */
+                        email: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Guest granted viewer access. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectGuest"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/guests/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke guest access (Manager+). Takes effect immediately. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    project_id: components["parameters"]["ProjectId"];
+                    user_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Revoked. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Projects explicitly shared with the caller (guest access) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Guest-visible projects, oldest first. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["Project"][];
+                        };
+                    };
+                };
+                401: components["responses"]["Problem401"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live": {
         parameters: {
             query?: never;
@@ -1821,6 +2306,8 @@ export interface components {
             open_task_count?: number;
             /** @enum {string|null} */
             my_role?: "owner" | "admin" | "manager" | "member" | null;
+            /** @description True when the caller reaches this project through a guest grant (read-only). */
+            is_guest?: boolean;
         };
         TaskCreate: {
             title: string;
@@ -1946,6 +2433,86 @@ export interface components {
             page_size: number;
             total: number;
         };
+        DependencyEdge: {
+            /** Format: uuid */
+            predecessor_task_id: string;
+            /** Format: uuid */
+            successor_task_id: string;
+            created_at: number;
+        };
+        DependencyTaskRef: {
+            /** Format: uuid */
+            task_id: string;
+            title: string;
+            /** @enum {string} */
+            status: "backlog" | "todo" | "in_progress" | "in_review" | "done";
+            /** Format: date */
+            due_date?: string | null;
+        };
+        DependencyList: {
+            /** @description Tasks that must finish before this task. */
+            blockers: components["schemas"]["DependencyTaskRef"][];
+            /** @description Tasks waiting on this task. */
+            blocked: components["schemas"]["DependencyTaskRef"][];
+            /** @description False for project guests. */
+            can_manage: boolean;
+        };
+        Workload: {
+            members: {
+                user: components["schemas"]["UserBrief"];
+                /** @description Status -> open task count. */
+                by_status: {
+                    [key: string]: number;
+                };
+                /** @description Priority -> open task count. */
+                by_priority: {
+                    [key: string]: number;
+                };
+                overdue: number;
+                total: number;
+            }[];
+            unassigned: {
+                by_status: {
+                    [key: string]: number;
+                };
+                by_priority: {
+                    [key: string]: number;
+                };
+                overdue: number;
+                total: number;
+            };
+            generated_at: number;
+        };
+        TaskTemplate: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            project_id: string;
+            name: string;
+            default_title: string;
+            default_description?: string | null;
+            /** @enum {string} */
+            default_priority: "low" | "medium" | "high" | "urgent";
+            label_ids: string[];
+            created_by?: components["schemas"]["UserBrief"] | null;
+            created_at: number;
+            updated_at: number;
+        };
+        TemplateUpsert: {
+            name: string;
+            default_title: string;
+            default_description?: string;
+            /** @enum {string} */
+            default_priority?: "low" | "medium" | "high" | "urgent";
+            label_ids?: string[];
+        };
+        ProjectGuest: {
+            user: components["schemas"]["UserBrief"];
+            /** @enum {string} */
+            role: "viewer";
+            created_at: number;
+            granted_by?: components["schemas"]["UserBrief"] | null;
+        };
         Board: {
             /** Format: uuid */
             project_id: string;
@@ -2039,6 +2606,7 @@ export interface components {
         TeamId: string;
         ProjectId: string;
         TaskId: string;
+        TemplateId: string;
         CommentId: string;
         UserId: string;
         Page: number;

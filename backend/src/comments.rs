@@ -39,11 +39,16 @@ pub struct Comment {
     pub task_id: String,
     pub author: UserBrief,
     pub body: String,
+    /// True when the comment is explicitly visible to project guests.
+    /// Internal by default; only team members can set or change it.
+    pub guest_visible: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }
 
-const COMMENT_COLUMNS: &str = "c.id, c.task_id, c.author_id, c.body, c.created_at, c.updated_at, u.email AS author_email, u.display_name AS author_name";
+// `guest_visible` is normalized to an integer in SQL: PG returns a real
+// BOOLEAN while MySQL/SQLite return 0/1 integers through the portable layer.
+const COMMENT_COLUMNS: &str = "c.id, c.task_id, c.author_id, c.body,      CASE WHEN c.guest_visible THEN 1 ELSE 0 END AS guest_visible,      c.created_at, c.updated_at, u.email AS author_email, u.display_name AS author_name";
 
 fn row_to_comment(row: &sqlx::any::AnyRow) -> Result<Comment, AppError> {
     Ok(Comment {
@@ -55,6 +60,7 @@ fn row_to_comment(row: &sqlx::any::AnyRow) -> Result<Comment, AppError> {
             email: row.try_get("author_email")?,
         },
         body: row.try_get("body")?,
+        guest_visible: row.try_get::<i64, _>("guest_visible")? != 0,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
     })
@@ -187,7 +193,15 @@ async fn list_comments(
     Query(query): Query<ListCommentsQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let mut conn = state.db.conn();
-    require_task_access(&mut conn, &task_id, &user.id).await?;
+    let (_, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
+    // Guests see only comments explicitly marked visible to them. The filter
+    // is alias-free: the count query reads `FROM comments` without an alias,
+    // and the list query has no other table carrying the column.
+    let visibility = if actor.is_guest() {
+        " AND guest_visible = TRUE"
+    } else {
+        ""
+    };
     let page = query.page.unwrap_or(1).max(1);
     let page_size = query.page_size.unwrap_or(50).clamp(1, 100);
     let offset = i64::from(page - 1) * i64::from(page_size);
@@ -195,7 +209,10 @@ async fn list_comments(
     let mut args = Args::new();
     args.s(&task_id);
     let total = conn
-        .fetch_optional("SELECT COUNT(*) AS n FROM comments WHERE task_id = ?", args)
+        .fetch_optional(
+            &format!("SELECT COUNT(*) AS n FROM comments WHERE task_id = ?{visibility}"),
+            args,
+        )
         .await?
         .map_or(0, |r| r.try_get::<i64, _>("n").unwrap_or(0));
 
@@ -205,7 +222,7 @@ async fn list_comments(
         .fetch_all(
             &format!(
                 "SELECT {COMMENT_COLUMNS} FROM comments c JOIN users u ON u.id = c.author_id \
-                 WHERE c.task_id = ? ORDER BY c.created_at, c.id LIMIT ? OFFSET ?"
+                 WHERE c.task_id = ?{visibility} ORDER BY c.created_at, c.id LIMIT ? OFFSET ?"
             ),
             args,
         )
@@ -222,6 +239,10 @@ async fn list_comments(
 #[derive(Deserialize)]
 pub struct CreateCommentRequest {
     pub body: String,
+    /// Mark the comment visible to project guests. Ignored (false) for
+    /// callers without team membership; guests cannot create comments.
+    #[serde(default)]
+    pub guest_visible: bool,
 }
 
 async fn create_comment(
@@ -232,14 +253,28 @@ async fn create_comment(
 ) -> Result<(StatusCode, Json<Comment>), AppError> {
     let body = validate_body(&payload.body)?;
     let mut conn = state.db.begin().await?;
-    let (task, _) = require_task_access(&mut conn, &task_id, &user.id).await?;
+    let (task, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
+    if actor.is_guest() {
+        return Err(AppError::Forbidden(
+            "guests have read-only access and cannot comment",
+        ));
+    }
+    // Internal by default; only team members may publish a guest-visible note.
+    let guest_visible = payload.guest_visible && !actor.is_guest();
 
     let id = util::new_id();
     let now = util::now_ms();
     let mut args = Args::new();
-    args.s(&id).s(&task_id).s(&user.id).s(&body).i(now).i(now);
+    args.s(&id)
+        .s(&task_id)
+        .s(&user.id)
+        .s(&body)
+        .b(guest_visible)
+        .i(now)
+        .i(now);
     conn.execute(
-        "INSERT INTO comments (id, task_id, author_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO comments (id, task_id, author_id, body, guest_visible, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
         args,
     )
     .await?;
@@ -280,6 +315,7 @@ async fn create_comment(
                 email: user.email,
             },
             body,
+            guest_visible,
             created_at: now,
             updated_at: now,
         }),
@@ -300,9 +336,9 @@ async fn update_comment(
     let body = validate_body(&payload.body)?;
     let mut conn = state.db.begin().await?;
     let comment = find_comment(&mut conn, &comment_id).await?;
-    let (task, membership) = require_task_access(&mut conn, &comment.task_id, &user.id).await?;
+    let (task, actor) = require_task_access(&mut conn, &comment.task_id, &user.id).await?;
 
-    let can_edit_any = membership.role.can(Capability::EditAnyComment);
+    let can_edit_any = actor.can(Capability::EditAnyComment);
     if comment.author.id != user.id && !can_edit_any {
         return Err(AppError::Forbidden("you can only edit your own comments"));
     }
@@ -357,9 +393,9 @@ async fn delete_comment(
 ) -> Result<StatusCode, AppError> {
     let mut conn = state.db.begin().await?;
     let comment = find_comment(&mut conn, &comment_id).await?;
-    let (task, membership) = require_task_access(&mut conn, &comment.task_id, &user.id).await?;
+    let (task, actor) = require_task_access(&mut conn, &comment.task_id, &user.id).await?;
 
-    let can_delete_any = membership.role.can(Capability::DeleteAnyComment);
+    let can_delete_any = actor.can(Capability::DeleteAnyComment);
     if comment.author.id != user.id && !can_delete_any {
         return Err(AppError::Forbidden("you can only delete your own comments"));
     }
