@@ -137,6 +137,20 @@ notifications in the same transaction.
 - **Templates**: project-scoped defaults feeding the standard task
   creation flow (no parallel creation path).
 
+## Phase 4: Goals & Key Results
+
+`goals.rs` implements team-level objectives with a validated lifecycle
+(draft → active → completed/cancelled + explicit reopen) and server-computed
+key-result progress (increase/decrease/boolean — clamped linear formulas in
+one pure function). Overall progress is the mean of key-result progress or
+`null` when none exist; activation requires at least one key result;
+reaching 100% never auto-completes. Goal↔project/task associations are
+same-team, non-owning links; the goal detail exposes a task execution
+summary that is explicitly distinct from measured outcome progress. Goal
+events are written transactionally to the existing activities table via a
+nullable `goal_id` column. Authorization uses the existing matrix
+(`ManageGoals`: Owner/Admin/Manager); guests receive the standard 404.
+
 ## Deliberate non-goals (Phase 1)
 
 Event sourcing, microservices, workflow builders, custom fields, e-mail

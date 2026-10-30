@@ -76,6 +76,6 @@ format_push_string = "allow"
 too_many_lines = "allow"
 # Workflow permission checks take (assignee, reporter, override, manager) flags.
 type_complexity = "allow"
-functions_max_lines = "allow"
+
 # plan_transition arms share fallthrough bodies by design.
 match_same_arms = "allow"

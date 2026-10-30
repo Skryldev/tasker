@@ -11,6 +11,7 @@ pub mod comments;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod goals;
 pub mod http;
 pub mod notifications;
 pub mod projects;

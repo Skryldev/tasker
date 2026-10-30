@@ -70,6 +70,16 @@ comment visible), and the guest activity feed is whitelisted to
 non-sensitive workflow events. Revocation is a row delete; the next
 request re-resolves and denies access.
 
+## Goals (Phase 4)
+
+Goals are team-scoped and invisible to guests: every goal endpoint resolves
+the caller through `require_goal_access`, which 404s anyone without team
+membership (including project guests — a guest grant to one project never
+confers visibility of team goals or their key results/summaries). Owner
+changes validate team membership; project/task associations validate
+same-team membership on both sides; all operations require the
+`ManageGoals` capability (Owner/Admin/Manager) for mutations.
+
 ## CSRF
 
 Cookie authentication requires cross-site request protection. Tasker layers

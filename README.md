@@ -68,6 +68,8 @@ SQLite and MySQL profiles: `docker compose --profile sqlite up -d --build`,
 - Task dependencies (finish-to-start) with cycle prevention
 - Team workload view (server-side aggregation, filters)
 - Project task templates (reusable defaults for new tasks)
+- Team Goals & Key Results: objectives with increase/decrease/boolean
+  metrics, server-computed progress, lifecycle, and contributing-work links
 - List and Kanban (drag-and-drop) views, My Tasks across teams
 - Light/dark themes, responsive shell, loading/empty/error states
 - Health/readiness endpoints, graceful shutdown, Prometheus-style metrics

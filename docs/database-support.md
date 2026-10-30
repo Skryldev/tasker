@@ -94,6 +94,16 @@ backfill: existing comments stay internal) with supporting indexes on all
 three engines. Applied by the same locked runner; verified fresh-install
 and upgrade paths on SQLite, PostgreSQL, and MariaDB.
 
+## Migration 0004 (Phase 4)
+
+Adds `goals`, `key_results`, `goal_projects`, and `goal_tasks` with FK
+cascades (goal deletion cascades key results and association rows; project
+and task deletion cleans up association rows while the goal survives), a
+CHECK-constrained goal status and metric type, indexes on team listing,
+key-result lookup, and association joins, plus a nullable
+`activities.goal_id` for goal-scoped history. Verified fresh-install and
+upgrade paths on SQLite, PostgreSQL, and MariaDB.
+
 ## Backup and restore
 
 - **SQLite**: stop the server (or use `sqlite3 tasker.db ".backup …"` on a

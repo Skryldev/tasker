@@ -15,6 +15,9 @@
       "name": "auth"
     },
     {
+      "name": "goals"
+    },
+    {
       "name": "templates"
     },
     {
@@ -2290,6 +2293,819 @@
         }
       }
     },
+    "/teams/{team_id}/goals": {
+      "get": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "List team goals (team members only)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "active",
+                "completed",
+                "cancelled"
+              ]
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Team goals, newest first, with measured progress.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "page",
+                    "page_size",
+                    "total"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Goal"
+                      }
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "page_size": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Create a goal (Manager+)",
+        "description": "New goals start in `draft` with the caller as default owner.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 250
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 5000
+                  },
+                  "owner_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Team member; defaults to the caller."
+                  },
+                  "start_date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "due_date": {
+                    "type": "string",
+                    "format": "date"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Goal created in `draft`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Goal"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/goals/{goal_id}": {
+      "get": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Goal detail with key results, associations and execution stats",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GoalId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full goal view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoalDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Update goal metadata (Manager+). Never changes status.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GoalId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 250
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 5000
+                  },
+                  "owner_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Team member."
+                  },
+                  "start_date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "due_date": {
+                    "type": "string",
+                    "format": "date"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated goal.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Goal"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Delete a goal (Manager+). Cascades key results and associations; projects and tasks survive.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GoalId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/goals/{goal_id}/status": {
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Explicit lifecycle transition (Manager+)",
+        "description": "Allowed: draft→active, draft→cancelled, active→completed,\nactive→cancelled, completed→active (reopen), cancelled→active\n(reopen). Activation requires at least one key result. Reaching 100%\nkey-result progress does NOT complete a goal automatically.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GoalId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "active",
+                      "completed",
+                      "cancelled"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transitioned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Goal"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/goals/{goal_id}/activity": {
+      "get": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Goal activity history (team members only)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GoalId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Goal events, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/GoalActivity"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/goals/{goal_id}/key-results": {
+      "get": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "List key results (team members only)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GoalId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Key results ordered by position.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/KeyResult"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Add a key result (Manager+)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GoalId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyResultUpsert"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Key result created; progress computed server-side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/key-results/{key_result_id}": {
+      "get": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Key result detail (team members only)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/KeyResultId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The key result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Update a key result (Manager+). Merge semantics; progress recomputed server-side.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/KeyResultId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyResultUpsert"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated key result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Delete a key result (Manager+)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/KeyResultId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/goals/{goal_id}/projects": {
+      "get": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Projects associated with the goal (team members only)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GoalId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Associated projects.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "status"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "active",
+                              "archived"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Associate a same-team project (Manager+)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GoalId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "project_id"
+                ],
+                "properties": {
+                  "project_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Associated."
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/goals/{goal_id}/projects/{project_id}": {
+      "delete": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Remove a project association (Manager+). The project survives.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GoalId"
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Disassociated."
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/goals/{goal_id}/tasks": {
+      "get": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Tasks associated with the goal (team members only)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GoalId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Associated tasks.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "title",
+                          "status"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "backlog",
+                              "todo",
+                              "in_progress",
+                              "in_review",
+                              "done"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Associate a same-team task (Manager+)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GoalId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "task_id"
+                ],
+                "properties": {
+                  "task_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Associated."
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/goals/{goal_id}/tasks/{task_id}": {
+      "delete": {
+        "tags": [
+          "goals"
+        ],
+        "summary": "Remove a task association (Manager+). The task survives.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GoalId"
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Disassociated."
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "tags": [
@@ -2415,6 +3231,24 @@
       },
       "TemplateId": {
         "name": "template_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "GoalId": {
+        "name": "goal_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "KeyResultId": {
+        "name": "key_result_id",
         "in": "path",
         "required": true,
         "schema": {
@@ -3613,6 +4447,396 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "Goal": {
+        "type": "object",
+        "required": [
+          "id",
+          "team_id",
+          "title",
+          "owner",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "team_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "owner": {
+            "$ref": "#/components/schemas/UserBrief"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "completed",
+              "cancelled"
+            ]
+          },
+          "start_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "due_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "created_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UserBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completed_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "integer"
+          },
+          "progress": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Mean key-result progress (0-100); null with no key results."
+          },
+          "key_result_count": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "KeyResult": {
+        "type": "object",
+        "required": [
+          "id",
+          "goal_id",
+          "title",
+          "metric_type",
+          "current_value",
+          "progress",
+          "position",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "goal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "metric_type": {
+            "type": "string",
+            "enum": [
+              "increase",
+              "decrease",
+              "boolean"
+            ]
+          },
+          "start_value": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "current_value": {
+            "type": "number"
+          },
+          "target_value": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 30
+          },
+          "progress": {
+            "type": "number",
+            "description": "Server-computed 0-100; clamped. 100% means the metric target was reached."
+          },
+          "position": {
+            "type": "number"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "KeyResultUpsert": {
+        "type": "object",
+        "required": [
+          "title",
+          "metric_type"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 250
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 5000
+          },
+          "metric_type": {
+            "type": "string",
+            "enum": [
+              "increase",
+              "decrease",
+              "boolean"
+            ]
+          },
+          "start_value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Required for increase/decrease."
+          },
+          "current_value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Defaults to start_value (numeric) or 0 (boolean); boolean accepts 0/1 only."
+          },
+          "target_value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Required for increase/decrease."
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 30
+          }
+        }
+      },
+      "GoalDetail": {
+        "type": "object",
+        "required": [
+          "goal",
+          "key_results",
+          "projects",
+          "tasks",
+          "execution"
+        ],
+        "properties": {
+          "goal": {
+            "$ref": "#/components/schemas/Goal"
+          },
+          "key_results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KeyResult"
+            }
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "status"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "archived"
+                  ]
+                }
+              }
+            }
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "title",
+                "status"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "backlog",
+                    "todo",
+                    "in_progress",
+                    "in_review",
+                    "done"
+                  ]
+                }
+              }
+            }
+          },
+          "execution": {
+            "type": "object",
+            "description": "Task execution statistics — NOT key-result achievement.",
+            "required": [
+              "total",
+              "by_status",
+              "completed"
+            ],
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "by_status": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                }
+              },
+              "completed": {
+                "type": "integer"
+              },
+              "completion_percent": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "GoalActivity": {
+        "type": "object",
+        "required": [
+          "id",
+          "event",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "goal_created",
+              "goal_updated",
+              "goal_status_changed",
+              "goal_deleted",
+              "goal_key_result_created",
+              "goal_key_result_updated",
+              "goal_key_result_deleted",
+              "goal_project_associated",
+              "goal_project_disassociated",
+              "goal_task_associated",
+              "goal_task_disassociated"
+            ]
+          },
+          "field": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "old_value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "new_value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "actor": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UserBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "integer"
           }
         }
       },

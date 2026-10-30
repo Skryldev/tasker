@@ -16,6 +16,8 @@ import { CreateTeamPage } from "@/pages/CreateTeamPage";
 import { AccountPage } from "@/pages/AccountPage";
 import { TaskPage } from "@/pages/TaskPage";
 import { WorkloadPage } from "@/pages/WorkloadPage";
+import { GoalsPage } from "@/pages/GoalsPage";
+import { GoalDetailPage } from "@/pages/GoalDetailPage";
 import { ProjectGuestsPage } from "@/pages/ProjectGuestsPage";
 import type { ReactNode } from "react";
 
@@ -60,6 +62,8 @@ const router = createBrowserRouter([
       { path: "projects/:projectId", element: <ProjectPage /> },
       { path: "teams/new", element: <CreateTeamPage /> },
       { path: "teams/:teamId/workload", element: <WorkloadPage /> },
+      { path: "teams/:teamId/goals", element: <GoalsPage /> },
+      { path: "goals/:goalId", element: <GoalDetailPage /> },
       { path: "teams/:teamId/settings", element: <TeamSettingsPage /> },
       { path: "projects/:projectId/guests", element: <ProjectGuestsPage /> },
       { path: "tasks/:taskId", element: <TaskPage /> },

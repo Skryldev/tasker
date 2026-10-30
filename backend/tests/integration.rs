@@ -154,6 +154,9 @@ async fn send_json(
     cookie: Option<&str>,
     body: Value,
 ) -> (StatusCode, Value) {
+    if uri.contains(' ') {
+        eprintln!("[dbg] BAD URI: {method} {uri}");
+    }
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
@@ -186,6 +189,16 @@ async fn send_request(
         .await
         .unwrap();
     to_response(response).await
+}
+
+fn assert_f64_close(actual: &Value, expected: f64, ctx: &str) {
+    let v = actual
+        .as_f64()
+        .unwrap_or_else(|| panic!("[debug] {ctx}: not a number: {actual}"));
+    assert!(
+        (v - expected).abs() < 1e-9,
+        "[{ctx}] expected {expected}, got {v}"
+    );
 }
 
 async fn to_response(response: axum::response::Response) -> (StatusCode, Value) {
@@ -1042,6 +1055,11 @@ async fn workflow_and_notifications_matrix() {
 
 /// Comprehensive Phase 3 verification on every engine.
 #[tokio::test]
+#[allow(
+    clippy::float_equality_without_abs,
+    unused_variables,
+    unused_assignments
+)]
 async fn phase3_matrix() {
     for (engine, url) in test_db_urls() {
         let app = spawn_app(&url).await;
@@ -1671,7 +1689,7 @@ async fn phase3_matrix() {
 
         // Multi-node cycle: create t2→t3' chain inside shared project with a
         // third task, then attempt the closing edge.
-        let (_code, t4) = send_json(
+        let (code, t4) = send_json(
             &app.app,
             "POST",
             &format!("/api/v1/projects/{project_id}/tasks"),
@@ -2082,5 +2100,616 @@ async fn phase3_matrix() {
         let (code, _) =
             get_json(&app.app, &format!("/api/v1/projects/{project_id}"), &member).await;
         assert_eq!(code, StatusCode::OK, "[{engine}] member read regression");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: goals & key results
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[allow(
+    clippy::float_equality_without_abs,
+    unused_variables,
+    unused_assignments
+)]
+async fn goals_matrix() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let suffix = Uuid::now_v7();
+        let admin_email = format!("admin-{suffix}@test.local");
+        let member_email = format!("member-{suffix}@test.local");
+        let guest_email = format!("guest-{suffix}@test.local");
+        let outsider_email = format!("outsider-{suffix}@test.local");
+        seed_user(&app.db, &admin_email, "Admin").await;
+        seed_user(&app.db, &member_email, "Member").await;
+        seed_user(&app.db, &guest_email, "Guest").await;
+        seed_user(&app.db, &outsider_email, "Outsider").await;
+
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let guest = login_as(&app.app, &guest_email, "test-password-123").await;
+        let outsider = login_as(&app.app, &outsider_email, "test-password-123").await;
+
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name":"T"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role":"member", "temp_password":"member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name":"P"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap();
+
+        let member_id = {
+            let (code, members) = get_json(
+                &app.app,
+                &format!("/api/v1/teams/{team_id}/members"),
+                &admin,
+            )
+            .await;
+            members["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["role"] == "member")
+                .unwrap()["user"]["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let guest_id = {
+            let (code, me) = get_json(&app.app, "/api/v1/me", &guest).await;
+            me["id"].as_str().unwrap().to_string()
+        };
+
+        let (code, t1) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title":"Goal task"}),
+        )
+        .await;
+        let t1_id = t1["id"].as_str().unwrap();
+
+        // Members cannot create goals (Manager+ capability).
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/goals"),
+            Some(&member),
+            json!({"title":"Nope"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] member goal create");
+
+        // Outsiders get 404 on team goal endpoints.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/goals"),
+            Some(&outsider),
+            json!({"title":"Nope"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] outsider goal create"
+        );
+
+        // Guests get 404 (no team membership).
+        let (code, _) = get_json(&app.app, &format!("/api/v1/teams/{team_id}/goals"), &guest).await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] guest goals list");
+
+        // Admin creates a draft goal with member as owner.
+        let (code, goal) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/goals"),
+            Some(&admin),
+            json!({"title":"Grow activation","description":"Q4 objective","owner_id": member_id,
+                   "start_date":"2026-01-01","due_date":"2026-03-31"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] goal create");
+        assert_eq!(goal["status"], "draft");
+        assert_eq!(goal["owner"]["id"].as_str().unwrap(), member_id);
+        assert_eq!(
+            goal["progress"],
+            Value::Null,
+            "[{engine}] no KRs -> undefined progress"
+        );
+        let goal_id = goal["id"].as_str().unwrap();
+
+        // Invalid dates rejected.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/goals"),
+            Some(&admin),
+            json!({"title":"X","start_date":"2026-03-01","due_date":"2026-01-01"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] bad date range"
+        );
+
+        // Activation with no KRs blocked.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/status"),
+            Some(&admin),
+            json!({"status":"active"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::CONFLICT,
+            "[{engine}] activate without KRs"
+        );
+
+        // Cross-team owner rejected.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/goals/{goal_id}"),
+            Some(&admin),
+            json!({"owner_id":"00000000-0000-0000-0000-000000000000"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] foreign owner"
+        );
+
+        // Add an increasing KR.
+        let (code, kr) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/key-results"),
+            Some(&admin),
+            json!({
+                "title":"Active users 100 -> 500",
+                "metric_type":"increase",
+                "start_value":100.0,
+                "current_value":300.0,
+                "target_value":500.0,
+                "unit":"users"
+            }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] KR create");
+        assert_f64_close(&kr["progress"], 50.0, "KR progress computed");
+        let kr_id = kr["id"].as_str().unwrap();
+
+        // Invalid KR configs rejected.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/key-results"),
+            Some(&admin),
+            json!({"title":"X","metric_type":"increase","start_value":500.0,"target_value":100.0}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] increase target < start"
+        );
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/key-results"),
+            Some(&admin),
+            json!({"title":"X","metric_type":"boolean","current_value":0.5}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] boolean 0.5"
+        );
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/key-results"),
+            Some(&admin),
+            json!({"title":"X","metric_type":"magic"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] bad metric type"
+        );
+
+        // Client-supplied progress is ignored (server-derived).
+        let (code, kr2) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/key-results"),
+            Some(&admin),
+            json!({"title":"NPS 30 -> 60","metric_type":"increase",
+                                 "start_value":30.0,"current_value":30.0,"target_value":60.0,
+                                 "unit":"pts"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        assert_f64_close(&kr2["progress"], 0.0, "fresh NPS KR progress");
+
+        // Update current value via the KR PATCH (merge semantics).
+        let (code, kr_updated) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/key-results/{}", kr2["id"].as_str().unwrap()),
+            Some(&admin),
+            json!({"current_value":45.0}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] KR update");
+        assert_f64_close(&kr_updated["progress"], 50.0, "NPS 45 = 50%");
+
+        // Goal detail: mean of KR progress = (50 + 50) / 2 = 50.
+        let (code, detail) = get_json(&app.app, &format!("/api/v1/goals/{goal_id}"), &admin).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_f64_close(&detail["goal"]["progress"], 50.0, "mean progress");
+        assert_eq!(detail["goal"]["key_result_count"].as_i64().unwrap(), 2);
+        assert_eq!(
+            detail["execution"]["total"].as_i64().unwrap(),
+            0,
+            "[{engine}] no associations yet"
+        );
+
+        // Activate now allowed with a KR.
+        let (code, g) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/status"),
+            Some(&admin),
+            json!({"status":"active"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] activate");
+        assert_eq!(g["status"], "active");
+
+        // Invalid transition: active -> draft.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/status"),
+            Some(&admin),
+            json!({"status":"draft"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] active -> draft");
+
+        // Cross-team project association rejected.
+        let (code, other_team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name":"T2"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let other_team_id = other_team["id"].as_str().unwrap();
+        let (code, other_project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{other_team_id}/projects"),
+            Some(&admin),
+            json!({"name":"P2"}),
+        )
+        .await;
+        let other_project_id = other_project["id"].as_str().unwrap();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/projects"),
+            Some(&admin),
+            json!({"project_id": other_project_id}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] cross-team project assoc"
+        );
+
+        // Same-team project association works; duplicate → 409.
+        let (code, assoc) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/projects"),
+            Some(&admin),
+            json!({"project_id": project_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] project assoc");
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/projects"),
+            Some(&admin),
+            json!({"project_id": project_id}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::CONFLICT,
+            "[{engine}] duplicate project assoc"
+        );
+
+        // Same-team task association works; duplicate → 409.
+        let (code, task_assoc) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/tasks"),
+            Some(&admin),
+            json!({"task_id": t1_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] task assoc");
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/tasks"),
+            Some(&admin),
+            json!({"task_id": t1_id}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::CONFLICT,
+            "[{engine}] duplicate task assoc"
+        );
+
+        // Execution summary: 1 associated task, backlog.
+        let (code, detail) = get_json(&app.app, &format!("/api/v1/goals/{goal_id}"), &admin).await;
+        assert_eq!(
+            detail["execution"]["total"].as_i64().unwrap(),
+            1,
+            "[{engine}] execution total"
+        );
+        assert_eq!(detail["execution"]["completed"].as_i64().unwrap(), 0);
+        let completion = detail["execution"]["completion_percent"].as_f64().unwrap();
+        assert!(completion.abs() < f64::EPSILON, "[{engine}] 0 of 1 done");
+        assert_eq!(detail["projects"].as_array().unwrap().len(), 1);
+        assert_eq!(detail["tasks"].as_array().unwrap().len(), 1);
+
+        // KR delete cascades only the KR; goal progress recomputes to 50%.
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/key-results/{kr_id}"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT);
+        let (code, detail) = get_json(&app.app, &format!("/api/v1/goals/{goal_id}"), &admin).await;
+        assert_f64_close(&detail["goal"]["progress"], 50.0, "remaining KR progress");
+        assert_eq!(detail["goal"]["key_result_count"].as_i64().unwrap(), 1);
+
+        // Disassociate project: project itself survives.
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/goals/{goal_id}/projects/{project_id}"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::NO_CONTENT,
+            "[{engine}] disassociate project"
+        );
+        let (code, _) = get_json(&app.app, &format!("/api/v1/projects/{project_id}"), &admin).await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] project survives");
+
+        // Disassociate task: task survives.
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/goals/{goal_id}/tasks/{t1_id}"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] disassociate task");
+        let (code, _) = get_json(&app.app, &format!("/api/v1/tasks/{t1_id}"), &admin).await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] task survives");
+
+        // Cross-team goal access denied (404 via second team's context — the
+        // admin belongs to both teams, so use the outsider to prove isolation).
+        let (code, _) = get_json(&app.app, &format!("/api/v1/goals/{goal_id}"), &outsider).await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] outsider goal read");
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/goals/{goal_id}"),
+            Some(&outsider),
+            json!({"title":"Hacked"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] outsider goal patch"
+        );
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/status"),
+            Some(&outsider),
+            json!({"status":"completed"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] outsider goal transition"
+        );
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/key-results"),
+            Some(&outsider),
+            json!({"title":"X","metric_type":"increase","start_value":0.0,"target_value":1.0}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] outsider KR create");
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/projects"),
+            Some(&outsider),
+            json!({"project_id": project_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] outsider assoc");
+
+        // Guest denied everywhere (no team membership).
+        let (code, _) = get_json(&app.app, &format!("/api/v1/goals/{goal_id}"), &guest).await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] guest goal read");
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/goals/{goal_id}"),
+            Some(&guest),
+            json!({"title":"H"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] guest goal patch");
+
+        // Complete → reopen flow.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/status"),
+            Some(&admin),
+            json!({"status":"completed"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] complete");
+        let (code, g) = get_json(&app.app, &format!("/api/v1/goals/{goal_id}"), &admin).await;
+        assert!(
+            g["goal"]["completed_at"].is_number(),
+            "[{engine}] completed_at set"
+        );
+        // Reset KR first so reopen is meaningful (progress stays, lifecycle reopens).
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/goals/{goal_id}/status"),
+            Some(&admin),
+            json!({"status":"active"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] reopen");
+        let (code, g) = get_json(&app.app, &format!("/api/v1/goals/{goal_id}"), &admin).await;
+        assert_eq!(
+            g["goal"]["completed_at"],
+            Value::Null,
+            "[{engine}] reopen clears completed_at"
+        );
+
+        // Status filter on the team list.
+        let (code, active_list) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/goals?status=active"),
+            &admin,
+        )
+        .await;
+        assert_eq!(
+            active_list["total"].as_i64().unwrap(),
+            1,
+            "[{engine}] status filter"
+        );
+        let (code, draft_list) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/goals?status=draft"),
+            &admin,
+        )
+        .await;
+        assert_eq!(
+            draft_list["total"].as_i64().unwrap(),
+            0,
+            "[{engine}] no drafts"
+        );
+
+        // Goal activity history recorded.
+        let (code, activity) = get_json(
+            &app.app,
+            &format!("/api/v1/goals/{goal_id}/activity"),
+            &admin,
+        )
+        .await;
+        let events: Vec<&str> = activity["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["event"].as_str().unwrap())
+            .collect();
+        for expected in [
+            "goal_created",
+            "goal_status_changed",
+            "goal_key_result_created",
+            "goal_key_result_deleted",
+            "goal_project_associated",
+            "goal_project_disassociated",
+            "goal_task_associated",
+            "goal_task_disassociated",
+        ] {
+            assert!(
+                events.contains(&expected),
+                "[{engine}] missing {expected} in {events:?}"
+            );
+        }
+
+        // Deleting the goal cascades KRs and associations but not tasks/projects.
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/goals/{goal_id}"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] goal delete");
+        let (code, _) = get_json(&app.app, &format!("/api/v1/tasks/{t1_id}"), &admin).await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] task survives goal delete");
+        let (code, _) = get_json(&app.app, &format!("/api/v1/projects/{project_id}"), &admin).await;
+        assert_eq!(
+            code,
+            StatusCode::OK,
+            "[{engine}] project survives goal delete"
+        );
+        let (code, _) = get_json(&app.app, &format!("/api/v1/goals/{goal_id}"), &admin).await;
+        assert_eq!(code, StatusCode::NOT_FOUND);
     }
 }

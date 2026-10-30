@@ -73,6 +73,10 @@ pub enum Capability {
     /// Owner and Admin only: reviewers may not review their own assigned work,
     /// and acceptance authority stays out of the day-to-day execution roles.
     ReviewAnyTask,
+    /// Create, edit, and manage team `Goals` & `Key Results`. Held by Owner,
+    /// Admin, and Manager — consistent with `ManageProjects`. Members view
+    /// goals; guests have no team membership and see nothing.
+    ManageGoals,
 }
 
 impl Role {
@@ -83,7 +87,7 @@ impl Role {
     pub fn can(self, capability: Capability) -> bool {
         use Capability::{
             AddMember, CreateLabel, CreateTask, DeleteAnyComment, DeleteAnyTask, EditAnyComment,
-            ManageProjects, ReviewAnyTask, UpdateAnyTask, UpdateTeam,
+            ManageGoals, ManageProjects, ReviewAnyTask, UpdateAnyTask, UpdateTeam,
         };
         match self {
             Self::Owner => true,
@@ -99,6 +103,7 @@ impl Role {
                     | EditAnyComment
                     | DeleteAnyComment
                     | ReviewAnyTask
+                    | ManageGoals
             ),
             Self::Manager => matches!(
                 capability,
@@ -108,6 +113,7 @@ impl Role {
                     | DeleteAnyTask
                     | CreateLabel
                     | DeleteAnyComment
+                    | ManageGoals
             ),
             Self::Member => matches!(capability, CreateTask),
         }
@@ -222,6 +228,7 @@ mod tests {
         assert!(Role::Admin.can(Capability::ManageProjects));
         assert!(Role::Admin.can(Capability::DeleteAnyTask));
         assert!(Role::Admin.can(Capability::ReviewAnyTask));
+        assert!(Role::Admin.can(Capability::ManageGoals));
     }
 
     #[test]
@@ -234,6 +241,8 @@ mod tests {
         assert!(!Role::Manager.can(Capability::EditAnyComment));
         // Acceptance authority stays with Owner/Admin only.
         assert!(!Role::Manager.can(Capability::ReviewAnyTask));
+        // Goals are managed like projects: Manager and above.
+        assert!(Role::Manager.can(Capability::ManageGoals));
     }
 
     #[test]
@@ -243,6 +252,7 @@ mod tests {
         assert!(!Role::Member.can(Capability::DeleteAnyTask));
         assert!(!Role::Member.can(Capability::ManageProjects));
         assert!(!Role::Member.can(Capability::AddMember));
+        assert!(!Role::Member.can(Capability::ManageGoals));
     }
 
     #[test]

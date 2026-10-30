@@ -214,6 +214,10 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
         "0003_guests_dependencies_templates",
         include_str!("../migrations/postgres/0003_guests_dependencies_templates.sql"),
     ),
+    (
+        "0004_goals",
+        include_str!("../migrations/postgres/0004_goals.sql"),
+    ),
 ];
 const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -228,6 +232,10 @@ const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
         "0003_guests_dependencies_templates",
         include_str!("../migrations/mysql/0003_guests_dependencies_templates.sql"),
     ),
+    (
+        "0004_goals",
+        include_str!("../migrations/mysql/0004_goals.sql"),
+    ),
 ];
 const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -241,6 +249,10 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
         "0003_guests_dependencies_templates",
         include_str!("../migrations/sqlite/0003_guests_dependencies_templates.sql"),
+    ),
+    (
+        "0004_goals",
+        include_str!("../migrations/sqlite/0004_goals.sql"),
     ),
 ];
 
@@ -485,6 +497,13 @@ impl Args<'_> {
     }
 
     pub fn opt_i(&mut self, v: Option<i64>) -> &mut Self {
+        self.inner
+            .add(v)
+            .expect("AnyArguments::add is infallible for supported scalar types");
+        self
+    }
+
+    pub fn opt_f(&mut self, v: Option<f64>) -> &mut Self {
         self.inner
             .add(v)
             .expect("AnyArguments::add is infallible for supported scalar types");

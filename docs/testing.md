@@ -9,6 +9,8 @@
 | API smoke | `scripts/smoke_api.sh` | 32-check end-to-end product workflow over HTTP |
 | Frontend unit | `frontend/src/**/*.test.tsx` | login validation/API errors, badges, empty/error states, theme toggle, toasts (11 tests) |
 | End-to-end | `frontend/e2e/workflow.spec.ts`, `workflow-p2.spec.ts`, `workflow-p3.spec.ts` | real-browser workflows: drag-and-drop persistence, negative authorization, acceptance/rejection with notifications, guest grant/revoke with read-only enforcement, dependency cycle rejection, workload view, template use (21 tests total) |
+| Goals domain | `backend/src/goals.rs` `domain_tests` | progress formulas (increase/decrease/boolean), clamping, invalid configs (target ranges, non-finite, boolean 0.5), mean-of-KRs goal progress, lifecycle transition table (9 tests) |
+| Goals matrix | `backend/tests/integration.rs` `goals_matrix` | goal CRUD, KR CRUD + server-computed progress, activation gating, lifecycle table, cross-team owner/association rejection, guest 404s, duplicate associations, cascade semantics, activity events (all engines) |
 | Benchmarks | `backend/benches/db.rs`, `scripts/loadtest.sh` | performance baselines (see docs/performance.md) |
 
 ## Exact commands

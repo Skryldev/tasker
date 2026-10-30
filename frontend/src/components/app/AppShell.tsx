@@ -9,6 +9,7 @@ import {
   Moon,
   Settings,
   Sun,
+  Target,
   UserRound,
 } from "lucide-react";
 import { NotificationBell } from "@/components/app/NotificationBell";
@@ -80,6 +81,12 @@ function Sidebar() {
               icon={<FolderKanban />}
               label="Projects"
               matchPrefix="/projects"
+            />
+            <SidebarLink
+              to={`/teams/${teamId}/goals`}
+              icon={<Target />}
+              label="Goals"
+              matchPrefix="/teams"
             />
             <SidebarLink
               to={`/teams/${teamId}/workload`}

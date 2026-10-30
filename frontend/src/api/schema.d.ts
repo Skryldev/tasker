@@ -2129,6 +2129,690 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/teams/{team_id}/goals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List team goals (team members only) */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "draft" | "active" | "completed" | "cancelled";
+                    page?: components["parameters"]["Page"];
+                    page_size?: components["parameters"]["PageSize"];
+                };
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Team goals, newest first, with measured progress. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["Goal"][];
+                            page: number;
+                            page_size: number;
+                            total: number;
+                        };
+                    };
+                };
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /**
+         * Create a goal (Manager+)
+         * @description New goals start in `draft` with the caller as default owner.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        title: string;
+                        description?: string;
+                        /**
+                         * Format: uuid
+                         * @description Team member; defaults to the caller.
+                         */
+                        owner_id?: string;
+                        /** Format: date */
+                        start_date?: string;
+                        /** Format: date */
+                        due_date?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Goal created in `draft`. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Goal"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/goals/{goal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Goal detail with key results, associations and execution stats */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    goal_id: components["parameters"]["GoalId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Full goal view. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GoalDetail"];
+                    };
+                };
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        /** Delete a goal (Manager+). Cascades key results and associations; projects and tasks survive. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    goal_id: components["parameters"]["GoalId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Update goal metadata (Manager+). Never changes status. */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    goal_id: components["parameters"]["GoalId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        title?: string;
+                        description?: string;
+                        /**
+                         * Format: uuid
+                         * @description Team member.
+                         */
+                        owner_id?: string;
+                        /** Format: date */
+                        start_date?: string;
+                        /** Format: date */
+                        due_date?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated goal. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Goal"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        trace?: never;
+    };
+    "/goals/{goal_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explicit lifecycle transition (Manager+)
+         * @description Allowed: draft→active, draft→cancelled, active→completed,
+         *     active→cancelled, completed→active (reopen), cancelled→active
+         *     (reopen). Activation requires at least one key result. Reaching 100%
+         *     key-result progress does NOT complete a goal automatically.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    goal_id: components["parameters"]["GoalId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "draft" | "active" | "completed" | "cancelled";
+                    };
+                };
+            };
+            responses: {
+                /** @description Transitioned. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Goal"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/goals/{goal_id}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Goal activity history (team members only) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    goal_id: components["parameters"]["GoalId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Goal events, newest first. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["GoalActivity"][];
+                        };
+                    };
+                };
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/goals/{goal_id}/key-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List key results (team members only) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    goal_id: components["parameters"]["GoalId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Key results ordered by position. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["KeyResult"][];
+                        };
+                    };
+                };
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /** Add a key result (Manager+) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    goal_id: components["parameters"]["GoalId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["KeyResultUpsert"];
+                };
+            };
+            responses: {
+                /** @description Key result created; progress computed server-side. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["KeyResult"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/key-results/{key_result_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Key result detail (team members only) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    key_result_id: components["parameters"]["KeyResultId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The key result. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["KeyResult"];
+                    };
+                };
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        /** Delete a key result (Manager+) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    key_result_id: components["parameters"]["KeyResultId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Update a key result (Manager+). Merge semantics; progress recomputed server-side. */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    key_result_id: components["parameters"]["KeyResultId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["KeyResultUpsert"];
+                };
+            };
+            responses: {
+                /** @description Updated key result. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["KeyResult"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        trace?: never;
+    };
+    "/goals/{goal_id}/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Projects associated with the goal (team members only) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    goal_id: components["parameters"]["GoalId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Associated projects. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                name: string;
+                                /** @enum {string} */
+                                status: "active" | "archived";
+                            }[];
+                        };
+                    };
+                };
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /** Associate a same-team project (Manager+) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    goal_id: components["parameters"]["GoalId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        project_id: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Associated. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/goals/{goal_id}/projects/{project_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a project association (Manager+). The project survives. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    goal_id: components["parameters"]["GoalId"];
+                    project_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Disassociated. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/goals/{goal_id}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tasks associated with the goal (team members only) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    goal_id: components["parameters"]["GoalId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Associated tasks. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                /** Format: uuid */
+                                id: string;
+                                title: string;
+                                /** @enum {string} */
+                                status: "backlog" | "todo" | "in_progress" | "in_review" | "done";
+                            }[];
+                        };
+                    };
+                };
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /** Associate a same-team task (Manager+) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    goal_id: components["parameters"]["GoalId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        task_id: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Associated. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/goals/{goal_id}/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a task association (Manager+). The task survives. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    goal_id: components["parameters"]["GoalId"];
+                    task_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Disassociated. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live": {
         parameters: {
             query?: never;
@@ -2513,6 +3197,98 @@ export interface components {
             created_at: number;
             granted_by?: components["schemas"]["UserBrief"] | null;
         };
+        Goal: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            team_id: string;
+            title: string;
+            description?: string | null;
+            owner: components["schemas"]["UserBrief"];
+            /** @enum {string} */
+            status: "draft" | "active" | "completed" | "cancelled";
+            /** Format: date */
+            start_date?: string | null;
+            /** Format: date */
+            due_date?: string | null;
+            created_by?: components["schemas"]["UserBrief"] | null;
+            completed_at?: number | null;
+            created_at: number;
+            updated_at: number;
+            /** @description Mean key-result progress (0-100); null with no key results. */
+            progress?: number | null;
+            key_result_count?: number | null;
+        };
+        KeyResult: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            goal_id: string;
+            title: string;
+            description?: string | null;
+            /** @enum {string} */
+            metric_type: "increase" | "decrease" | "boolean";
+            start_value?: number | null;
+            current_value: number;
+            target_value?: number | null;
+            unit?: string | null;
+            /** @description Server-computed 0-100; clamped. 100% means the metric target was reached. */
+            progress: number;
+            position: number;
+            created_at: number;
+            updated_at: number;
+        };
+        KeyResultUpsert: {
+            title: string;
+            description?: string;
+            /** @enum {string} */
+            metric_type: "increase" | "decrease" | "boolean";
+            /** @description Required for increase/decrease. */
+            start_value?: number | null;
+            /** @description Defaults to start_value (numeric) or 0 (boolean); boolean accepts 0/1 only. */
+            current_value?: number | null;
+            /** @description Required for increase/decrease. */
+            target_value?: number | null;
+            unit?: string | null;
+        };
+        GoalDetail: {
+            goal: components["schemas"]["Goal"];
+            key_results: components["schemas"]["KeyResult"][];
+            projects: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                /** @enum {string} */
+                status: "active" | "archived";
+            }[];
+            tasks: {
+                /** Format: uuid */
+                id: string;
+                title: string;
+                /** @enum {string} */
+                status: "backlog" | "todo" | "in_progress" | "in_review" | "done";
+            }[];
+            /** @description Task execution statistics — NOT key-result achievement. */
+            execution: {
+                total: number;
+                by_status: {
+                    [key: string]: number;
+                };
+                completed: number;
+                completion_percent?: number | null;
+            };
+        };
+        GoalActivity: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            event: "goal_created" | "goal_updated" | "goal_status_changed" | "goal_deleted" | "goal_key_result_created" | "goal_key_result_updated" | "goal_key_result_deleted" | "goal_project_associated" | "goal_project_disassociated" | "goal_task_associated" | "goal_task_disassociated";
+            field?: string | null;
+            old_value?: string | null;
+            new_value?: string | null;
+            actor?: components["schemas"]["UserBrief"] | null;
+            created_at: number;
+        };
         Board: {
             /** Format: uuid */
             project_id: string;
@@ -2607,6 +3383,8 @@ export interface components {
         ProjectId: string;
         TaskId: string;
         TemplateId: string;
+        GoalId: string;
+        KeyResultId: string;
         CommentId: string;
         UserId: string;
         Page: number;

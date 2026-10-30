@@ -17,6 +17,12 @@ export type Workload = components["schemas"]["Workload"];
 export type TaskTemplate = components["schemas"]["TaskTemplate"];
 export type TemplateUpsert = components["schemas"]["TemplateUpsert"];
 export type ProjectGuest = components["schemas"]["ProjectGuest"];
+export type Goal = components["schemas"]["Goal"];
+export type GoalDetail = components["schemas"]["GoalDetail"];
+export type KeyResult = components["schemas"]["KeyResult"];
+export type GoalActivity = components["schemas"]["GoalActivity"];
+export type GoalStatus = NonNullable<Goal["status"]>;
+export type KrMetricType = NonNullable<KeyResult["metric_type"]>;
 export type Resolution = NonNullable<Task["resolution"]>;
 export type Board = components["schemas"]["Board"];
 export type BoardColumn = NonNullable<Board["columns"]>[number];
@@ -282,6 +288,118 @@ export const api = {
   },
   myProjects(): Promise<{ items: Project[] }> {
     return request("get", "/me/projects") as Promise<{ items: Project[] }>;
+  },
+  listGoals(
+    teamId: string,
+    status?: string,
+  ): Promise<{ items: Goal[]; page: number; page_size: number; total: number }> {
+    return request("get", `/teams/${teamId}/goals`, {
+      query: { status: status || undefined },
+    }) as Promise<{ items: Goal[]; page: number; page_size: number; total: number }>;
+  },
+  getGoal(goalId: string): Promise<GoalDetail> {
+    return request("get", `/goals/${goalId}`) as Promise<GoalDetail>;
+  },
+  createGoal(
+    teamId: string,
+    body: {
+      title: string;
+      description?: string;
+      owner_id?: string;
+      start_date?: string;
+      due_date?: string;
+    },
+  ): Promise<Goal> {
+    return request("post", `/teams/${teamId}/goals`, { body }) as Promise<Goal>;
+  },
+  updateGoal(
+    goalId: string,
+    body: {
+      title?: string;
+      description?: string;
+      owner_id?: string;
+      start_date?: string;
+      due_date?: string;
+    },
+  ): Promise<Goal> {
+    return request("patch", `/goals/${goalId}`, { body }) as Promise<Goal>;
+  },
+  deleteGoal(goalId: string): Promise<void> {
+    return request("delete", `/goals/${goalId}`) as Promise<void>;
+  },
+  transitionGoal(goalId: string, status: string): Promise<Goal> {
+    return request("post", `/goals/${goalId}/status`, {
+      body: { status },
+    }) as Promise<Goal>;
+  },
+  goalActivity(goalId: string): Promise<{ items: GoalActivity[] }> {
+    return request("get", `/goals/${goalId}/activity`) as Promise<{ items: GoalActivity[] }>;
+  },
+  listKeyResults(goalId: string): Promise<{ items: KeyResult[] }> {
+    return request("get", `/goals/${goalId}/key-results`) as Promise<{ items: KeyResult[] }>;
+  },
+  createKeyResult(
+    goalId: string,
+    body: {
+      title: string;
+      description?: string;
+      metric_type: string;
+      start_value?: number;
+      current_value?: number;
+      target_value?: number;
+      unit?: string;
+    },
+  ): Promise<KeyResult> {
+    return request("post", `/goals/${goalId}/key-results`, { body }) as Promise<KeyResult>;
+  },
+  updateKeyResult(
+    keyResultId: string,
+    body: {
+      title?: string;
+      description?: string;
+      metric_type?: string;
+      start_value?: number;
+      current_value?: number;
+      target_value?: number;
+      unit?: string;
+    },
+  ): Promise<KeyResult> {
+    return request("patch", `/key-results/${keyResultId}`, { body }) as Promise<KeyResult>;
+  },
+  deleteKeyResult(keyResultId: string): Promise<void> {
+    return request("delete", `/key-results/${keyResultId}`) as Promise<void>;
+  },
+  listGoalProjects(
+    goalId: string,
+  ): Promise<{ items: { id: string; name: string; status: string }[] }> {
+    return request(
+      "get",
+      `/goals/${goalId}/projects`,
+    ) as Promise<{ items: { id: string; name: string; status: string }[] }>;
+  },
+  associateProjectWithGoal(goalId: string, projectId: string): Promise<void> {
+    return request("post", `/goals/${goalId}/projects`, {
+      body: { project_id: projectId },
+    }) as Promise<void>;
+  },
+  removeProjectFromGoal(goalId: string, projectId: string): Promise<void> {
+    return request("delete", `/goals/${goalId}/projects/${projectId}`) as Promise<void>;
+  },
+  listGoalTasks(
+    goalId: string,
+  ): Promise<{ items: { id: string; title: string; status: string }[] }> {
+    return request(
+      "get",
+      `/goals/${goalId}/tasks`,
+    ) as Promise<{ items: { id: string; title: string; status: string }[] }>;
+  },
+  associateTaskWithGoal(goalId: string, taskId: string): Promise<void> {
+    return request("post", `/goals/${goalId}/tasks`, {
+      body: { task_id: taskId },
+    }) as Promise<void>;
+  },
+  removeTaskFromGoal(goalId: string, taskId: string): Promise<void> {
+    return request("delete", `/goals/${goalId}/tasks/${taskId}`) as Promise<void>;
   },
   board(projectId: string, pageSize?: number): Promise<Board> {
     return request("get", "/projects/{project_id}/board".replace("{project_id}", projectId), {

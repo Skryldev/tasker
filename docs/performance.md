@@ -52,6 +52,14 @@ after the Phase 3 code landed (list ~568 µs, search ~484 µs, board
 / ~22 µs) — no regression from guest resolution (one extra indexed lookup
 only for non-members), dependencies, workload, or templates.
 
+## Phase 4 additions
+
+Phase 1/2 benchmarks re-measured within noise after the goals code landed
+(list ~572 µs, search ~486 µs, board ~331 µs, get ~9.5 µs, insert ~146 µs,
+update ~95 µs, notifications ~33/23 µs) — goals listing paginates with one
+bounded KR fetch per goal; goal detail uses two grouped queries (KRs,
+execution counts) plus association joins, all indexed.
+
 ## HTTP load test
 
 Command: `scripts/loadtest.sh <port> <seconds> <sqlite|postgres|mysql>`
