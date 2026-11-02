@@ -430,7 +430,7 @@ mod mention_tests {
         let body = "ping @member@example.com and @not-an-email plus @second@example.com twice @member@example.com";
         let tokens = mention_tokens(body);
         assert_eq!(tokens, ["member@example.com", "second@example.com"]);
-        assert!(mention_tokens("no mentions here").is_empty());
+        assert_eq!(mention_tokens("no mentions here"), Vec::<String>::new());
         // Trailing punctuation does not become part of the address.
         assert_eq!(mention_tokens("thanks @a@b.co!"), ["a@b.co"]);
     }

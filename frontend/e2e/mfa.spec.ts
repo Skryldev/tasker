@@ -1,5 +1,5 @@
-import { createHmac } from "node:crypto";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { currentStep, totpAtStep, totpNow, waitMsForFreshStep } from "./totp";
 
 /**
  * Phase 7 E2E: TOTP two-factor authentication.
@@ -7,49 +7,22 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
  * The TOTP codes here are computed independently (Node crypto, HMAC-SHA-1,
  * RFC 6238) from the Base32 secret the setup endpoint returns — the same
  * computation any authenticator app performs.
+ *
+ * Timing discipline: the backend accepts only the current 30-second step
+ * (window 0). Codes are therefore generated immediately before submission
+ * and only when at least 5 seconds of the step remain; a retry always
+ * generates a code for a NEW step (never re-submits a potentially expired
+ * one). Replay protection and enrollment semantics are not weakened.
  */
 
 const ADMIN = { email: "admin@tasker.local", password: "admin-pass-12345" };
-
-const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-
-function base32Decode(input: string): Buffer {
-  let bits = 0;
-  let value = 0;
-  const out: number[] = [];
-  for (const c of input.replace(/=+$/, "").toUpperCase()) {
-    const idx = BASE32.indexOf(c);
-    if (idx < 0) continue;
-    value = (value << 5) | idx;
-    bits += 5;
-    if (bits >= 8) {
-      out.push((value >>> (bits - 8)) & 0xff);
-      bits -= 8;
-    }
-  }
-  return Buffer.from(out);
-}
-
-function totpAt(secretBase32: string, step: number): string {
-  const key = base32Decode(secretBase32);
-  const counter = Buffer.alloc(8);
-  counter.writeBigUInt64BE(BigInt(step));
-  const digest = createHmac("sha1", key).update(counter).digest();
-  const offset = digest[digest.length - 1] & 0x0f;
-  const binary =
-    ((digest[offset] & 0x7f) << 24) |
-    (digest[offset + 1] << 16) |
-    (digest[offset + 2] << 8) |
-    digest[offset + 3];
-  return String(binary % 1_000_000).padStart(6, "0");
-}
-
-const currentStep = () => Math.floor(Date.now() / 1000 / 30);
 
 test.describe.serial("Phase 7 two-factor authentication", () => {
   let context: BrowserContext;
   let page: Page;
   let secret = "";
+  /** TOTP step consumed by the latest successful verification. */
+  let consumedStep = -1;
 
   test.beforeAll(async ({ browser }) => {
     context = await browser.newContext();
@@ -80,29 +53,53 @@ test.describe.serial("Phase 7 two-factor authentication", () => {
   });
 
   test("enabling with the current TOTP code reveals ten recovery codes once", async () => {
-    // Retry once across a 30-second step boundary: the backend accepts only
-    // the current step (window 0), so a code computed just before a boundary
-    // roll is legitimately stale by the time the server sees it.
-    const tryEnable = async () => {
-      await page.getByTestId("mfa-code-input").fill(totpAt(secret, currentStep()));
+    /**
+     * One bounded enrollment attempt. Returns "ok" on success, "timing" when
+     * the two-step window likely expired (retry with a fresh code), or
+     * "app" when the application rejected a fresh code outright.
+     */
+    const tryEnable = async (): Promise<"ok" | "timing" | "app"> => {
+      // Never generate a code for a step that is about to roll over.
+      const settle = waitMsForFreshStep();
+      if (settle > 0) {
+        await page.waitForTimeout(settle);
+      }
+      // Compute as close to submission as practical.
+      const code = totpNow(secret);
+      await page.getByTestId("mfa-code-input").fill(code);
       await page.getByTestId("mfa-enable-submit").click();
-      // Recovery codes replace the form on success; an invalid code keeps
-      // the form mounted with an error banner. Wait for the panel ONLY —
-      // the code input races the re-render in the instant after success.
+      // Success replaces the form with the recovery panel; a rejection keeps
+      // the form mounted with an error banner.
       try {
         await page
           .getByTestId("mfa-recovery")
           .waitFor({ state: "visible", timeout: 5_000 });
-        return true;
+        return "ok";
       } catch {
-        return false;
+        const bannerVisible = await page
+          .locator("[role=alert], .text-destructive")
+          .first()
+          .isVisible()
+          .catch(() => false);
+        return bannerVisible ? "app" : "timing";
       }
     };
-    let enabled = await tryEnable();
-    if (!enabled) {
-      enabled = await tryEnable();
+
+    let outcome = await tryEnable();
+    if (outcome === "timing") {
+      // Retry ONCE with a freshly generated code for the new step.
+      outcome = await tryEnable();
     }
-    expect(enabled, "enable succeeded within two step attempts").toBe(true);
+    if (outcome === "timing") {
+      throw new Error(
+        "MFA enrollment did not complete within two TOTP steps — " +
+          "code timing exhausted (this is a test-boundary issue, not an app rejection)",
+      );
+    }
+    expect(outcome, "enrollment succeeded (app accepted a fresh TOTP code)").toBe(
+      "ok",
+    );
+
     const codes = await page.getByTestId("mfa-recovery-code").allTextContents();
     expect(codes).toHaveLength(10);
     for (const c of codes) {
@@ -128,9 +125,18 @@ test.describe.serial("Phase 7 two-factor authentication", () => {
     // No authenticated page was reached: the URL is still /login.
     expect(new URL(mp.url()).pathname).toBe("/login");
 
-    await mp.getByTestId("mfa-login-code").fill(totpAt(secret, currentStep()));
+    // Boundary guard, then compute immediately before submitting.
+    const settle = waitMsForFreshStep();
+    if (settle > 0) {
+      await mp.waitForTimeout(settle);
+    }
+    await mp
+      .getByTestId("mfa-login-code")
+      .fill(totpAtStep(secret, currentStep()));
     await mp.getByTestId("mfa-verify-submit").click();
     await expect(mp.getByRole("heading", { name: "My Tasks" })).toBeVisible();
+    // Record the step the server just consumed (replay protection pins it).
+    consumedStep = currentStep();
     // Clear cookies so the next test starts from a clean login state.
     await context.clearCookies();
     await mp.close();
@@ -150,24 +156,23 @@ test.describe.serial("Phase 7 two-factor authentication", () => {
     expect(new URL(mp.url()).pathname).toBe("/login");
 
     // Clean up the failed attempt with a valid code so later steps stay sane.
-    // The code must be from a NEW step: test 3 already consumed the current
-    // step, and replay protection correctly rejects reuse (window 0).
-    const nextStepCode = () => totpAt(secret, currentStep() + 1);
-    await mp.getByTestId("mfa-login-code").fill(nextStepCode());
-    await mp.getByTestId("mfa-verify-submit").click();
-    try {
-      await mp.getByRole("heading", { name: "My Tasks" }).waitFor({
-        state: "visible",
-        timeout: 10_000,
-      });
-    } catch {
-      // The boundary has not passed yet — wait for it and retry once.
-      const sleepMs = (currentStep() + 1) * 30_000 - Date.now() + 500;
-      await mp.waitForTimeout(Math.max(sleepMs, 1000));
-      await mp.getByTestId("mfa-login-code").fill(totpAt(secret, currentStep()));
-      await mp.getByTestId("mfa-verify-submit").click();
+    // Test 3 consumed step `consumedStep` and replay protection pins it
+    // (window 0), so if we are still inside that step, wait for the next
+    // boundary; then submit a code computed for the fresh current step.
+    if (consumedStep >= 0 && currentStep() <= consumedStep) {
+      const waitMs = (consumedStep + 1) * 30_000 - Date.now() + 500;
+      await mp.waitForTimeout(Math.max(waitMs, 1_000));
     }
+    expect(
+      currentStep(),
+      "test invariant: cleanup runs in a step after the consumed one",
+    ).toBeGreaterThan(consumedStep);
+    await mp
+      .getByTestId("mfa-login-code")
+      .fill(totpNow(secret));
+    await mp.getByTestId("mfa-verify-submit").click();
     await expect(mp.getByRole("heading", { name: "My Tasks" })).toBeVisible();
+    consumedStep = currentStep();
     await mp.close();
   });
 

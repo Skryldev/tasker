@@ -260,6 +260,10 @@ const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
         "0007_recovery_pepper",
         include_str!("../migrations/mysql/0007_recovery_pepper.sql"),
     ),
+    (
+        "0008_recovery_codes_varchar",
+        include_str!("../migrations/mysql/0008_recovery_codes_varchar.sql"),
+    ),
 ];
 const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (

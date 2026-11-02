@@ -23,11 +23,13 @@ TASKER_DATABASE_URL="sqlite:$DB_WIN/e2e.db" \
   --email admin@tasker.local --password admin-pass-12345 --display-name "Ada Admin"
 
 echo "==> Starting server on :$PORT"
-# TASKER_MFA_ENCRYPTION_KEY: fixed test-only value (NOT a production secret);
-# production keys are generated per deployment — see docs/security.md.
+# TASKER_MFA_ENCRYPTION_KEY / TASKER_RECOVERY_PEPPER: fixed test-only values
+# (NOT production secrets); production keys are generated per deployment —
+# see docs/security.md.
 exec env TASKER_DATABASE_URL="sqlite:$DB_WIN/e2e.db" \
   TASKER_HTTP_PORT="$PORT" \
   TASKER_STATIC_DIR="$ROOT/frontend/dist" \
   TASKER_RATE_LIMIT_LOGIN_PER_MIN=100 \
   TASKER_MFA_ENCRYPTION_KEY="3d2690e6245a4e2fa53b7f8d1c9a07b4e5c6d8f90a1b2c3d4e5f60718293a4b5" \
+  TASKER_RECOVERY_PEPPER="7c1f4a9e2b6d8305fa14c7e902b5d8163a9f04cbe7d2185a630fe94c7b2d5186" \
   "$ROOT/backend/target/debug/tasker" serve

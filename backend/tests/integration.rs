@@ -2602,6 +2602,132 @@ async fn mfa_legacy_recovery_digests_rejected() {
     }
 }
 
+/// CI integration-matrix regression (ADR-0012 follow-up): the
+/// `recovery_codes_hashed` column must be a portable *textual* type on every
+/// engine. `MySQL`'s `TEXT` maps to the `BLOB` family on the wire, which `sqlx`'s
+/// Any driver cannot decode into `String`; migration `0008` re-declares it
+/// as `VARCHAR(4096)`. This test runs the registered migrations in their
+/// real order (via `spawn_app`), asserts the materialized column type per
+/// dialect, then drives the full recovery path — MFA enrollment, digest
+/// persistence/readback (JSON, `h1.`-tagged, no plaintext), and one-time
+/// redemption — against the live engine.
+#[tokio::test]
+async fn mfa_recovery_digests_column_portability() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+        let suffix = Uuid::now_v7();
+        let email = format!("portable-{suffix}@test.local");
+        let user_id = seed_user(&db, &email, "Portable User").await;
+        let cookie = login_as(&app.app, &email, "test-password-123").await;
+
+        // 1. Materialized column type per dialect (schema regression).
+        {
+            let mut conn = db.conn();
+            let expected = match engine.as_str() {
+                // MySQL: 0008 re-declares TEXT → VARCHAR(4096); the wire
+                // reports VARCHAR as DATA_TYPE='varchar'.
+                "mysql" => "varchar",
+                "postgres" => "text",
+                _ => "text", // SQLite: declared type TEXT (pragma).
+            };
+            let observed: Vec<String> = if engine == "sqlite" {
+                // PRAGMA rows: (cid, name, type, ...) — read the type column.
+                conn.fetch_all("PRAGMA table_info(user_mfa)", tasker::db::Args::new())
+                    .await
+                    .unwrap()
+                    .iter()
+                    .filter_map(|r| {
+                        let name: String = r.try_get(1).ok()?;
+                        (name == "recovery_codes_hashed").then(|| r.try_get::<String, _>(2).ok())?
+                    })
+                    .collect()
+            } else {
+                conn.fetch_all(
+                    "SELECT DATA_TYPE FROM information_schema.columns \
+                     WHERE table_name = 'user_mfa' AND column_name = 'recovery_codes_hashed' \
+                       AND table_schema = DATABASE()",
+                    tasker::db::Args::new(),
+                )
+                .await
+                .unwrap()
+                .iter()
+                .filter_map(|r| r.try_get::<String, _>(0).ok())
+                .collect()
+            };
+            assert!(
+                observed.iter().any(|t| t.to_ascii_lowercase() == expected),
+                "[{engine}] recovery_codes_hashed must be {expected}; got {observed:?}"
+            );
+        }
+
+        // 2. Enable MFA: digests are persisted as a JSON array of `h1.`
+        //    digests, never plaintext (readback through the same wire type).
+        let (code, setup) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/auth/2fa/setup",
+            Some(&cookie),
+            json!({}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] setup");
+        let secret = setup["secret"].as_str().unwrap().to_string();
+        let (code, enabled) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/auth/2fa/enable",
+            Some(&cookie),
+            json!({"code": totp_code_now(&secret, &email)}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] enable");
+        let codes: Vec<String> = enabled["recovery_codes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(codes.len(), 10, "[{engine}] ten codes");
+        let digests = db_recovery_digests(&db, &user_id).await;
+        assert_eq!(digests.len(), 10, "[{engine}] digests read back");
+        assert!(
+            digests.iter().all(|d| d.starts_with("h1.")),
+            "[{engine}] digests tagged"
+        );
+        for c in &codes {
+            assert!(
+                !digests.iter().any(|d| d.contains(c)),
+                "[{engine}] no plaintext at rest"
+            );
+        }
+
+        // 3. Redeem one valid code: one-time consumption over the same wire
+        //    type that just failed on MySQL BLOB.
+        let (code, login_body) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/auth/login",
+            None,
+            json!({"email": email, "password": "test-password-123"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] login");
+        let token = login_body["mfa_token"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/auth/2fa/verify",
+            None,
+            json!({"mfa_token": token, "code": codes[0]}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] redemption");
+        let remaining = db_recovery_digests(&db, &user_id).await;
+        assert_eq!(remaining.len(), 9, "[{engine}] code consumed");
+    }
+}
+
 async fn db_recovery_digests(db: &Database, user_id: &str) -> Vec<String> {
     let mut conn = db.conn();
     let mut args = tasker::db::Args::new();
