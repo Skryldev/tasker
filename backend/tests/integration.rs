@@ -2643,17 +2643,23 @@ async fn mfa_recovery_digests_column_portability() {
                     })
                     .collect()
             } else {
-                conn.fetch_all(
+                // DATABASE() is MySQL syntax; PostgreSQL uses current_schema().
+                let schema_fn = if engine == "mysql" {
+                    "DATABASE()"
+                } else {
+                    "current_schema()"
+                };
+                let sql = format!(
                     "SELECT DATA_TYPE FROM information_schema.columns \
                      WHERE table_name = 'user_mfa' AND column_name = 'recovery_codes_hashed' \
-                       AND table_schema = DATABASE()",
-                    tasker::db::Args::new(),
-                )
-                .await
-                .unwrap()
-                .iter()
-                .filter_map(|r| r.try_get::<String, _>(0).ok())
-                .collect()
+                       AND table_schema = {schema_fn}"
+                );
+                conn.fetch_all(&sql, tasker::db::Args::new())
+                    .await
+                    .unwrap()
+                    .iter()
+                    .filter_map(|r| r.try_get::<String, _>(0).ok())
+                    .collect()
             };
             assert!(
                 observed.iter().any(|t| t.to_ascii_lowercase() == expected),
