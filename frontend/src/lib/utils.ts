@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { format, formatDistanceToNow, parseISO } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
@@ -10,8 +10,9 @@ export const TASK_STATUSES = [
   "backlog",
   "todo",
   "in_progress",
+  "resolved",
   "in_review",
-  "done",
+  "closed",
 ] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
@@ -19,8 +20,9 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
   backlog: "Backlog",
   todo: "Todo",
   in_progress: "In Progress",
+  resolved: "Resolved",
   in_review: "In Review",
-  done: "Done",
+  closed: "Closed",
 };
 
 export const PRIORITIES = ["low", "medium", "high", "urgent"] as const;
@@ -49,20 +51,6 @@ export function timeAgo(epochMs: number | null | undefined): string {
   } catch {
     return "—";
   }
-}
-
-/** Format a YYYY-MM-DD date string for display. */
-export function formatDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return "—";
-  try {
-    return format(parseISO(dateStr), "MMM d, yyyy");
-  } catch {
-    return dateStr;
-  }
-}
-
-export function todayISO(): string {
-  return format(new Date(), "yyyy-MM-dd");
 }
 
 /** Deterministic pastel-free avatar background from any string. */

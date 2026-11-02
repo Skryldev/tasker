@@ -6,11 +6,13 @@
 | --- | --- | --- |
 | Rust unit tests | `backend/src/**` | permission matrix, password/token handling, rate limiter, SQL splitter, placeholder adaptation, driver detection (13 tests) |
 | Rust HTTP integration | `backend/tests/integration.rs` | security matrix (unauthenticated access, cross-team 404s, self-escalation, cross-assignment, validation shapes, subtask nesting, archival boundary, logout revocation) **plus the Phase 2 workflow/notification matrix** (submit/accept/reject permissions, reviewer independence, rejection reason, resolution consistency, stale transitions, notification generation, mention dedup, cross-user isolation) over real engines |
-| API smoke | `scripts/smoke_api.sh` | 32-check end-to-end product workflow over HTTP |
+| API smoke | `scripts/smoke_api.sh` | 37-check end-to-end product workflow over HTTP (includes the lifecycle transition endpoint and the identity invariant) |
 | Frontend unit | `frontend/src/**/*.test.tsx` | login validation/API errors, badges, empty/error states, theme toggle, toasts (11 tests) |
 | End-to-end | `frontend/e2e/workflow.spec.ts`, `workflow-p2.spec.ts`, `workflow-p3.spec.ts` | real-browser workflows: drag-and-drop persistence, negative authorization, acceptance/rejection with notifications, guest grant/revoke with read-only enforcement, dependency cycle rejection, workload view, template use (21 tests total) |
 | Goals domain | `backend/src/goals.rs` `domain_tests` | progress formulas (increase/decrease/boolean), clamping, invalid configs (target ranges, non-finite, boolean 0.5), mean-of-KRs goal progress, lifecycle transition table (9 tests) |
 | Goals matrix | `backend/tests/integration.rs` `goals_matrix` | goal CRUD, KR CRUD + server-computed progress, activation gating, lifecycle table, cross-team owner/association rejection, guest 404s, duplicate associations, cascade semantics, activity events (all engines) |
+| Recovery-code remediation | `backend/tests/integration.rs` `mfa_legacy_recovery_digests_rejected` + `mfa.rs` digest unit tests | legacy SHA-256 digests rejected at the HTTP layer; invalidation preserves MFA state; regeneration issues keyed `h1.` sets; keyed-HMAC construction, pepper separation, constant-time comparison, format tagging (ADR-0012) |
+| MFA security matrix | `backend/tests/integration.rs` `mfa_security_matrix` | 14 required scenarios + additional: AES-GCM envelope roundtrip/tamper, recovery-code hashing, atomic redemption & token consumption under concurrency, replay of consumed steps, pending-token scope, rate-limit boundary (all engines) |
 | Benchmarks | `backend/benches/db.rs`, `scripts/loadtest.sh` | performance baselines (see docs/performance.md) |
 
 ## Exact commands
@@ -57,7 +59,7 @@ The integration suite runs the identical security matrix against:
   11.4.5; MySQL 8.x compatibility is covered by the portable SQL subset and
   the dedicated migration dialect — see docs/database-support.md caveats).
 
-All three passed the full matrix, plus the 32-check API smoke suite on each
+All three passed the full matrix, plus the 37-check API smoke suite on each
 engine (see the implementation report for the recorded runs).
 
 ## CI

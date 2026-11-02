@@ -59,10 +59,15 @@ R=$(curl -s -b "$COOKIES" -X POST "$BASE/api/v1/teams/$TEAM/projects" -H 'Conten
 check "create project" '"status":"active"' "$R"
 PROJECT=$(jqget "$R" '.id')
 
-# --- member creates task (allowed) with assignee = self ---
+# --- member creates task (no assignee: the creator is the default reporter,
+#     and one person must not be both assignee and reporter) ---
 R=$(curl -s -b "$COOKIES2" -X POST "$BASE/api/v1/projects/$PROJECT/tasks" -H 'Content-Type: application/json' -d "{\"title\":\"Fix hero\",\"priority\":\"high\",\"label_ids\":[\"$LABEL\"]}")
 check "member creates task" '"title":"Fix hero"' "$R"
 TASK=$(jqget "$R" '.id')
+
+# --- self-review creation is rejected (identity invariant) ---
+R=$(curl -s -b "$COOKIES2" -X POST "$BASE/api/v1/projects/$PROJECT/tasks" -H 'Content-Type: application/json' -d "{\"title\":\"Self review\",\"assignee_id\":\"$MEMBER_ID\"}")
+check "assignee+reporter overlap rejected" 'validation-failed' "$R"
 
 R=$(curl -s -b "$COOKIES3" "$BASE/api/v1/tasks/$TASK")
 check "outsider sees no task" 'not-found' "$R"
@@ -71,9 +76,21 @@ check "outsider sees no task" 'not-found' "$R"
 R=$(curl -s -b "$COOKIES2" -X PATCH "$BASE/api/v1/tasks/$TASK" -H 'Content-Type: application/json' -d "{\"assignee_id\":\"$ADMIN_ID\"}")
 check "member cannot assign others" 'forbidden' "$R"
 
-# --- admin assigns member ---
-R=$(curl -s -b "$COOKIES" -X PATCH "$BASE/api/v1/tasks/$TASK" -H 'Content-Type: application/json' -d "{\"assignee_id\":\"$MEMBER_ID\",\"status\":\"in_progress\"}")
-check "admin assigns + status change" '"status":"in_progress"' "$R"
+# --- admin takes over as reporter, then assigns the member ---
+R=$(curl -s -b "$COOKIES" -X PATCH "$BASE/api/v1/tasks/$TASK" -H 'Content-Type: application/json' -d "{\"reporter_id\":\"$ADMIN_ID\"}")
+check "admin changes reporter" "$ADMIN_ID" "$(echo "$R" | jq -c .reporter)"
+R=$(curl -s -b "$COOKIES" -X PATCH "$BASE/api/v1/tasks/$TASK" -H 'Content-Type: application/json' -d "{\"assignee_id\":\"$MEMBER_ID\"}")
+check "admin assigns member" "$MEMBER_ID" "$(echo "$R" | jq -c .assignee)"
+
+# --- generic PATCH no longer mutates status (400) ---
+R=$(curl -s -b "$COOKIES" -X PATCH "$BASE/api/v1/tasks/$TASK" -H 'Content-Type: application/json' -d '{"status":"in_progress"}')
+check "PATCH status rejected (400)" 'bad-request' "$R"
+
+# --- assignee drives the lifecycle through the transition endpoint ---
+R=$(curl -s -b "$COOKIES2" -X POST "$BASE/api/v1/tasks/$TASK/transition" -H 'Content-Type: application/json' -d '{"to":"todo"}')
+check "assignee picks up (backlog->todo)" '"status":"todo"' "$R"
+R=$(curl -s -b "$COOKIES2" -X POST "$BASE/api/v1/tasks/$TASK/transition" -H 'Content-Type: application/json' -d '{"to":"in_progress"}')
+check "assignee starts work (todo->in_progress)" '"status":"in_progress"' "$R"
 
 # --- subtask ---
 R=$(curl -s -b "$COOKIES" -X POST "$BASE/api/v1/tasks/$TASK/subtasks" -H 'Content-Type: application/json' -d '{"title":"Pick image"}')

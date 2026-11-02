@@ -1,96 +1,68 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { CheckCircle2, Info, TriangleAlert, X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Toaster as SonnerToaster, toast } from "sonner";
+import { useTheme } from "@/lib/theme";
 
-type ToastKind = "success" | "error" | "info";
+/**
+ * Application feedback standard. All user-facing notifications flow through
+ * [Sonner](https://sonner.emilkowal.ski) — success, error, and informational
+ * messages share one accessible, theme-aware surface with consistent timing
+ * (errors linger longer than confirmations). Screens keep inline field-level
+ * validation where it is more usable; toasts are for operation outcomes.
+ *
+ * The `useToast().push(kind, title, description)` signature is preserved so
+ * feature code reads the same across the app; it adapts to Sonner beneath.
+ */
 
-interface Toast {
-  id: number;
-  kind: ToastKind;
-  title: string;
-  description?: string;
-}
+/** How long a toast stays on screen, in milliseconds. */
+const DURATION = {
+  success: 4000,
+  info: 4000,
+  error: 8000,
+} as const;
 
-interface ToastContextValue {
-  push: (kind: ToastKind, title: string, description?: string) => void;
-}
+type ToastKind = keyof typeof DURATION;
 
-const ToastContext = createContext<ToastContextValue>({ push: () => undefined });
-
-const ICONS: Record<ToastKind, typeof Info> = {
-  success: CheckCircle2,
-  error: TriangleAlert,
-  info: Info,
-};
-
-const TONES: Record<ToastKind, string> = {
-  success: "text-emerald-500",
-  error: "text-destructive",
-  info: "text-primary",
-};
-
-export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const nextId = useRef(1);
-
-  const push = useCallback((kind: ToastKind, title: string, description?: string) => {
-    const id = nextId.current++;
-    setToasts((prev) => [...prev.slice(-4), { id, kind, title, description }]);
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, kind === "error" ? 8000 : 4000);
-  }, []);
-
-  const dismiss = useCallback((id: number) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  }, []);
-
+export function ToastProvider({ children }: { children: React.ReactNode }) {
+  const { theme } = useTheme();
   return (
-    <ToastContext.Provider value={{ push }}>
+    <>
       {children}
-      <div
-        aria-live="polite"
-        aria-label="Notifications"
-        className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-full max-w-sm flex-col gap-2"
-      >
-        {toasts.map((toast) => {
-          const Icon = ICONS[toast.kind];
-          return (
-            <div
-              key={toast.id}
-              role="status"
-              className="pointer-events-auto flex items-start gap-3 rounded-lg border bg-popover p-3.5 shadow-lg animate-fade-in"
-            >
-              <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", TONES[toast.kind])} />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">{toast.title}</p>
-                {toast.description ? (
-                  <p className="mt-0.5 text-2xs text-muted-foreground">{toast.description}</p>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                aria-label="Dismiss notification"
-                onClick={() => dismiss(toast.id)}
-                className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          );
-        })}
-      </div>
-    </ToastContext.Provider>
+      <SonnerToaster
+        position="bottom-right"
+        theme={theme === "dark" ? "dark" : "light"}
+        richColors
+        closeButton
+        gap={8}
+        toastOptions={{
+          style: {
+            // Align Sonner's surface with the app's popover token.
+            background: "hsl(var(--popover))",
+            border: "1px solid hsl(var(--border))",
+            color: "hsl(var(--popover-foreground))",
+          },
+        }}
+      />
+    </>
   );
 }
 
-export function useToast(): ToastContextValue {
-  return useContext(ToastContext);
+/** Push a standardized feedback toast. */
+export function pushToast(kind: ToastKind, title: string, description?: string) {
+  const options = { description, duration: DURATION[kind] };
+  switch (kind) {
+    case "success":
+      toast.success(title, options);
+      break;
+    case "error":
+      toast.error(title, options);
+      break;
+    case "info":
+      toast.info(title, options);
+      break;
+  }
 }
+
+export function useToast() {
+  return { push: pushToast };
+}
+
+export type { ToastKind };

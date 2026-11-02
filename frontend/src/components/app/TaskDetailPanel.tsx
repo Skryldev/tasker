@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CalendarDays, History, MessageSquare, Pencil, ListTree, Trash2 } from "lucide-react";
+import { CalendarDays, History, MessageSquare, Pencil, ListTree, Trash2, X } from "lucide-react";
 import { api, type Task } from "@/api/client";
 import {
   useActivity,
@@ -12,13 +12,15 @@ import {
 import { Avatar, Separator } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { StatusBadge, PriorityBadge } from "./TaskBadges";
 import { TaskDialog } from "./TaskDialog";
 import { WorkflowActions } from "./WorkflowActions";
 import { CommentBody, CommentComposer } from "./Mentions";
 import { DependenciesPanel } from "./DependenciesPanel";
 import { useToast } from "@/components/ui/toast";
-import { cn, formatDate, timeAgo } from "@/lib/utils";
+import { cn, timeAgo } from "@/lib/utils";
+import { formatJalaliDate } from "@/lib/doran";
 import { useQueryClient } from "@tanstack/react-query";
 
 const EVENT_LABELS: Record<string, string> = {
@@ -47,6 +49,7 @@ export function TaskDetailPanel({
   onClose: () => void;
 }) {
   const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [editingComment, setEditingComment] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
@@ -70,9 +73,8 @@ export function TaskDetailPanel({
     );
   }
 
-  const submitComment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!commentDraft.trim()) return;
+  const submitComment = async () => {
+    if (!commentDraft.trim() || createComment.isPending) return;
     try {
       await createComment.mutateAsync(commentDraft.trim());
       setCommentDraft("");
@@ -82,10 +84,10 @@ export function TaskDetailPanel({
   };
 
   const confirmDeleteTask = () => {
-    if (!window.confirm(`Delete task "${task.title}"? Its subtasks are deleted too.`)) return;
     deleteTask.mutate(task.id, {
       onSuccess: () => {
         push("info", "Task deleted");
+        setDeleteOpen(false);
         onClose();
       },
       onError: (error) =>
@@ -104,14 +106,14 @@ export function TaskDetailPanel({
           <Button
             variant="ghost"
             size="icon-sm"
-            onClick={confirmDeleteTask}
+            onClick={() => setDeleteOpen(true)}
             aria-label="Delete task"
             className="text-destructive hover:bg-destructive/10 hover:text-destructive"
           >
             <Trash2 />
           </Button>
           <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close detail panel">
-            ✕
+            <X />
           </Button>
         </div>
       </div>
@@ -129,7 +131,7 @@ export function TaskDetailPanel({
           <StatusBadge status={task.status} />
           <PriorityBadge priority={task.priority} />
           <span className="inline-flex items-center gap-1">
-            <CalendarDays className="h-3.5 w-3.5" /> Due {formatDate(task.due_date)}
+            <CalendarDays className="h-3.5 w-3.5" /> Due {formatJalaliDate(task.due_date)}
           </span>
           {task.assignee ? (
             <span className="inline-flex items-center gap-1.5">
@@ -153,7 +155,7 @@ export function TaskDetailPanel({
             className={cn(
               "mt-3 rounded-md border px-3 py-2 text-xs",
               task.resolution === "accepted"
-                ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+                ? "border-success/30 bg-success/5 text-success"
                 : "border-destructive/30 bg-destructive/5 text-destructive",
             )}
             data-testid="resolution-banner"
@@ -187,15 +189,15 @@ export function TaskDetailPanel({
         ) : null}
 
         {task.subtasks && task.subtasks.length > 0 ? (
-          <section className="mt-5" aria-label="ListTree">
+          <section className="mt-5" aria-label="Subtasks">
             <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
-              <ListTree className="h-3.5 w-3.5" /> ListTree ({task.subtasks.length})
+              <ListTree className="h-3.5 w-3.5" /> Subtasks ({task.subtasks.length})
             </h3>
             <ul className="flex flex-col gap-1">
               {task.subtasks.map((sub) => (
                 <li key={sub.id} className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
                   <StatusBadge status={sub.status} />
-                  <span className={cn("truncate", sub.status === "done" && "text-muted-foreground line-through")}>
+                  <span className={cn("truncate", sub.status === "closed" && "text-muted-foreground line-through")}>
                     {sub.title}
                   </span>
                   <PriorityBadge priority={sub.priority} className="ml-auto" />
@@ -216,7 +218,7 @@ export function TaskDetailPanel({
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              void submitComment(e);
+              void submitComment();
             }}
             className="mb-4"
           >
@@ -224,9 +226,7 @@ export function TaskDetailPanel({
               teamId={task.team_id}
               value={commentDraft}
               onChange={setCommentDraft}
-              onSubmit={() => {
-                if (commentDraft.trim()) void createComment.mutateAsync(commentDraft.trim()).then(() => setCommentDraft(""));
-              }}
+              onSubmit={() => void submitComment()}
               pending={createComment.isPending}
             />
           </form>
@@ -286,7 +286,8 @@ export function TaskDetailPanel({
                         value={editDraft}
                         onChange={(e) => setEditDraft(e.target.value)}
                         rows={2}
-                        className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
+                        aria-label="Edit comment"
+                        className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       />
                       <div className="flex gap-2">
                         <Button type="submit" size="sm">Save</Button>
@@ -342,6 +343,16 @@ export function TaskDetailPanel({
           )}
         </section>
       </div>
+
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete this task?"
+        description={`"${task.title}" and its subtasks are permanently removed.`}
+        confirmLabel="Delete task"
+        pending={deleteTask.isPending}
+        onConfirm={confirmDeleteTask}
+      />
 
       {editOpen ? (
         <TaskDialogResolver

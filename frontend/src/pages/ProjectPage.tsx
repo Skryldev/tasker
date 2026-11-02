@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { KanbanSquare, ListFilter, ListTodo, Plus, Search } from "lucide-react";
@@ -34,6 +34,9 @@ export function ProjectPage() {
   const teamId = project.data?.team_id;
 
   const [search, setSearch] = useState("");
+  // Keystrokes stay instant; the (server-side) query uses the settled value.
+  // The server filter and pagination semantics are unchanged.
+  const deferredSearch = useDeferredValue(search);
   const [statusFilter, setStatusFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [assigneeFilter, setAssigneeFilter] = useState("all");
@@ -49,7 +52,7 @@ export function ProjectPage() {
 
   const filters = useMemo(
     () => ({
-      q: search || undefined,
+      q: deferredSearch || undefined,
       status: statusFilter !== "all" ? statusFilter : undefined,
       priority: priorityFilter !== "all" ? priorityFilter : undefined,
       assignee_id:
@@ -60,7 +63,7 @@ export function ProjectPage() {
       page,
       page_size: 25,
     }),
-    [search, statusFilter, priorityFilter, assigneeFilter, labelFilter, sort, order, page],
+    [deferredSearch, statusFilter, priorityFilter, assigneeFilter, labelFilter, sort, order, page],
   );
 
   const tasks = useTasks(view === "list" ? projectId : undefined, filters);

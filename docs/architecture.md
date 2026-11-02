@@ -101,21 +101,31 @@ shadcn-style primitives on Radix primitives with semantic CSS-variable
 tokens (light/dark). Kanban drag-and-drop uses dnd-kit with optimistic
 reordering and rollback on failure.
 
-## Task acceptance workflow (Phase 2)
+## Task lifecycle workflow (Phase 2, corrected in the pre-Phase-5 integrity hotfix)
 
 Tasks carry three independent responsibilities: `created_by` (who created
 it), `reporter_id` (who accepts or rejects the work), and `assignee_id` (who
-does the work). Transitions are validated business operations
-(`tasks::plan_transition`, unit-tested), not free-form status writes:
+does the work). The lifecycle is a strict linear machine with one return
+edge, enforced centrally by `tasks::plan_transition` (pure, unit-tested):
 
-- `In Progress -> In Review` (submit): assignee, creator (unassigned work),
-  or Manager+.
-- `In Review -> Done` (accept): the reporter, or the Owner/Admin reviewer
-  override — never the assignee; a reporter who is also the assignee is not
-  independent and must let an administrator accept.
-- `In Review -> In Progress` (reject): reporter or Manager+; the dedicated
+- `Backlog -> Todo`: assignee only.
+- `Todo -> In Progress`: assignee only.
+- `In Progress -> Resolved`: assignee only.
+- `Resolved -> In Review` (submit): reporter only.
+- `In Review -> Closed` (accept): reporter only.
+- `In Review -> In Progress` (reject): reporter only; the transition
   endpoint requires an audited reason.
-- `Done -> actionable` (reopen): reporter or Manager+; clears the resolution.
+
+No other transition exists: `closed` is terminal, skips are rejected, and
+no Manager/Admin/Owner override bypasses the matrix — general
+task-management capabilities govern field edits and deletion, not
+lifecycle transitions. The identity invariant (`assignee != reporter`) is
+validated server-side at creation and on every assignment/reporter update;
+requests that would give one person both roles are rejected, never silently
+corrected. Legacy rows with overlapping roles cannot be advanced by the
+overlapping user — they are corrected through the generic PATCH, which no
+longer accepts a `status` field at all (400; transitions have the dedicated
+`POST /tasks/{id}/transition` endpoint).
 
 Transitions persist through compare-and-update (`WHERE id = ? AND
 status = ?`), so stale concurrent requests fail with 409 instead of

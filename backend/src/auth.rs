@@ -32,6 +32,7 @@ pub fn routes() -> Router<AppState> {
         .route("/auth/register", post(register))
         .route("/me", get(me))
         .route("/me/password", put(change_password))
+        .merge(crate::mfa::routes())
 }
 
 // ---------------------------------------------------------------------------
@@ -217,12 +218,27 @@ pub struct LoginRequest {
     pub password: String,
 }
 
+/// Login outcome: a normal session (non-MFA users, unchanged contract) or an
+/// MFA-pending challenge. The pending token lives only in the response body —
+/// it is never a cookie and cannot authorize any other endpoint.
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum LoginResponse {
+    User(UserResponse),
+    MfaRequired {
+        mfa_required: bool,
+        mfa_token: String,
+    },
+}
+
 #[derive(Serialize)]
 pub struct UserResponse {
     pub id: String,
     pub email: String,
     pub display_name: String,
     pub created_at: i64,
+    /// Whether TOTP two-factor authentication is enabled for this account.
+    pub mfa_enabled: bool,
 }
 
 impl From<User> for UserResponse {
@@ -232,6 +248,7 @@ impl From<User> for UserResponse {
             email: u.email,
             display_name: u.display_name,
             created_at: u.created_at,
+            mfa_enabled: false,
         }
     }
 }
@@ -240,7 +257,7 @@ async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(body): Json<LoginRequest>,
-) -> Result<(StatusCode, HeaderMap, Json<UserResponse>), AppError> {
+) -> Result<(StatusCode, HeaderMap, Json<LoginResponse>), AppError> {
     let ip = client_ip(&headers);
     let rate_key = format!("login:{ip}");
     if let Err(retry_after) = state.rate_limiter.check(
@@ -273,6 +290,20 @@ async fn login(
         return Err(AppError::Unauthenticated);
     }
 
+    // Two-factor users do not get a session yet: password possession alone
+    // yields a short-lived, single-use MFA-pending credential.
+    if crate::mfa::is_enabled(&mut conn, &user.id).await? {
+        let mfa_token = crate::mfa::issue_pending_token(&mut conn, &user.id).await?;
+        return Ok((
+            StatusCode::OK,
+            HeaderMap::new(),
+            Json(LoginResponse::MfaRequired {
+                mfa_required: true,
+                mfa_token,
+            }),
+        ));
+    }
+
     purge_expired(&mut conn).await;
     let user_agent = headers
         .get(header::USER_AGENT)
@@ -300,7 +331,7 @@ async fn login(
     Ok((
         StatusCode::OK,
         response_headers,
-        Json(UserResponse::from(user)),
+        Json(LoginResponse::User(UserResponse::from(user))),
     ))
 }
 
@@ -351,7 +382,9 @@ async fn me(
     let full = users::find_by_id(&mut conn, &user.id)
         .await?
         .ok_or(AppError::Unauthenticated)?;
-    Ok(Json(UserResponse::from(full)))
+    let mut response = UserResponse::from(full);
+    response.mfa_enabled = crate::mfa::is_enabled(&mut conn, &user.id).await?;
+    Ok(Json(response))
 }
 
 #[derive(Deserialize)]

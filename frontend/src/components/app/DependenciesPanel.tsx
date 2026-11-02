@@ -80,11 +80,11 @@ export function DependenciesPanel({ task }: { task: Task }) {
       <span
         className={cn(
           "h-2 w-2 shrink-0 rounded-full",
-          ref.status === "done" ? "bg-status-done" : "bg-status-in-progress",
+          ref.status === "closed" ? "bg-status-closed" : "bg-status-in-progress",
         )}
-        aria-label={ref.status === "done" ? "done" : "in progress"}
+        aria-label={ref.status === "closed" ? "closed" : "not closed"}
       />
-      <span className={cn("truncate", ref.status === "done" && "text-muted-foreground line-through")}>
+      <span className={cn("truncate", ref.status === "closed" && "text-muted-foreground line-through")}>
         {ref.title}
       </span>
       <span className="ml-auto shrink-0 text-2xs text-muted-foreground">
@@ -106,7 +106,7 @@ export function DependenciesPanel({ task }: { task: Task }) {
   const blockers = deps.data?.blockers ?? [];
   const blocked = deps.data?.blocked ?? [];
   const canManage = deps.data?.can_manage ?? false;
-  const openBlockers = blockers.filter((b) => b.status !== "done").length;
+  const openBlockers = blockers.filter((b) => b.status !== "closed").length;
 
   if (deps.isLoading) {
     return <div className="h-16 animate-pulse rounded bg-muted" />;

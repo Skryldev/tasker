@@ -34,7 +34,13 @@
     --status-todo: 243 60% 58%;
     --status-in-progress: 199 89% 44%;
     --status-in-review: 271 76% 56%;
-    --status-done: 152 62% 40%;
+    --status-resolved: 174 62% 34%;
+    --status-closed: 152 62% 40%;
+    --success: 152 62% 34%;
+    --success-foreground: 0 0% 100%;
+    --warning: 36 92% 40%;
+    --warning-foreground: 0 0% 100%;
+    --info: 243 62% 52%;
   }
 
   .dark {
@@ -67,7 +73,13 @@
     --status-todo: 243 70% 66%;
     --status-in-progress: 199 85% 55%;
     --status-in-review: 271 70% 64%;
-    --status-done: 152 55% 46%;
+    --status-resolved: 174 55% 46%;
+    --status-closed: 152 55% 46%;
+    --success: 152 55% 46%;
+    --success-foreground: 240 12% 6%;
+    --warning: 38 92% 54%;
+    --warning-foreground: 240 12% 6%;
+    --info: 243 80% 66%;
   }
 
   * {
@@ -84,9 +96,67 @@
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Doran calendar token bridge. Doran reads its own --doran-* custom properties;
+   they are mapped onto the app's shadcn/ui tokens so the calendar follows the
+   existing light/dark theme, radius, and typography instead of carrying a
+   second color system. Component-level styles come from @doranjs/react.
+   --------------------------------------------------------------------------- */
+:root,
+.dark {
+  --doran-primary: hsl(var(--primary));
+  --doran-primary-hover: hsl(var(--primary) / 0.9);
+  --doran-primary-soft: hsl(var(--primary) / 0.12);
+  --doran-primary-contrast: hsl(var(--primary-foreground));
+  --doran-danger: hsl(var(--destructive));
+  --doran-success: hsl(var(--success));
+  --doran-warning: hsl(var(--warning));
+  --doran-focus-ring: hsl(var(--ring) / 0.4);
+  --doran-radius-sm: calc(var(--radius) - 4px);
+  --doran-radius-md: calc(var(--radius) - 2px);
+  --doran-radius-lg: var(--radius);
+  --doran-font-sans: inherit;
+  --doran-bg: hsl(var(--background));
+  --doran-surface: hsl(var(--card));
+  --doran-surface-muted: hsl(var(--muted));
+  --doran-surface-raised: hsl(var(--card));
+  --doran-border: hsl(var(--border));
+  --doran-border-strong: hsl(var(--input));
+  --doran-text: hsl(var(--foreground));
+  --doran-text-muted: hsl(var(--muted-foreground));
+  --doran-text-subtle: hsl(var(--muted-foreground) / 0.75);
+  --doran-shadow-sm: 0 1px 2px hsl(var(--foreground) / 0.06);
+  --doran-shadow-md: 0 8px 24px hsl(var(--foreground) / 0.12);
+  --doran-shadow-lg: 0 16px 48px hsl(var(--foreground) / 0.16);
+}
+
 @layer utilities {
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  }
+}
+
+/* Respect the user's motion preference globally: dialogs, dropdowns, toasts
+   and decorative transitions collapse to instant state changes. Compositor
+   properties only — nothing here animates layout. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Sonner renders its own markup; keep its motion aligned with the app's
+   reduced-motion contract. */
+@media (prefers-reduced-motion: reduce) {
+  [data-sonner-toast],
+  [data-sonner-toast] * {
+    transition: none !important;
+    transform: none !important;
   }
 }

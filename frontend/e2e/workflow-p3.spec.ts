@@ -125,7 +125,11 @@ test.describe.serial("Phase 3 guests, dependencies, workload, templates", () => 
       data: { title: "Hacked" },
     });
     expect(patch.status()).toBe(403);
-    const accept = await gp.request.post(`/api/v1/tasks/${taskId}/accept`);
+    // A legal transition pair fails on the actor check (403): the guest is
+    // neither assignee nor reporter. An illegal pair would return 409.
+    const accept = await gp.request.post(`/api/v1/tasks/${taskId}/transition`, {
+      data: { to: "todo" },
+    });
     expect(accept.status()).toBe(403);
 
     // Guest reads tasks; detail renders (task identity verified by title).

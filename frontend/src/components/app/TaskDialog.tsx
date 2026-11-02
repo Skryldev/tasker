@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import {
   Select,
   SelectContent,
@@ -110,10 +111,11 @@ export function TaskDialog(props: TaskDialogProps) {
         label_ids: selectedLabels.length > 0 ? selectedLabels : undefined,
       };
       if (task) {
+        // Status changes use the lifecycle transition endpoint (board drag or
+        // the workflow actions); the generic update only edits fields.
         return api.updateTask(task.id, {
           title: body.title,
           description: form.description,
-          status: body.status,
           priority: body.priority,
           assignee_id: form.assignee_id === "none" ? "" : form.assignee_id,
           reporter_id: canPickReporter
@@ -197,24 +199,26 @@ export function TaskDialog(props: TaskDialogProps) {
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-status">Status</Label>
-              <Select
-                value={form.status}
-                onValueChange={(v) => setForm((f) => ({ ...f, status: v as TaskStatus }))}
-              >
-                <SelectTrigger id="task-status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {selectableStatuses.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {STATUS_LABELS[s]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {task ? null : (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="task-status">Status</Label>
+                <Select
+                  value={form.status}
+                  onValueChange={(v) => setForm((f) => ({ ...f, status: v as TaskStatus }))}
+                >
+                  <SelectTrigger id="task-status">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectableStatuses.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {STATUS_LABELS[s]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="task-priority">Priority</Label>
               <Select
@@ -281,11 +285,11 @@ export function TaskDialog(props: TaskDialogProps) {
             ) : null}
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="task-due">Due date</Label>
-              <Input
+              <DateField
                 id="task-due"
-                type="date"
-                value={form.due_date}
-                onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))}
+                value={form.due_date || null}
+                onChange={(v) => setForm((f) => ({ ...f, due_date: v }))}
+                ariaLabel="Due date"
               />
               {fieldErrors.due_date ? (
                 <p className="text-2xs text-destructive" role="alert">{fieldErrors.due_date}</p>

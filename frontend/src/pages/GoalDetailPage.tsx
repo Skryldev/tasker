@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -36,7 +37,8 @@ import {
 import { EmptyState, ErrorState } from "@/components/app/EmptyState";
 import { useToast } from "@/components/ui/toast";
 import { useWorkspace } from "@/lib/workspace";
-import { cn, formatDate, timeAgo } from "@/lib/utils";
+import { cn, timeAgo } from "@/lib/utils";
+import { formatJalaliDate } from "@/lib/doran";
 import { GoalFormDialog, GoalStatusBadge, ProgressBar } from "@/pages/GoalsPage";
 
 type KrMetricType = "increase" | "decrease" | "boolean";
@@ -71,6 +73,7 @@ export function GoalDetailPage() {
   const { myRole } = useWorkspace();
   const canManage = myRole !== undefined && ["owner", "admin", "manager"].includes(myRole);
 
+  const { confirm, element: confirmElement } = useConfirmDialog();
   const [editOpen, setEditOpen] = useState(false);
   const [krDialogOpen, setKrDialogOpen] = useState(false);
   const [editingKr, setEditingKr] = useState<KeyResult | null>(null);
@@ -139,9 +142,6 @@ export function GoalDetailPage() {
   const execution = data.execution;
 
   const confirmDelete = () => {
-    if (!window.confirm(`Delete goal "${goal.title}"? Its key results and associations are removed.`)) {
-      return;
-    }
     api
       .deleteGoal(goal.id)
       .then(() => {
@@ -156,6 +156,7 @@ export function GoalDetailPage() {
 
   return (
     <div className="mx-auto max-w-3xl p-6" data-testid="goal-detail">
+      {confirmElement}
       <div className="mb-4">
         <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
           <ArrowLeft /> Back
@@ -178,8 +179,8 @@ export function GoalDetailPage() {
               {goal.owner.display_name}
             </span>
           ) : null}
-          {goal.start_date ? <span>Start {formatDate(goal.start_date)}</span> : null}
-          {goal.due_date ? <span>Due {formatDate(goal.due_date)}</span> : null}
+          {goal.start_date ? <span>Start {formatJalaliDate(goal.start_date)}</span> : null}
+          {goal.due_date ? <span>Due {formatJalaliDate(goal.due_date)}</span> : null}
           <span>Created {timeAgo(goal.created_at)}</span>
         </div>
 
@@ -250,7 +251,14 @@ export function GoalDetailPage() {
               variant="ghost"
               size="sm"
               className="ml-auto text-destructive hover:bg-destructive/10"
-              onClick={confirmDelete}
+              onClick={() =>
+                confirm({
+                  title: "Delete this goal?",
+                  description: `"${goal.title}" is deleted together with its key results and associations.`,
+                  confirmLabel: "Delete goal",
+                  action: confirmDelete,
+                })
+              }
               data-testid="delete-goal"
             >
               <Trash2 /> Delete
@@ -294,10 +302,10 @@ export function GoalDetailPage() {
                     className={cn(
                       "mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium",
                       kr.metric_type === "increase"
-                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                        ? "bg-success/10 text-success"
                         : kr.metric_type === "decrease"
-                          ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
-                          : "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+                          ? "bg-info/10 text-info"
+                          : "bg-status-in-review/10 text-status-in-review",
                     )}
                     title={`Metric: ${kr.metric_type}`}
                   >
@@ -329,11 +337,14 @@ export function GoalDetailPage() {
                         type="button"
                         aria-label={`Delete ${kr.title}`}
                         className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                        onClick={() => {
-                          if (window.confirm(`Delete key result "${kr.title}"?`)) {
-                            removeKr.mutate(kr.id);
-                          }
-                        }}
+                        onClick={() =>
+                          confirm({
+                            title: "Delete this key result?",
+                            description: `"${kr.title}" is removed from the goal.`,
+                            confirmLabel: "Delete key result",
+                            action: () => removeKr.mutate(kr.id),
+                          })
+                        }
                         data-testid={`delete-kr-${kr.id}`}
                       >
                         <Trash2 className="h-3 w-3" />

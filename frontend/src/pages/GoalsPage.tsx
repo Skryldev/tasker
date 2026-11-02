@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import {
   Select,
   SelectContent,
@@ -25,7 +26,8 @@ import {
 import { EmptyState, ErrorState } from "@/components/app/EmptyState";
 import { useToast } from "@/components/ui/toast";
 import { useWorkspace } from "@/lib/workspace";
-import { cn, formatDate } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { formatJalaliDate } from "@/lib/doran";
 
 const GOAL_STATUS_LABELS: Record<GoalStatus, string> = {
   draft: "Draft",
@@ -36,8 +38,8 @@ const GOAL_STATUS_LABELS: Record<GoalStatus, string> = {
 
 const STATUS_TONE: Record<GoalStatus, string> = {
   draft: "bg-muted text-muted-foreground",
-  active: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  completed: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  active: "bg-info/10 text-info",
+  completed: "bg-success/10 text-success",
   cancelled: "bg-destructive/10 text-destructive",
 };
 
@@ -184,7 +186,7 @@ export function GoalsPage() {
                       {goal.owner.display_name}
                     </span>
                   ) : null}
-                  {goal.due_date ? <span>Due {formatDate(goal.due_date)}</span> : null}
+                  {goal.due_date ? <span>Due {formatJalaliDate(goal.due_date)}</span> : null}
                   <span>
                     {goal.key_result_count ?? 0} key result{" "}
                     {(goal.key_result_count ?? 0) === 1 ? "" : "s"}
@@ -326,20 +328,22 @@ export function GoalFormDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="goal-start">Start date</Label>
-              <Input
+              <DateField
                 id="goal-start"
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                value={startDate || null}
+                onChange={setStartDate}
+                ariaLabel="Start date"
+                invalid={Boolean(errors.start_date)}
               />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="goal-due">Due date</Label>
-              <Input
+              <DateField
                 id="goal-due"
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
+                value={dueDate || null}
+                onChange={setDueDate}
+                ariaLabel="Due date"
+                invalid={Boolean(errors.due_date)}
               />
               {errors.due_date ? (
                 <p className="text-2xs text-destructive" role="alert">{errors.due_date}</p>

@@ -34,6 +34,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
+    // Doran components read their light/dark tokens from this attribute.
+    document.documentElement.setAttribute("data-doran-theme", theme);
     try {
       localStorage.setItem("tasker-theme", theme);
     } catch {

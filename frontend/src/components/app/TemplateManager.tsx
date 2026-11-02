@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileStack, Plus, Trash2, Wand2 } from "lucide-react";
 import { api, ApiError, type TaskTemplate } from "@/api/client";
@@ -57,6 +58,7 @@ export function TemplateManager({ projectId }: { projectId: string }) {
     queryFn: () => api.listTemplates(projectId),
   });
 
+  const { confirm, element: confirmElement } = useConfirmDialog();
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<TaskTemplate | null>(null);
   const [form, setForm] = useState<TemplateFormState>(EMPTY);
@@ -124,6 +126,7 @@ export function TemplateManager({ projectId }: { projectId: string }) {
 
   return (
     <section aria-label="Task templates" className="mt-8" data-testid="template-manager">
+      {confirmElement}
       <div className="mb-3 flex items-center justify-between">
         <div>
           <h2 className="flex items-center gap-1.5 text-sm font-semibold">
@@ -173,11 +176,14 @@ export function TemplateManager({ projectId }: { projectId: string }) {
                     size="icon-sm"
                     aria-label={`Delete ${template.name}`}
                     className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    onClick={() => {
-                      if (window.confirm(`Delete template "${template.name}"?`)) {
-                        remove.mutate(template.id);
-                      }
-                    }}
+                    onClick={() =>
+                      confirm({
+                        title: "Delete this template?",
+                        description: `"${template.name}" is permanently removed.`,
+                        confirmLabel: "Delete template",
+                        action: () => remove.mutate(template.id),
+                      })
+                    }
                   >
                     <Trash2 />
                   </Button>

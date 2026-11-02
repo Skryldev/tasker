@@ -812,7 +812,7 @@ async fn get_goal(
         *by_status.entry(status).or_insert(0) += n;
         total += n;
     }
-    let done = *by_status.get("done").unwrap_or(&0);
+    let done = *by_status.get("closed").unwrap_or(&0);
     #[allow(clippy::cast_precision_loss)]
     let completion = if total > 0 {
         Some((done as f64) / (total as f64) * 100.0)

@@ -353,7 +353,7 @@ async fn list_projects(
         .fetch_all(
             "SELECT p.id, p.team_id, p.name, p.description, p.status, p.owner_id, p.created_by, \
                     p.created_at, p.updated_at, \
-                    (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status != 'done') AS open_task_count \
+                    (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status != 'closed') AS open_task_count \
              FROM projects p \
              WHERE p.team_id = ? AND (p.status = 'active' OR ? = TRUE) \
              ORDER BY p.created_at",

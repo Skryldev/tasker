@@ -85,6 +85,7 @@ describe("LoginForm", () => {
       email: "admin@tasker.local",
       display_name: "Ada",
       created_at: 0,
+      mfa_enabled: false,
     });
     renderWithProviders(<LoginPage />);
     await user.type(screen.getByLabelText("Email"), "admin@tasker.local");
@@ -175,9 +176,15 @@ describe("toasts", () => {
       </ToastProvider>,
     );
     await user.click(screen.getByRole("button", { name: "fail" }));
+    // Sonner announces toasts through its own live region.
     expect(await screen.findByText("It failed")).toBeVisible();
     expect(screen.getByText("with details")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Dismiss notification" }));
+    const toastEl = document.querySelector("[data-sonner-toast]");
+    expect(toastEl).not.toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: /close|dismiss/i }) ??
+        toastEl!.querySelector("[data-close-button]")!,
+    );
     await waitFor(() => expect(screen.queryByText("It failed")).not.toBeInTheDocument());
   });
 });

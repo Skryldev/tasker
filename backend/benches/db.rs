@@ -28,6 +28,8 @@ fn bench_config(url: String) -> Config {
             max_lifetime: Duration::from_secs(3600),
         },
         session_ttl: Duration::from_secs(3600),
+        mfa_encryption_key: Some(vec![7u8; 32]),
+        mfa_recovery_pepper: Some(vec![11u8; 32]),
         public_registration: false,
         allowed_origins: Vec::new(),
         login_rate_limit_per_min: 1000,
@@ -96,7 +98,14 @@ async fn seed(db: &Database, task_count: usize) -> (String, String, String) {
     .await
     .unwrap();
 
-    let statuses = ["backlog", "todo", "in_progress", "in_review", "done"];
+    let statuses = [
+        "backlog",
+        "todo",
+        "in_progress",
+        "resolved",
+        "in_review",
+        "closed",
+    ];
     let priorities = ["low", "medium", "high", "urgent"];
     for i in 0..task_count {
         let id = tasker::util::new_id();
@@ -220,7 +229,7 @@ fn db_benchmarks(c: &mut Criterion) {
         b.to_async(&runtime).iter(|| async {
             let mut conn = db.conn();
             let mut total = 0usize;
-            for status in ["backlog", "todo", "in_progress", "in_review", "done"] {
+            for status in ["backlog", "todo", "in_progress", "resolved", "in_review", "closed"] {
                 let sql = "SELECT id FROM tasks t WHERE t.project_id = ? AND t.status = ? AND t.parent_task_id IS NULL \
                            ORDER BY t.position, t.created_at, t.id LIMIT ?";
                 let mut args = Args::new();

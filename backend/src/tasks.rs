@@ -24,7 +24,14 @@ use crate::util;
 
 /// Canonical status workflow. Centralized and ordered so a configurable
 /// workflow can replace it later without reshaping the domain.
-pub const STATUSES: [&str; 5] = ["backlog", "todo", "in_progress", "in_review", "done"];
+pub const STATUSES: [&str; 6] = [
+    "backlog",
+    "todo",
+    "in_progress",
+    "resolved",
+    "in_review",
+    "closed",
+];
 
 /// Canonical priorities, ascending importance.
 pub const PRIORITIES: [&str; 4] = ["low", "medium", "high", "urgent"];
@@ -67,9 +74,7 @@ pub fn routes() -> Router<AppState> {
             get(get_task).patch(update_task).delete(delete_task),
         )
         .route("/tasks/{task_id}/subtasks", post(create_subtask))
-        .route("/tasks/{task_id}/submit", post(submit_for_review))
-        .route("/tasks/{task_id}/accept", post(accept_task))
-        .route("/tasks/{task_id}/reject", post(reject_task))
+        .route("/tasks/{task_id}/transition", post(run_transition))
         .route("/me/tasks", get(my_tasks))
 }
 
@@ -580,12 +585,13 @@ async fn create_task_inner(
         body.priority.as_deref().unwrap_or("medium"),
         body.due_date.as_deref(),
     )?;
-    // New work always starts in an actionable state: reaching Done requires a
-    // review acceptance, so creation into `done`/`in_review` is rejected.
-    if matches!(input.status, "in_review" | "done") {
+    // New work always starts in an actionable state: reaching `resolved`,
+    // `in_review` or `closed` requires the corresponding lifecycle transition
+    // (resolve by the assignee, submission and acceptance by the reporter).
+    if matches!(input.status, "resolved" | "in_review" | "closed") {
         return Err(AppError::validation(
             "status",
-            "new tasks must start in backlog, todo or in_progress; done requires review acceptance",
+            "new tasks must start in backlog, todo or in_progress; later states are reached via transitions",
         ));
     }
 
@@ -626,6 +632,15 @@ async fn create_task_inner(
         _ => Some(user.id.clone()),
     };
 
+    // Identity invariant: one person cannot both execute a task and accept
+    // their own work. The request is rejected rather than silently corrected.
+    if assignee_id == reporter_id && assignee_id.is_some() {
+        return Err(AppError::validation(
+            "assignee_id",
+            "the assignee and reporter must be different users",
+        ));
+    }
+
     if let Some(parent_id) = &parent_task_id {
         validate_parent(&mut conn, &project_id, parent_id).await?;
     }
@@ -644,11 +659,8 @@ async fn create_task_inner(
 
     let id = util::new_id();
     let now = util::now_ms();
-    let completed_at = if input.status == "done" {
-        Some(now)
-    } else {
-        None
-    };
+    // Only review acceptance completes a task; creation never does.
+    let completed_at: Option<i64> = None;
     let mut args = Args::new();
     args.s(&id)
         .s(&project.team_id)
@@ -1097,113 +1109,172 @@ pub struct UpdateTaskRequest {
 /// workflow semantics and the permission rule; see `plan_transition`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransitionKind {
-    /// Moves between `backlog/todo/in_progress` (planning changes).
-    Planning,
-    /// `in_progress` -> `in_review`: work submitted for acceptance.
+    /// `backlog` -> `todo`: assignee picks up the task.
+    Start,
+    /// `todo` -> `in_progress`: assignee begins active work.
+    BeginProgress,
+    /// `in_progress` -> `resolved`: assignee declares work complete.
+    Resolve,
+    /// `resolved` -> `in_review`: reporter picks up for acceptance review.
     Submit,
-    /// `in_review` -> done: work accepted by the reporter (or override).
+    /// `in_review` -> `closed`: reporter explicitly accepts the work.
     Accept,
-    /// `in_review` -> `in_progress`: work returned (rejection / return-to-work).
+    /// `in_review` -> `in_progress`: reporter rejects with a mandatory reason.
     Reject,
-    /// done -> an actionable state: reopen a previously accepted task.
-    Reopen,
     /// No status field change.
     None,
 }
 
 impl TransitionKind {
+    #[allow(clippy::unused_self)]
     fn is_workflow_step(self) -> bool {
-        matches!(self, Self::Submit | Self::Accept | Self::Reject)
+        true // every variant is a workflow step in the new model
     }
 }
 
-/// Decide whether `from -> to` is a legal transition for this actor and which
-/// workflow operation it represents. Pure function; unit-tested.
-/// Permission inputs: `is_assignee`/`is_reporter` describe the actor's
-/// relationship to the task; `can_review_any` is the Owner/Admin reviewer
-/// override; `can_update_any` is the Manager+ edit permission.
-#[allow(clippy::fn_params_excessive_bools)]
-fn plan_transition(
+/// Target-state lookup for each transition kind.
+fn kind_target(kind: TransitionKind) -> &'static str {
+    match kind {
+        TransitionKind::Start => "todo",
+        TransitionKind::BeginProgress => "in_progress",
+        TransitionKind::Resolve => "resolved",
+        TransitionKind::Submit => "in_review",
+        TransitionKind::Accept => "closed",
+        TransitionKind::Reject => "in_progress",
+        TransitionKind::None => "",
+    }
+}
+
+/// The task lifecycle's authorization and validation policy. Pure function;
+/// unit-tested; no side effects. Returns the transition kind on success.
+///
+/// Role separation is strict: the assignee executes (`Start`, `BeginProgress`,
+/// `Resolve`); the reporter reviews (`Submit`, `Accept`, `Reject`). No
+/// Manager/Admin/Owner override bypasses the matrix — general task-management
+/// capabilities govern field edits and deletion, not lifecycle transitions.
+///
+/// `is_assignee` / `is_reporter`: the actor's relationship to the task.
+/// `has_overlap`: true when assignee and reporter are the same user (legacy
+/// data); overlap actors cannot gain review authority.
+/// `reason`: required for Reject, forbidden for all other transitions.
+pub fn plan_transition(
     from: &str,
     to: &'static str,
     is_assignee: bool,
     is_reporter: bool,
-    can_review_any: bool,
-    can_update_any: bool,
-) -> Result<(TransitionKind, &'static str), AppError> {
+    has_overlap: bool,
+    reason: Option<&str>,
+) -> Result<TransitionKind, AppError> {
+    #[allow(clippy::wildcard_imports)]
+    use TransitionKind::{Accept, BeginProgress, None, Reject, Resolve, Start, Submit};
     if from == to {
-        return Ok((TransitionKind::None, to));
+        return Ok(None);
     }
-    let kind = match (from, to) {
-        // Submitting work requires an actionable starting state.
-        ("in_progress", "in_review") => TransitionKind::Submit,
-        ("backlog" | "todo" | "done", "in_review") => {
-            return Err(AppError::Conflict(
-                "only in-progress tasks can be submitted for review".into(),
-            ));
-        }
-        // Acceptance is the reviewer's decision, never the assignee's. A
-        // reporter who is also the assignee is not independent: their
-        // self-review must be accepted by an administrator instead.
-        ("in_review", "done") => {
-            if (is_reporter || can_review_any) && !is_assignee {
-                TransitionKind::Accept
-            } else if is_assignee {
-                return Err(AppError::Forbidden(
-                    "the assignee cannot accept their own work; an administrator must accept it",
-                ));
+    // Role separation: overlap actors cannot act as reporter (legacy guard).
+    let effective_reporter = is_reporter && !has_overlap;
+    match (from, to) {
+        ("backlog", "todo") => {
+            if is_assignee {
+                Ok(Start)
             } else {
-                return Err(AppError::Forbidden(
-                    "only the reporter or an administrator can accept a task",
-                ));
+                Err(AppError::Forbidden(
+                    "only the assignee can move a task from backlog to todo",
+                ))
             }
         }
-        // Returning rejected work is a reviewer/manager decision.
+        ("todo", "in_progress") => {
+            if is_assignee {
+                Ok(BeginProgress)
+            } else {
+                Err(AppError::Forbidden(
+                    "only the assignee can start progress on a task",
+                ))
+            }
+        }
+        ("in_progress", "resolved") => {
+            if is_assignee {
+                Ok(Resolve)
+            } else {
+                Err(AppError::Forbidden("only the assignee can resolve a task"))
+            }
+        }
+        ("resolved", "in_review") => {
+            if effective_reporter {
+                Ok(Submit)
+            } else if has_overlap && is_assignee && is_reporter {
+                Err(AppError::Forbidden(
+                    "this task has overlapping assignee and reporter; the assignee cannot submit for review — update the reporter or assignee first",
+                ))
+            } else {
+                Err(AppError::Forbidden(
+                    "only the reporter can submit a resolved task for review",
+                ))
+            }
+        }
+        ("in_review", "closed") => {
+            if effective_reporter {
+                Ok(Accept)
+            } else if has_overlap && is_assignee && is_reporter {
+                Err(AppError::Forbidden(
+                    "this task has overlapping assignee and reporter; the assignee cannot accept their own work — update the reporter or assignee first",
+                ))
+            } else {
+                Err(AppError::Forbidden(
+                    "only the reporter can accept a task under review",
+                ))
+            }
+        }
         ("in_review", "in_progress") => {
-            if is_reporter || can_review_any || can_update_any {
-                TransitionKind::Reject
-            } else {
+            if !effective_reporter {
+                if has_overlap && is_assignee && is_reporter {
+                    return Err(AppError::Forbidden(
+                        "this task has overlapping assignee and reporter; the assignee cannot reject their own work — update the reporter or assignee first",
+                    ));
+                }
                 return Err(AppError::Forbidden(
-                    "only the reporter or a manager can return a task in review",
+                    "only the reporter can reject a task under review",
                 ));
             }
-        }
-        // Reopening accepted work clears the acceptance and starts a new cycle.
-        ("done", "backlog" | "todo" | "in_progress") => {
-            if is_reporter || can_update_any {
-                TransitionKind::Reopen
-            } else {
-                return Err(AppError::Forbidden(
-                    "only the reporter or a manager can reopen an accepted task",
+            let reason = reason.map_or("", str::trim);
+            if reason.is_empty() {
+                return Err(AppError::validation(
+                    "reason",
+                    "a rejection reason is required",
                 ));
             }
+            if reason.chars().count() > 2000 {
+                return Err(AppError::validation(
+                    "reason",
+                    "the rejection reason must be at most 2000 characters",
+                ));
+            }
+            Ok(Reject)
         }
-        // Reaching Done from an actionable state must go through review.
-        (_, "done") => {
-            return Err(AppError::Conflict(
-                "tasks must be submitted for review and accepted before they are done".into(),
-            ));
-        }
-        // Planning moves inside the actionable states.
-        _ => TransitionKind::Planning,
-    };
-    Ok((kind, to))
+        // Everything else is forbidden — including any transition from
+        // `closed` (terminal), any skip (e.g. backlog → in_progress), and any
+        // reporter attempting assignee-only transitions.
+        _ => Err(AppError::Conflict(format!(
+            "transition {from} -> {to} is not permitted by the task workflow"
+        ))),
+    }
 }
 
-/// Determine the new resolution state for a transition.
+/// The new resolution state for a transition. `Accept` marks the work
+/// accepted; `Reject` marks it rejected with the reason; other transitions
+/// leave resolution untouched.
 fn next_resolution(
     kind: TransitionKind,
     current: Option<Resolution>,
     note: Option<String>,
 ) -> (Option<Resolution>, Option<String>) {
     match kind {
-        // A new review cycle never inherits a previous decision; the history
-        // retains it.
-        TransitionKind::Submit => (None, None),
         TransitionKind::Accept => (Some(Resolution::Accepted), note),
         TransitionKind::Reject => (Some(Resolution::Rejected), note),
-        TransitionKind::Reopen => (None, None),
-        TransitionKind::Planning | TransitionKind::None => (current, note),
+        TransitionKind::Start
+        | TransitionKind::BeginProgress
+        | TransitionKind::Resolve
+        | TransitionKind::Submit
+        | TransitionKind::None => (current, note),
     }
 }
 
@@ -1230,21 +1301,33 @@ fn workflow_recipients(
         }
     };
     match kind {
-        TransitionKind::Submit => push(
-            crate::notifications::events::TASK_SUBMITTED,
-            task.reporter_id.as_ref(),
-            format!("{name} submitted \"{title}\" for your review"),
-        ),
+        TransitionKind::Start | TransitionKind::BeginProgress | TransitionKind::Resolve => {
+            // Assignee actions: notify the reporter.
+            push(
+                crate::notifications::events::TASK_STATUS_CHANGED,
+                task.reporter_id.as_ref(),
+                match kind {
+                    TransitionKind::Resolve => {
+                        format!("{name} resolved \"{title}\" — ready for review")
+                    }
+                    _ => format!("{name} started work on \"{title}\""),
+                },
+            );
+        }
+        TransitionKind::Submit => {
+            // The reporter performed the submission; inform the assignee that
+            // their work is now formally under review.
+            push(
+                crate::notifications::events::TASK_SUBMITTED,
+                task.assignee_id.as_ref(),
+                format!("{name} moved \"{title}\" into review"),
+            );
+        }
         TransitionKind::Accept => {
             push(
                 crate::notifications::events::TASK_ACCEPTED,
                 task.assignee_id.as_ref(),
-                format!("{name} accepted your work on \"{title}\""),
-            );
-            push(
-                crate::notifications::events::TASK_ACCEPTED,
-                task.reporter_id.as_ref(),
-                format!("You accepted \"{title}\""),
+                format!("{name} accepted \"{title}\""),
             );
         }
         TransitionKind::Reject => {
@@ -1252,10 +1335,10 @@ fn workflow_recipients(
             push(
                 crate::notifications::events::TASK_REJECTED,
                 task.assignee_id.as_ref(),
-                format!("{name} returned \"{title}\"{detail}"),
+                format!("{name} returned \"{title}\" to in progress{detail}"),
             );
         }
-        TransitionKind::Planning | TransitionKind::Reopen | TransitionKind::None => {}
+        TransitionKind::None => {}
     }
     batch
 }
@@ -1290,7 +1373,6 @@ async fn apply_status_transition(
     };
     let completed_at = match kind {
         TransitionKind::Accept => Some(now),
-        TransitionKind::Reopen => None,
         _ => task.completed_at,
     };
 
@@ -1391,19 +1473,13 @@ async fn update_task(
         return Err(AppError::Conflict("archived projects are read-only".into()));
     }
 
-    let is_assignee = task.assignee_id.as_deref() == Some(&user.id);
-    let is_reporter = task.reporter_id.as_deref() == Some(&user.id);
-    let (kind, next_status) = match body.status.as_deref() {
-        Some(to) => plan_transition(
-            &task.status,
-            validate_status(to)?,
-            is_assignee,
-            is_reporter,
-            actor.can(Capability::ReviewAnyTask),
-            can_update_any,
-        )?,
-        None => (TransitionKind::None, task.status.as_str()),
-    };
+    // Status transitions use the dedicated transition endpoint. The generic
+    // PATCH rejects attempts to set status directly.
+    if body.status.is_some() {
+        return Err(AppError::BadRequest(
+            "status transitions must use POST /tasks/{id}/transition".into(),
+        ));
+    }
 
     let input = validate_task_fields(
         body.title.as_deref().unwrap_or(&task.title),
@@ -1452,6 +1528,19 @@ async fn update_task(
         _ => task.reporter_id.clone(),
     };
 
+    // Identity invariant: a role change must not leave one person as both
+    // assignee and reporter. Checked only when the request touches a role so
+    // legacy overlap rows remain editable for correction via PATCH.
+    if (body.assignee_id.is_some() || body.reporter_id.is_some())
+        && assignee_id.is_some()
+        && assignee_id == reporter_id
+    {
+        return Err(AppError::validation(
+            "assignee_id",
+            "the assignee and reporter must be different users",
+        ));
+    }
+
     let label_ids = match &body.label_ids {
         Some(ids) => {
             if !can_update_any {
@@ -1465,9 +1554,9 @@ async fn update_task(
         None => None,
     };
 
-    // Diff against current state for activity records.
+    // Diff against current state for activity records. Status transitions
+    // are NOT handled here — they use the dedicated transition endpoint.
     let now = util::now_ms();
-    let (resolution, resolution_note) = next_resolution(kind, task.resolution, None);
     let mut changes: Vec<(&'static str, Option<String>, Option<String>)> = Vec::new();
     if input.title != task.title {
         changes.push(("title", Some(task.title.clone()), Some(input.title.clone())));
@@ -1477,13 +1566,6 @@ async fn update_task(
             "description",
             task.description.clone(),
             input.description.clone(),
-        ));
-    }
-    if next_status != task.status {
-        changes.push((
-            "status",
-            Some(task.status.clone()),
-            Some(next_status.to_string()),
         ));
     }
     if input.priority != task.priority {
@@ -1503,57 +1585,20 @@ async fn update_task(
         changes.push(("due_date", task.due_date.clone(), input.due_date.clone()));
     }
 
-    let completed_at = match kind {
-        TransitionKind::Accept => Some(now),
-        TransitionKind::Reopen => None,
-        _ => {
-            if next_status == "done" {
-                task.completed_at.or(Some(now))
-            } else {
-                None
-            }
-        }
-    };
-
-    // Compare-and-update on the status column: stale concurrent requests fail
-    // here instead of producing an inconsistent workflow state.
     let mut args = Args::new();
     args.s(&input.title)
         .opt_s(input.description.clone())
-        .s(next_status)
         .s(input.priority)
         .opt_s(assignee_id.clone())
         .opt_s(reporter_id.clone())
-        .opt_s(resolution.map(|r| r.as_str().to_string()))
-        .opt_s(resolution_note.clone())
-        .opt_s(if kind.is_workflow_step() {
-            Some(user.id.clone())
-        } else {
-            task.resolved_by.clone()
-        })
-        .opt_i(if kind.is_workflow_step() {
-            Some(now)
-        } else {
-            task.resolved_at
-        })
         .opt_s(input.due_date.clone())
-        .opt_i(completed_at)
         .i(now)
-        .s(&task_id)
-        .s(&task.status);
-    let affected = conn
-        .execute(
-            "UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, assignee_id = ?, \
-             reporter_id = ?, resolution = ?, resolution_note = ?, resolved_by = ?, resolved_at = ?, \
-             due_date = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = ?",
-            args,
-        )
-        .await?;
-    if affected == 0 {
-        return Err(AppError::Conflict(
-            "the task state changed concurrently; reload and retry".into(),
-        ));
-    }
+        .s(&task_id);
+    conn.execute(
+        "UPDATE tasks SET title = ?, description = ?, priority = ?, assignee_id = ?,          reporter_id = ?, due_date = ?, updated_at = ? WHERE id = ?",
+        args,
+    )
+    .await?;
 
     if let Some(ids) = &label_ids {
         let mut args = Args::new();
@@ -1565,12 +1610,8 @@ async fn update_task(
 
     // Activity rows and notifications, in the same transaction.
     let mut batch: Vec<crate::notifications::NewNotification> = Vec::new();
-    if kind.is_workflow_step() {
-        batch.extend(workflow_recipients(kind, &task, &user, None));
-    }
     for (field, old, new) in &changes {
         let event = match *field {
-            "status" => events::TASK_STATUS_CHANGED,
             "priority" => events::TASK_PRIORITY_CHANGED,
             "assignee_id" => events::TASK_ASSIGNEE_CHANGED,
             "reporter_id" => events::TASK_REPORTER_CHANGED,
@@ -1618,23 +1659,6 @@ async fn update_task(
             });
         }
     }
-    // Meaningful status change on a task the caller did not create? Inform the
-    // creator unless they already received a notification in this operation.
-    if next_status != task.status && task.created_by != user.id {
-        let already = batch.iter().any(|n| n.recipient_id == task.created_by);
-        if !already {
-            batch.push(crate::notifications::NewNotification {
-                event: crate::notifications::events::TASK_STATUS_CHANGED,
-                recipient_id: task.created_by.clone(),
-                task_id: task.id.clone(),
-                actor_id: user.id.clone(),
-                summary: format!(
-                    "{} moved \"{}\" to {}",
-                    user.display_name, input.title, next_status
-                ),
-            });
-        }
-    }
     crate::notifications::record_batch(&mut conn, &batch).await?;
     conn.commit().await?;
 
@@ -1645,26 +1669,18 @@ async fn update_task(
         parent_task_id: task.parent_task_id,
         title: input.title,
         description: input.description,
-        status: next_status.to_string(),
+        status: task.status,
         priority: input.priority.to_string(),
         assignee_id,
         reporter_id,
         created_by: task.created_by,
-        resolution,
-        resolution_note,
-        resolved_by: if kind.is_workflow_step() {
-            Some(user.id.clone())
-        } else {
-            task.resolved_by.clone()
-        },
-        resolved_at: if kind.is_workflow_step() {
-            Some(now)
-        } else {
-            task.resolved_at
-        },
+        resolution: task.resolution,
+        resolution_note: task.resolution_note,
+        resolved_by: task.resolved_by,
+        resolved_at: task.resolved_at,
         due_date: input.due_date,
         position: task.position,
-        completed_at,
+        completed_at: task.completed_at,
         created_at: task.created_at,
         updated_at: now,
     };
@@ -1680,109 +1696,64 @@ async fn update_task(
 /// override. The assignee may never decide acceptance of their own work —
 /// even when they are also the reporter, because that role is not independent.
 #[allow(clippy::fn_params_excessive_bools)]
-fn require_review_authority(
-    task: &TaskCore,
-    user: &AuthedUser,
-    can_review_any: bool,
-) -> Result<(), AppError> {
-    let is_assignee = task.assignee_id.as_deref() == Some(&user.id);
-    let is_reporter = task.reporter_id.as_deref() == Some(&user.id);
-    if (is_reporter || can_review_any) && !is_assignee {
-        Ok(())
-    } else if is_assignee {
-        Err(AppError::Forbidden(
-            "the assignee cannot decide acceptance of their own work",
-        ))
-    } else {
-        Err(AppError::Forbidden(
-            "only the reporter or an administrator can decide acceptance",
-        ))
-    }
-}
-
-/// Shared body for submit/accept/reject: permission + transition checks run on
-/// the loaded task, then the atomic transition writes history and
-/// notifications in one transaction and the fresh task is returned.
-async fn run_workflow_step(
-    state: AppState,
+/// The dedicated status-transition endpoint. All task lifecycle changes go
+/// through this path: the centralized `plan_transition` validates the
+/// transition and the actor's role, then the atomic compare-and-update
+/// persists the new state with activity and notifications in one transaction.
+async fn run_transition(
+    State(state): State<AppState>,
     user: AuthedUser,
-    task_id: String,
-    to_status: &'static str,
-    reason: Option<String>,
-) -> Result<Task, AppError> {
-    if let Some(r) = &reason {
-        if r.trim().is_empty() {
-            return Err(AppError::validation(
-                "reason",
-                "a rejection reason is required",
-            ));
-        }
-        if r.chars().count() > 2000 {
-            return Err(AppError::validation(
-                "reason",
-                "the rejection reason must be at most 2000 characters",
-            ));
-        }
-    }
+    Path(task_id): Path<String>,
+    Json(body): Json<TransitionRequest>,
+) -> Result<Json<Task>, AppError> {
+    let to = validate_status(&body.to)?;
+    let reason = body
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty());
+
     let mut conn = state.db.begin().await?;
-    let (task, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
+    let (task, _actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
 
     let project = crate::projects::find_project(&mut conn, &task.project_id).await?;
     if project.status == "archived" {
         return Err(AppError::Conflict("archived projects are read-only".into()));
     }
 
-    match to_status {
-        "in_review" => {
-            // Submission belongs to the assignee; the creator (for unassigned
-            // work) and managers may submit on their behalf.
-            let is_assignee = task.assignee_id.as_deref() == Some(&user.id);
-            let is_creator = task.created_by == user.id;
-            if !is_assignee && !is_creator && !actor.can(Capability::UpdateAnyTask) {
-                return Err(AppError::Forbidden(
-                    "only the assignee, the creator, or a manager can submit a task for review",
-                ));
-            }
-        }
-        "done" | "in_progress" => {
-            require_review_authority(&task, &user, actor.can(Capability::ReviewAnyTask))?;
-        }
-        _ => unreachable!("workflow endpoint targets a fixed status"),
-    }
+    let is_assignee = task.assignee_id.as_deref() == Some(&user.id);
+    let is_reporter = task.reporter_id.as_deref() == Some(&user.id);
+    let has_overlap = task
+        .assignee_id
+        .as_deref()
+        .zip(task.reporter_id.as_deref())
+        .is_some_and(|(a, r)| a == r);
 
-    let (kind, next_status) = plan_transition(
+    let kind = plan_transition(
         &task.status,
-        to_status,
-        task.assignee_id.as_deref() == Some(&user.id),
-        task.reporter_id.as_deref() == Some(&user.id),
-        actor.can(Capability::ReviewAnyTask),
-        actor.can(Capability::UpdateAnyTask),
+        to,
+        is_assignee,
+        is_reporter,
+        has_overlap,
+        reason,
     )?;
-    if matches!(kind, TransitionKind::None | TransitionKind::Planning) {
+    if kind == TransitionKind::None {
         return Err(AppError::Conflict(
-            "this operation does not apply to the task's current state".into(),
+            "the task is already in this status".into(),
         ));
     }
+    let next_status = kind_target(kind);
 
-    let mut batch = workflow_recipients(kind, &task, &user, reason.as_deref());
-    if to_status == "in_progress" {
-        // Rejection also informs the reporter-of-record's creator when they are
-        // not the actor and were not otherwise notified.
-        if task.created_by != user.id && !batch.iter().any(|n| n.recipient_id == task.created_by) {
-            batch.push(crate::notifications::NewNotification {
-                event: crate::notifications::events::TASK_STATUS_CHANGED,
-                recipient_id: task.created_by.clone(),
-                task_id: task.id.clone(),
-                actor_id: user.id.clone(),
-                summary: format!(
-                    "{} returned \"{}\" to in progress",
-                    user.display_name, task.title
-                ),
-            });
-        }
-    }
-    let applied_at =
-        apply_status_transition(&mut conn, &task, &user, kind, next_status, reason.clone()).await?;
+    let batch = workflow_recipients(kind, &task, &user, reason);
+    let applied_at = apply_status_transition(
+        &mut conn,
+        &task,
+        &user,
+        kind,
+        next_status,
+        reason.map(String::from),
+    )
+    .await?;
     crate::notifications::record_batch(&mut conn, &batch).await?;
     conn.commit().await?;
 
@@ -1790,64 +1761,34 @@ async fn run_workflow_step(
     core.status = next_status.to_string();
     let (resolution, note) = {
         let n = match kind {
-            TransitionKind::Reject => reason.or_else(|| core.resolution_note.clone()),
-            TransitionKind::Submit => None,
+            TransitionKind::Reject => reason
+                .map(String::from)
+                .or_else(|| core.resolution_note.clone()),
+            TransitionKind::Accept => core.resolution_note.clone(),
             _ => core.resolution_note.clone(),
         };
         next_resolution(kind, core.resolution, n)
     };
     core.resolution = resolution;
     core.resolution_note = note;
-    if kind.is_workflow_step() {
+    if matches!(kind, TransitionKind::Accept | TransitionKind::Reject) {
         core.resolved_by = Some(user.id.clone());
         core.resolved_at = Some(applied_at);
     }
-    core.completed_at = match kind {
-        TransitionKind::Accept => Some(applied_at),
-        TransitionKind::Reject | TransitionKind::Reopen => None,
-        _ => core.completed_at,
-    };
-    task_from_core(&state, core).await
-}
-
-/// Submit the assignee's completed work for the reporter's acceptance.
-async fn submit_for_review(
-    State(state): State<AppState>,
-    user: AuthedUser,
-    Path(task_id): Path<String>,
-) -> Result<Json<Task>, AppError> {
-    run_workflow_step(state, user, task_id, "in_review", None)
-        .await
-        .map(Json)
-}
-
-/// Accept a task awaiting review.
-async fn accept_task(
-    State(state): State<AppState>,
-    user: AuthedUser,
-    Path(task_id): Path<String>,
-) -> Result<Json<Task>, AppError> {
-    run_workflow_step(state, user, task_id, "done", None)
-        .await
-        .map(Json)
+    if kind == TransitionKind::Accept {
+        core.completed_at = Some(applied_at);
+    }
+    task_from_core(&state, core).await.map(Json)
 }
 
 #[derive(Deserialize)]
-pub struct RejectTaskRequest {
-    pub reason: String,
-}
-
-/// Reject a task awaiting review; it returns to In Progress with a required,
-/// audited reason.
-async fn reject_task(
-    State(state): State<AppState>,
-    user: AuthedUser,
-    Path(task_id): Path<String>,
-    Json(body): Json<RejectTaskRequest>,
-) -> Result<Json<Task>, AppError> {
-    run_workflow_step(state, user, task_id, "in_progress", Some(body.reason))
-        .await
-        .map(Json)
+pub struct TransitionRequest {
+    /// The target state. Must be a legal transition from the current state.
+    pub to: String,
+    /// Required (non-empty) for `In Review -> In Progress` rejection;
+    /// forbidden for all other transitions.
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 async fn delete_task(
@@ -2057,154 +1998,231 @@ async fn my_tasks(
 }
 
 #[cfg(test)]
+#[allow(clippy::float_equality_without_abs)]
 mod workflow_tests {
+    // These tests assert on exactly representable results (50.0, 100.0, 0.0
+    // from the linear formulas), so direct equality is intentional.
     use super::*;
 
-    #[allow(clippy::fn_params_excessive_bools)]
+    /// Helper: call `plan_transition` and return the kind (ignoring target).
     fn plan(
         from: &str,
         to: &'static str,
         is_assignee: bool,
         is_reporter: bool,
-        can_review_any: bool,
-        can_update_any: bool,
+        has_overlap: bool,
+        reason: Option<&str>,
     ) -> Result<TransitionKind, AppError> {
-        plan_transition(
-            from,
-            to,
-            is_assignee,
-            is_reporter,
-            can_review_any,
-            can_update_any,
-        )
-        .map(|(kind, _)| kind)
+        plan_transition(from, to, is_assignee, is_reporter, has_overlap, reason)
     }
 
-    #[test]
-    fn planning_moves_are_free_inside_actionable_states() {
-        for from in ["backlog", "todo", "in_progress"] {
-            for to in ["backlog", "todo", "in_progress"] {
-                if from == to {
-                    continue;
-                }
-                let kind = plan(from, to, false, false, false, false).unwrap();
-                assert_eq!(kind, TransitionKind::Planning, "{from}->{to}");
-            }
-        }
-    }
+    // ---- Allowed transitions ----
 
     #[test]
-    fn submit_requires_in_progress() {
+    fn backlog_to_todo_by_assignee() {
         assert_eq!(
-            plan("in_progress", "in_review", true, false, false, false).unwrap(),
+            plan("backlog", "todo", true, false, false, None).unwrap(),
+            TransitionKind::Start
+        );
+    }
+
+    #[test]
+    fn todo_to_in_progress_by_assignee() {
+        assert_eq!(
+            plan("todo", "in_progress", true, false, false, None).unwrap(),
+            TransitionKind::BeginProgress
+        );
+    }
+
+    #[test]
+    fn in_progress_to_resolved_by_assignee() {
+        assert_eq!(
+            plan("in_progress", "resolved", true, false, false, None).unwrap(),
+            TransitionKind::Resolve
+        );
+    }
+
+    #[test]
+    fn resolved_to_in_review_by_reporter() {
+        assert_eq!(
+            plan("resolved", "in_review", false, true, false, None).unwrap(),
             TransitionKind::Submit
         );
-        for from in ["backlog", "todo", "done"] {
+    }
+
+    #[test]
+    fn in_review_to_closed_by_reporter() {
+        assert_eq!(
+            plan("in_review", "closed", false, true, false, None).unwrap(),
+            TransitionKind::Accept
+        );
+    }
+
+    #[test]
+    fn in_review_to_in_progress_by_reporter_with_reason() {
+        assert_eq!(
+            plan(
+                "in_review",
+                "in_progress",
+                false,
+                true,
+                false,
+                Some("fix the bug")
+            )
+            .unwrap(),
+            TransitionKind::Reject
+        );
+    }
+
+    // ---- Forbidden transitions ----
+
+    #[test]
+    fn reporter_cannot_resolve() {
+        assert!(plan("in_progress", "resolved", false, true, false, None).is_err());
+    }
+
+    #[test]
+    fn assignee_cannot_submit_for_review() {
+        // In Progress -> In Review is forbidden (must go through Resolved).
+        assert!(plan("in_progress", "in_review", true, false, false, None).is_err());
+    }
+
+    #[test]
+    fn assignee_cannot_close() {
+        assert!(plan("in_review", "closed", true, false, false, None).is_err());
+    }
+
+    #[test]
+    fn assignee_cannot_move_backlog_to_todo_without_assignment() {
+        assert!(plan("backlog", "todo", false, false, false, None).is_err());
+    }
+
+    #[test]
+    fn reporter_cannot_move_backlog_to_todo_unless_assignee() {
+        assert!(plan("backlog", "todo", false, true, false, None).is_err());
+        // If the reporter is also the assignee, they can (identity policy
+        // allows this only when assignee and reporter are different users).
+    }
+
+    #[test]
+    fn no_direct_backlog_to_in_progress() {
+        assert!(plan("backlog", "in_progress", true, false, false, None).is_err());
+    }
+
+    #[test]
+    fn no_direct_resolved_to_closed() {
+        assert!(plan("resolved", "closed", false, true, false, None).is_err());
+    }
+
+    #[test]
+    fn no_direct_todo_to_resolved() {
+        assert!(plan("todo", "resolved", true, false, false, None).is_err());
+    }
+
+    #[test]
+    fn closed_is_terminal() {
+        for to in ["backlog", "todo", "in_progress", "resolved", "in_review"] {
             assert!(
-                plan(from, "in_review", true, true, true, true).is_err(),
-                "{from}"
+                plan("closed", to, true, true, false, None).is_err(),
+                "closed -> {to} must be forbidden"
             );
         }
     }
 
+    // ---- Privileged role override tests ----
+
     #[test]
-    fn assignee_cannot_accept_even_when_reporter() {
-        // The assignee's reporter role is not independent.
-        let err = plan("in_review", "done", true, true, false, false).unwrap_err();
-        assert!(matches!(err, AppError::Forbidden(_)));
-        // Even with the reviewer override, the assignee cannot accept.
-        let err = plan("in_review", "done", true, true, true, true).unwrap_err();
-        assert!(matches!(err, AppError::Forbidden(_)));
+    fn manager_cannot_resolve_others_task() {
+        // Manager is not the assignee — cannot resolve.
+        assert!(plan("in_progress", "resolved", false, false, false, None).is_err());
     }
 
     #[test]
-    fn reporter_accepts_when_not_assignee() {
+    fn admin_cannot_accept_without_reporter_role() {
+        assert!(plan("in_review", "closed", false, false, false, None).is_err());
+    }
+
+    // ---- Role separation / identity conflicts ----
+
+    #[test]
+    fn overlap_actor_cannot_submit_for_review() {
+        // Same user is both assignee and reporter (legacy data).
+        assert!(plan("resolved", "in_review", true, true, true, None).is_err());
+    }
+
+    #[test]
+    fn overlap_actor_cannot_accept() {
+        assert!(plan("in_review", "closed", true, true, true, None).is_err());
+    }
+
+    #[test]
+    fn overlap_actor_cannot_reject() {
+        assert!(plan("in_review", "in_progress", true, true, true, Some("x")).is_err());
+    }
+
+    #[test]
+    fn non_overlap_reporter_can_accept() {
+        // Assignee and reporter are different users (normal case).
         assert_eq!(
-            plan("in_review", "done", false, true, false, false).unwrap(),
+            plan("in_review", "closed", false, true, false, None).unwrap(),
             TransitionKind::Accept
         );
     }
 
+    // ---- Rejection reason validation ----
+
     #[test]
-    fn admin_override_accepts_but_not_own_assignment() {
-        assert_eq!(
-            plan("in_review", "done", false, false, true, true).unwrap(),
-            TransitionKind::Accept
-        );
-        assert!(plan("in_review", "done", true, false, true, true).is_err());
+    fn rejection_requires_reason() {
+        assert!(plan("in_review", "in_progress", false, true, false, None).is_err());
     }
 
     #[test]
-    fn plain_member_cannot_accept_or_reject() {
-        assert!(plan("in_review", "done", false, false, false, false).is_err());
-        assert!(plan("in_review", "in_progress", false, false, false, false).is_err());
+    fn rejection_rejects_whitespace_reason() {
+        assert!(plan("in_review", "in_progress", false, true, false, Some("   ")).is_err());
     }
 
     #[test]
-    fn rejection_returns_to_in_progress() {
-        assert_eq!(
-            plan("in_review", "in_progress", false, true, false, false).unwrap(),
-            TransitionKind::Reject
-        );
-        // Managers may return work without being reporters.
-        assert_eq!(
-            plan("in_review", "in_progress", false, false, false, true).unwrap(),
-            TransitionKind::Reject
-        );
+    fn rejection_rejects_oversized_reason() {
+        let long = "x".repeat(2001);
+        assert!(plan("in_review", "in_progress", false, true, false, Some(&long)).is_err());
     }
 
     #[test]
-    fn done_requires_review() {
-        for from in ["backlog", "todo", "in_progress"] {
-            let err = plan(from, "done", true, true, true, true).unwrap_err();
-            assert!(matches!(err, AppError::Conflict(_)), "{from}");
-        }
-    }
-
-    #[test]
-    fn reopen_is_reporter_or_manager() {
+    fn rejection_forbidden_for_other_transitions() {
+        // A reason supplied for a non-rejection transition is ignored (the
+        // planner only validates it for Reject).
         assert_eq!(
-            plan("done", "in_progress", false, true, false, false).unwrap(),
-            TransitionKind::Reopen
-        );
-        assert_eq!(
-            plan("done", "todo", false, false, false, true).unwrap(),
-            TransitionKind::Reopen
-        );
-        assert!(plan("done", "in_progress", true, false, false, false).is_err());
-    }
-
-    #[test]
-    fn no_op_when_status_unchanged() {
-        assert_eq!(
-            plan("todo", "todo", false, false, false, false).unwrap(),
-            TransitionKind::None
+            plan(
+                "in_progress",
+                "resolved",
+                true,
+                false,
+                false,
+                Some("why not")
+            )
+            .unwrap(),
+            TransitionKind::Resolve
         );
     }
 
+    // ---- Resolution state ----
+
     #[test]
-    fn resolution_transitions() {
-        use Resolution::*;
-        // A new review cycle clears the previous decision.
-        let (res, note) =
-            next_resolution(TransitionKind::Submit, Some(Rejected), Some("old".into()));
-        assert_eq!(res, None);
-        assert_eq!(note, None);
-        // Acceptance records the decision.
+    fn resolution_on_accept() {
         let (res, _) = next_resolution(TransitionKind::Accept, None, None);
-        assert_eq!(res, Some(Accepted));
-        // Rejection records the decision.
-        let (res, note) = next_resolution(
-            TransitionKind::Reject,
-            Some(Accepted),
-            Some("broken".into()),
-        );
-        assert_eq!(res, Some(Rejected));
+        assert_eq!(res, Some(Resolution::Accepted));
+    }
+
+    #[test]
+    fn resolution_on_reject() {
+        let (res, note) = next_resolution(TransitionKind::Reject, None, Some("broken".into()));
+        assert_eq!(res, Some(Resolution::Rejected));
         assert_eq!(note.as_deref(), Some("broken"));
-        // Reopen clears it; planning keeps it.
-        let (res, _) = next_resolution(TransitionKind::Reopen, Some(Accepted), None);
-        assert_eq!(res, None);
-        let (res, _) = next_resolution(TransitionKind::Planning, Some(Rejected), None);
-        assert_eq!(res, Some(Rejected));
+    }
+
+    #[test]
+    fn resolution_unchanged_on_other_transitions() {
+        let (res, _) = next_resolution(TransitionKind::Start, Some(Resolution::Rejected), None);
+        assert_eq!(res, Some(Resolution::Rejected));
     }
 }

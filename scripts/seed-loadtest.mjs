@@ -39,7 +39,7 @@ const session = setCookie.split(";")[0];
 const team = await jf("POST", "/api/v1/teams", { name: "Load Team" }, session);
 const project = await jf("POST", `/api/v1/teams/${team.id}/projects`, { name: "Load Project" }, session);
 
-const statuses = ["backlog", "todo", "in_progress", "in_review", "done"];
+const statuses = ["backlog", "todo", "in_progress", "resolved", "in_review", "closed"];
 const priorities = ["low", "medium", "high", "urgent"];
 let created = 0;
 const CONCURRENCY = 25;

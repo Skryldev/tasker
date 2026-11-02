@@ -1,6 +1,8 @@
 # ADR-0008: Reporter acceptance workflow and transactional notifications
 
-Date: 2026-10-29 · Status: accepted
+Date: 2026-10-29 · Status: accepted (workflow model superseded by
+[ADR-0011](0011-task-lifecycle-integrity.md), which removed the
+Owner/Admin reviewer override and the `done` status)
 
 ## Context
 

@@ -92,7 +92,9 @@ test.describe.serial("Tasker core workflow", () => {
     await memberPage.close();
   });
 
-  test("create a project and a task, assign, and move it across the board", async () => {
+  test("create a project and a task, assign, and move it across the board", async ({
+    browser,
+  }) => {
     await page.goto(`/projects?team=${teamId}`);
     await page.getByTestId("create-project").click();
     await page.getByTestId("project-name-input").fill("Launch Plan");
@@ -105,27 +107,43 @@ test.describe.serial("Tasker core workflow", () => {
     projectId = url.pathname.split("/").pop() ?? "";
     expect(projectId).not.toBe("");
 
-    // Create a task from the board's Todo column.
+    // Create a task from the board's Todo column, assigned to the member:
+    // the creator (admin) is the reporter, and one person must not be both
+    // assignee and reporter.
     await page.getByTestId("view-board").click();
     await page.getByTestId("create-task-board").click();
     await page.getByTestId("task-title-input").fill("Write announcement post");
     await page.getByLabel("Status").click();
     await page.getByRole("option", { name: "Todo" }).click();
+    await page.getByRole("combobox", { name: "Assignee" }).click();
+    await page.getByRole("option", { name: "member", exact: false }).first().click();
     await page.getByTestId("task-submit").click();
     const card = page.locator('[data-testid^="kanban-card-"]', { hasText: "Write announcement post" });
     await expect(card).toBeVisible();
 
-    // Move the card to In Progress via drag and drop.
+    // Move the card to In Progress via drag and drop. Only the assignee may
+    // execute that transition, so the member does the dragging.
     const cardId = (await card.getAttribute("data-testid"))!.replace("kanban-card-", "");
-    await card.hover();
-    await page.mouse.down();
-    const target = page.getByTestId("kanban-column-in_progress");
+    const memberContext = await browser.newContext();
+    const mp = await memberContext.newPage();
+    await mp.goto("/login");
+    await mp.getByLabel("Email").fill(MEMBER.email);
+    await mp.getByLabel("Password").fill(MEMBER.password);
+    await mp.getByTestId("login-submit").click();
+    await expect(mp.getByRole("heading", { name: "My Tasks" })).toBeVisible();
+    await mp.goto(`/projects/${projectId}?view=board`);
+    const memberCard = mp.locator('[data-testid^="kanban-card-"]', { hasText: "Write announcement post" });
+    await expect(memberCard).toBeVisible();
+    await memberCard.hover();
+    await mp.mouse.down();
+    const target = mp.getByTestId("kanban-column-in_progress");
     const box = await target.boundingBox();
-    await page.mouse.move(box!.x + box!.width / 2, box!.y + 40, { steps: 8 });
-    await page.mouse.up();
-    await expect(page.getByTestId("kanban-column-in_progress")).toContainText(
+    await mp.mouse.move(box!.x + box!.width / 2, box!.y + 40, { steps: 8 });
+    await mp.mouse.up();
+    await expect(mp.getByTestId("kanban-column-in_progress")).toContainText(
       "Write announcement post",
     );
+    await memberContext.close();
 
     // The change persisted to the backend.
     const list = await page.request.get(

@@ -45,6 +45,9 @@ time = { version = "0.3", features = ["parsing", "formatting", "macros"] }
 url = "2"
 clap = { version = "4", features = ["derive", "env"] }
 rpassword = "7"
+totp-rs = { version = "5", features = ["otpauth"] }
+aes-gcm = "0.10"
+hmac = "0.12"
 
 [dev-dependencies]
 tracing-subscriber = "0.3"

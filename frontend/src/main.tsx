@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import "@/index.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -9,17 +9,37 @@ import { ToastProvider } from "@/components/ui/toast";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { LoginPage } from "@/pages/LoginPage";
 import { MyTasksPage } from "@/pages/MyTasksPage";
-import { ProjectsPage } from "@/pages/ProjectsPage";
-import { ProjectPage } from "@/pages/ProjectPage";
-import { TeamSettingsPage } from "@/pages/TeamSettingsPage";
-import { CreateTeamPage } from "@/pages/CreateTeamPage";
-import { AccountPage } from "@/pages/AccountPage";
-import { TaskPage } from "@/pages/TaskPage";
-import { WorkloadPage } from "@/pages/WorkloadPage";
-import { GoalsPage } from "@/pages/GoalsPage";
-import { GoalDetailPage } from "@/pages/GoalDetailPage";
-import { ProjectGuestsPage } from "@/pages/ProjectGuestsPage";
 import type { ReactNode } from "react";
+
+// Route-level code splitting: the login page and the default landing page
+// load eagerly with the shell; every other page is fetched on first visit so
+// the initial bundle stays small (see vite.config manualChunks).
+const ProjectsPage = lazy(() =>
+  import("@/pages/ProjectsPage").then((m) => ({ default: m.ProjectsPage })),
+);
+const ProjectPage = lazy(() =>
+  import("@/pages/ProjectPage").then((m) => ({ default: m.ProjectPage })),
+);
+const TeamSettingsPage = lazy(() =>
+  import("@/pages/TeamSettingsPage").then((m) => ({ default: m.TeamSettingsPage })),
+);
+const CreateTeamPage = lazy(() =>
+  import("@/pages/CreateTeamPage").then((m) => ({ default: m.CreateTeamPage })),
+);
+const AccountPage = lazy(() =>
+  import("@/pages/AccountPage").then((m) => ({ default: m.AccountPage })),
+);
+const TaskPage = lazy(() => import("@/pages/TaskPage").then((m) => ({ default: m.TaskPage })));
+const WorkloadPage = lazy(() =>
+  import("@/pages/WorkloadPage").then((m) => ({ default: m.WorkloadPage })),
+);
+const GoalsPage = lazy(() => import("@/pages/GoalsPage").then((m) => ({ default: m.GoalsPage })));
+const GoalDetailPage = lazy(() =>
+  import("@/pages/GoalDetailPage").then((m) => ({ default: m.GoalDetailPage })),
+);
+const ProjectGuestsPage = lazy(() =>
+  import("@/pages/ProjectGuestsPage").then((m) => ({ default: m.ProjectGuestsPage })),
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {

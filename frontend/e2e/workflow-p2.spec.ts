@@ -1,7 +1,9 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
 /**
- * Phase 2 E2E: reporter acceptance workflow + in-app notifications.
+ * Phase 2 E2E: reporter acceptance workflow + in-app notifications, on the
+ * strict lifecycle (assignee executes, reporter reviews):
+ *   backlog -> todo -> in_progress -> resolved -> in_review -> closed
  * Runs after the Phase 1 suite against a freshly bootstrapped server
  * (scripts/e2e.sh restarts the server and wipes the DB before the run).
  */
@@ -13,6 +15,7 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
   let context: BrowserContext;
   let page: Page;
   let teamId = "";
+  let projectId = "";
   let taskId = "";
 
   test.beforeAll(async ({ browser }) => {
@@ -50,8 +53,12 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
     await page.getByTestId("project-name-input").fill("P2 Project");
     await page.getByTestId("project-submit").click();
     await page.getByRole("link", { name: /P2 Project/ }).first().click();
+    projectId = new URL(await page.url()).pathname.split("/").pop() ?? "";
+    expect(projectId).not.toBe("");
 
     // The admin assigns the member at creation so the member can work it.
+    // The admin stays the reporter: one person must not be both assignee
+    // and reporter (identity invariant).
     await page.getByTestId("create-task").click();
     await page.getByTestId("task-title-input").fill("Workflow task");
     await page.request.get(`/api/v1/teams/${teamId}/members`);
@@ -67,7 +74,7 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
     expect(taskId).not.toBe("");
   });
 
-  test("member assigns self, works, and submits for review", async ({ browser }) => {
+  test("member picks up, works, and resolves — but cannot review", async ({ browser }) => {
     const memberContext = await browser.newContext();
     const mp = await memberContext.newPage();
     await mp.goto("/login");
@@ -78,47 +85,73 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
     await mp.waitForURL(/\/$|\?team=/, { timeout: 15_000 });
     await expect(mp.getByRole("heading", { name: "My Tasks" })).toBeVisible();
 
-    // The member (already assigned at creation) starts work and submits.
-    await mp.goto(`/tasks/${taskId}`);
-    await expect(mp.getByTestId("task-detail")).toContainText("Workflow task");
-    const start = await mp.request.patch(`/api/v1/tasks/${taskId}`, {
-      data: { status: "in_progress" },
+    // The assignee drives the execution leg through the transition endpoint.
+    const todo = await mp.request.post(`/api/v1/tasks/${taskId}/transition`, {
+      data: { to: "todo" },
+    });
+    expect(todo.status()).toBe(200);
+    const start = await mp.request.post(`/api/v1/tasks/${taskId}/transition`, {
+      data: { to: "in_progress" },
     });
     expect(start.status()).toBe(200);
-    await mp.reload();
+    // The generic PATCH no longer mutates status (dedicated endpoint only).
+    const patchStatus = await mp.request.patch(`/api/v1/tasks/${taskId}`, {
+      data: { status: "in_progress" },
+    });
+    expect(patchStatus.status()).toBe(400);
+    await mp.goto(`/tasks/${taskId}`);
     await expect(mp.getByTestId("task-detail")).toContainText("In Progress");
 
-    // The submit button is offered to the assignee.
-    await mp.getByTestId("submit-task").click();
-    await expect(mp.getByTestId("task-detail")).toContainText("In Review");
-    // The assignee cannot accept their own work: no accept button is offered,
-    // and a direct API call is forbidden.
+    // The assignee marks the work resolved.
+    await mp.getByTestId("resolve-task").click();
+    await expect(mp.getByTestId("task-detail")).toContainText("Resolved");
+
+    // Review decisions belong to the reporter: submission is forbidden for
+    // the assignee (legal pair, actor check), and no accept button is
+    // offered. A direct attempt to jump straight to closed is not even a
+    // legal pair (409): closed is only reachable from in_review.
+    const submitRes = await mp.request.post(`/api/v1/tasks/${taskId}/transition`, {
+      data: { to: "in_review" },
+    });
+    expect(submitRes.status()).toBe(403);
     expect(await mp.getByTestId("accept-task").count()).toBe(0);
-    const res = await mp.request.post(`/api/v1/tasks/${taskId}/accept`);
-    expect(res.status()).toBe(403);
+    const res = await mp.request.post(`/api/v1/tasks/${taskId}/transition`, {
+      data: { to: "closed" },
+    });
+    expect(res.status()).toBe(409);
     await memberContext.close();
   });
 
-  test("reporter sees a submission notification and accepts via the UI", async () => {
-    // The bell shows the unread submission notification.
+  test("reporter sees the ready-for-review notification and accepts via the UI", async () => {
+    // The bell shows the unread notification about the resolved work.
     await page.reload();
     await expect(page.getByTestId("unread-badge")).toBeVisible();
     await page.getByTestId("notification-bell").click();
     const list = page.getByTestId("notification-list");
-    await expect(list).toContainText("submitted");
+    await expect(list).toContainText("resolved");
     await list.locator('[data-testid^="notification-"]').first().click();
-    // Navigation goes to the task page; the workflow buttons appear.
+    // Navigation goes to the task page; the reporter submits for review.
+    await expect(page.getByTestId("task-detail")).toContainText("Resolved");
+    await expect(page.getByTestId("submit-task")).toBeVisible();
+    await page.getByTestId("submit-task").click();
     await expect(page.getByTestId("task-detail")).toContainText("In Review");
-    await expect(page.getByTestId("workflow-actions")).toBeVisible();
+    // Then the reporter accepts: the task closes.
     await page.getByTestId("accept-task").click();
     await expect(page.getByTestId("resolution-banner")).toContainText("Accepted");
   });
 
   test("reject flow requires a reason and the assignee is notified", async ({ browser }) => {
-    // Admin reopens; member resubmits; admin rejects with a reason.
-    await page.request.patch(`/api/v1/tasks/${taskId}`, {
-      data: { status: "in_progress" },
-    });
+    // Closed is terminal, so the rejection path uses a fresh task: the admin
+    // creates it with the member as assignee (reporter = admin).
+    const members = await (await page.request.get(`/api/v1/teams/${teamId}/members`)).json();
+    const memberId = members.items.find((m) => m.role === "member").user.id;
+    const created = await (
+      await page.request.post(`/api/v1/projects/${projectId}/tasks`, {
+        data: { title: "Reject flow task", assignee_id: memberId },
+      })
+    ).json();
+    const rejectTaskId = created.id as string;
+    expect(rejectTaskId).not.toBe("");
 
     const memberContext = await browser.newContext();
     const mp = await memberContext.newPage();
@@ -129,17 +162,20 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
     // Wait for the authenticated redirect, not a transient heading flash.
     await mp.waitForURL(/\/$|\?team=/, { timeout: 15_000 });
     await expect(mp.getByRole("heading", { name: "My Tasks" })).toBeVisible();
-    await mp.goto(`/tasks/${taskId}`);
-    await mp.getByTestId("submit-task").click();
-    await expect(mp.getByTestId("task-detail")).toContainText("In Review");
+    // Member works the task to resolved; the reporter then submits it.
+    for (const to of ["todo", "in_progress", "resolved"]) {
+      const res = await mp.request.post(`/api/v1/tasks/${rejectTaskId}/transition`, {
+        data: { to },
+      });
+      expect(res.status()).toBe(200);
+    }
     await memberContext.close();
+    const submit = await page.request.post(`/api/v1/tasks/${rejectTaskId}/transition`, {
+      data: { to: "in_review" },
+    });
+    expect(submit.status()).toBe(200);
 
-    // The bell carries a new submission notification (badge visible after
-    // the query refresh; no need to open the panel).
-    await page.reload();
-    await expect(page.getByTestId("unread-badge")).toBeVisible();
-
-    await page.goto(`/tasks/${taskId}`);
+    await page.goto(`/tasks/${rejectTaskId}`);
     await page.getByTestId("reject-task").click();
     // Blank reason is blocked client-side.
     await page.getByTestId("reject-submit").click();

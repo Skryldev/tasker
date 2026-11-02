@@ -9,8 +9,9 @@ import {
 import type { Task } from "@/api/client";
 import { Avatar } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
-import { PriorityBadge, StatusBadge } from "./TaskBadges";
-import { cn, formatDate } from "@/lib/utils";
+import { PriorityBadge, StatusBadge, StatusDot } from "./TaskBadges";
+import { cn } from "@/lib/utils";
+import { formatJalaliDate } from "@/lib/doran";
 
 const columnHelper = createColumnHelper<Task>();
 
@@ -48,8 +49,7 @@ export function TaskTable({
         header: "Task",
         cell: ({ row }) => (
           <span className="flex items-center gap-2">
-            <StatusDot status={row.original.status} />
-            <span className="min-w-0">
+            <StatusDot status={row.original.status} />            <span className="min-w-0">
               <span className="block truncate font-medium">{row.original.title}</span>
               {renderContext ? (
                 <span className="block truncate text-2xs text-muted-foreground">
@@ -89,7 +89,7 @@ export function TaskTable({
       columnHelper.accessor("due_date", {
         header: "Due",
         cell: ({ getValue }) => (
-          <span className="text-xs text-muted-foreground">{formatDate(getValue())}</span>
+          <span className="text-xs text-muted-foreground">{formatJalaliDate(getValue())}</span>
         ),
       }),
     ],
@@ -163,15 +163,4 @@ export function TaskTable({
       ) : null}
     </div>
   );
-}
-
-function StatusDot({ status }: { status: string }) {
-  const color: Record<string, string> = {
-    backlog: "bg-status-backlog",
-    todo: "bg-status-todo",
-    in_progress: "bg-status-in-progress",
-    in_review: "bg-status-in-review",
-    done: "bg-status-done",
-  };
-  return <span className={cn("h-2 w-2 shrink-0 rounded-full", color[status] ?? "bg-muted-foreground")} />;
 }

@@ -49,6 +49,10 @@ One SQL codebase runs on all engines. The rules that make this work:
   never serves traffic, and non-destructive DDL makes reruns safe.
 - Fresh-install and upgrade paths are the same code path; no destructive
   resets are ever issued automatically.
+- Migrations that cannot run inside a transaction (SQLite table rebuilds
+  needing `PRAGMA foreign_keys = OFF`, MySQL/MariaDB DDL that implicitly
+  commits) declare `-- tasker:autocommit` and execute statement-by-statement
+  with the version recorded last.
 
 ## Engine-specific notes
 
@@ -103,6 +107,36 @@ CHECK-constrained goal status and metric type, indexes on team listing,
 key-result lookup, and association joins, plus a nullable
 `activities.goal_id` for goal-scoped history. Verified fresh-install and
 upgrade paths on SQLite, PostgreSQL, and MariaDB.
+
+## Migration 0005 (pre-Phase-5 integrity hotfix)
+
+Corrects the task lifecycle to the strict six-state machine (see
+ADR-0011). The legacy `done` status is mapped conservatively using the
+Phase 2 `resolution` column as evidence: `done` with
+`resolution='accepted'` becomes `closed`; any other `done` row becomes
+`resolved` (rejected or undecided work stays in the reviewable pipeline
+rather than earning unearned acceptance). PostgreSQL swaps the CHECK
+constraint atomically: DDL is transactional there, so the whole migration
+(constraint drops, remap, re-add, version record) commits together and a
+crash rolls back for a clean re-run. Note the base schema declares the
+status CHECK inline, so its auto-generated name is `tasks_status_check` —
+the migration drops that name and the reserved `chk_tasks_status`
+defensively before remapping. MySQL/MariaDB DDL implicitly commits, so the
+swap cannot be atomic: a stop between `DROP CHECK` and `ADD CHECK` leaves
+valid data without the constraint, and a naive re-run fails at `DROP CHECK`
+(fail-closed — the server refuses to start; recovery is to re-apply the
+remaining statements manually). SQLite cannot alter a CHECK constraint, so
+the tasks table is rebuilt with the new constraint and the status mapping
+expressed as a CASE in the copy SELECT — rows are copied before anything
+is dropped, so no crash window can lose data (fail-closed recovery windows
+are documented in the migration header). The rebuild needs
+`PRAGMA foreign_keys = OFF`, which is a no-op inside a transaction —
+migrations may now declare an `-- tasker:autocommit` marker; the runner
+then executes their statements outside a wrapping transaction (on a single
+connection) and records the version at the end. A statement filter for
+that mode skips only pure-comment blocks. Verified fresh-install and
+upgrade paths on SQLite;
+the PostgreSQL/MariaDB variants are exercised by CI's three-engine job.
 
 ## Backup and restore
 

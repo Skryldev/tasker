@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { PRIORITIES, PRIORITY_LABELS, STATUS_LABELS, TASK_STATUSES, cn } from "@/lib/utils";
 
 /** Team workload view: server-side aggregation of assigned open tasks by
@@ -90,18 +90,16 @@ export function WorkloadPage() {
             ))}
           </SelectContent>
         </Select>
-        <Input
-          type="date"
-          value={dueAfter}
-          onChange={(e) => setDueAfter(e.target.value)}
-          aria-label="Due on or after"
+        <DateField
+          value={dueAfter || null}
+          onChange={setDueAfter}
+          ariaLabel="Due on or after"
           className="w-40"
         />
-        <Input
-          type="date"
-          value={dueBefore}
-          onChange={(e) => setDueBefore(e.target.value)}
-          aria-label="Due on or before"
+        <DateField
+          value={dueBefore || null}
+          onChange={setDueBefore}
+          ariaLabel="Due on or before"
           className="w-40"
         />
       </div>

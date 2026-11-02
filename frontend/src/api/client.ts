@@ -1,6 +1,9 @@
 import type { components } from "./schema";
 
 export type User = components["schemas"]["User"];
+export type MfaRequired = components["schemas"]["MfaRequired"];
+export type MfaSetup = components["schemas"]["MfaSetup"];
+export type RecoveryCodes = components["schemas"]["RecoveryCodes"];
 export type Team = components["schemas"]["Team"];
 export type Member = components["schemas"]["Member"];
 export type Label = components["schemas"]["Label"];
@@ -94,8 +97,31 @@ async function request(
  */
 export const api = {
   // auth ---------------------------------------------------------------
-  login(email: string, password: string): Promise<User> {
-    return request("post", "/auth/login", { body: { email, password } }) as Promise<User>;
+  login(email: string, password: string): Promise<User | MfaRequired> {
+    return request("post", "/auth/login", { body: { email, password } }) as Promise<
+      User | MfaRequired
+    >;
+  },
+  mfaSetup(): Promise<MfaSetup> {
+    return request("post", "/auth/2fa/setup") as Promise<MfaSetup>;
+  },
+  mfaEnable(code: string): Promise<RecoveryCodes> {
+    return request("post", "/auth/2fa/enable", { body: { code } }) as Promise<RecoveryCodes>;
+  },
+  mfaVerify(mfaToken: string, code: string): Promise<User> {
+    return request("post", "/auth/2fa/verify", {
+      body: { mfa_token: mfaToken, code },
+    }) as Promise<User>;
+  },
+  mfaDisable(currentPassword: string): Promise<void> {
+    return request("post", "/auth/2fa/disable", {
+      body: { current_password: currentPassword },
+    }) as Promise<void>;
+  },
+  mfaRecoveryCodes(currentPassword: string): Promise<RecoveryCodes> {
+    return request("post", "/auth/2fa/recovery-codes", {
+      body: { current_password: currentPassword },
+    }) as Promise<RecoveryCodes>;
   },
   logout(): Promise<void> {
     return request("post", "/auth/logout") as Promise<void>;
@@ -218,15 +244,9 @@ export const api = {
       body,
     }) as Promise<Task>;
   },
-  submitForReview(taskId: string): Promise<Task> {
-    return request("post", `/tasks/${taskId}/submit`) as Promise<Task>;
-  },
-  acceptTask(taskId: string): Promise<Task> {
-    return request("post", `/tasks/${taskId}/accept`) as Promise<Task>;
-  },
-  rejectTask(taskId: string, reason: string): Promise<Task> {
-    return request("post", `/tasks/${taskId}/reject`, {
-      body: { reason },
+  transitionTask(taskId: string, to: string, reason?: string): Promise<Task> {
+    return request("post", `/tasks/${taskId}/transition`, {
+      body: reason !== undefined ? { to, reason } : { to },
     }) as Promise<Task>;
   },
   listDependencies(taskId: string): Promise<DependencyList> {

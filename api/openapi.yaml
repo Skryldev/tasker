@@ -69,7 +69,103 @@ paths:
                   type: string
       responses:
         "200":
-          description: Authenticated; session cookie set.
+          description: |
+            Authenticated. Two shapes:
+            - users WITHOUT two-factor authentication: the user, session cookie set;
+            - users WITH two-factor authentication: `mfa_required` with a
+              short-lived, single-use `mfa_token` (no session is issued yet).
+              The token is submitted with the code to `POST /auth/2fa/verify`.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/User"
+                  - $ref: "#/components/schemas/MfaRequired"
+        "401":
+          $ref: "#/components/responses/Problem401"
+        "429":
+          $ref: "#/components/responses/Problem429"
+
+  /auth/2fa/setup:
+    post:
+      tags: [auth]
+      summary: Begin TOTP two-factor enrollment (normal session required)
+      description: |
+        Generates a fresh pending TOTP secret, stores it encrypted
+        (AES-256-GCM), and returns the `otpauth://` provisioning URI plus the
+        Base32 secret for manual entry. MFA is NOT enabled yet. Repeated
+        setup replaces the pending secret. Responses are `Cache-Control:
+        no-store`. An MFA-pending token cannot call this endpoint.
+      responses:
+        "200":
+          description: Pending provisioning information.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MfaSetup"
+        "401":
+          $ref: "#/components/responses/Problem401"
+        "409":
+          $ref: "#/components/responses/Problem409"
+        "500":
+          $ref: "#/components/responses/Problem500"
+
+  /auth/2fa/enable:
+    post:
+      tags: [auth]
+      summary: Confirm enrollment with a six-digit TOTP code
+      description: |
+        Verifies the code against the pending secret (window 0: only the
+        current 30-second step), atomically enables MFA, and returns ten
+        plaintext recovery codes — the only response that ever contains
+        them. An invalid code does not enable MFA.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpCode"
+      responses:
+        "200":
+          description: MFA enabled; recovery codes returned exactly once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveryCodes"
+        "400":
+          $ref: "#/components/responses/Problem400"
+        "401":
+          $ref: "#/components/responses/Problem401"
+        "409":
+          $ref: "#/components/responses/Problem409"
+        "422":
+          $ref: "#/components/responses/Problem422"
+
+  /auth/2fa/verify:
+    post:
+      tags: [auth]
+      summary: Complete two-factor login (MFA-pending token required)
+      description: |
+        Accepts either a six-digit TOTP code or a recovery code
+        (`XXXX-XXXX`). Rate limited: 5 failed attempts per user per minute
+        and 10 per IP per minute (the stricter applies; 429 on excess).
+        The MFA-pending token is consumed exactly once on success and a
+        normal session cookie is issued. Expired, consumed, or forged
+        tokens — and wrong codes — return 401; no session is issued on any
+        failed path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MfaVerify"
+      responses:
+        "200":
+          description: Two-factor check passed; session cookie set.
           headers:
             Set-Cookie:
               schema:
@@ -82,6 +178,57 @@ paths:
           $ref: "#/components/responses/Problem401"
         "429":
           $ref: "#/components/responses/Problem429"
+
+  /auth/2fa/disable:
+    post:
+      tags: [auth]
+      summary: Disable two-factor authentication (password re-authentication)
+      description: |
+        Requires the current password. Removes the encrypted TOTP secret and
+        recovery codes atomically and invalidates outstanding MFA-pending
+        tokens. An MFA-pending token cannot call this endpoint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CurrentPassword"
+      responses:
+        "204":
+          description: Two-factor authentication disabled.
+        "401":
+          $ref: "#/components/responses/Problem401"
+        "422":
+          $ref: "#/components/responses/Problem422"
+
+  /auth/2fa/recovery-codes:
+    post:
+      tags: [auth]
+      summary: Regenerate recovery codes (password re-authentication)
+      description: |
+        Requires the current password and enabled MFA. Replaces all stored
+        recovery-code hashes: every previously issued code is invalidated.
+        The new plaintext codes are returned exactly once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CurrentPassword"
+      responses:
+        "200":
+          description: Ten new recovery codes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveryCodes"
+        "400":
+          $ref: "#/components/responses/Problem400"
+        "401":
+          $ref: "#/components/responses/Problem401"
+        "422":
+          $ref: "#/components/responses/Problem422"
+
   /auth/logout:
     post:
       tags: [auth]
@@ -670,6 +817,11 @@ paths:
         they created or are assigned to, but may only assign tasks to
         themselves and cannot edit labels. Every changed field is recorded
         in the task's activity history.
+
+        Status changes are not accepted here — a request containing `status`
+        is rejected with 400; lifecycle transitions must use
+        `POST /tasks/{task_id}/transition`. A change that would leave one
+        person as both assignee and reporter is rejected with 422.
       parameters:
         - $ref: "#/components/parameters/TaskId"
       requestBody:
@@ -685,6 +837,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Task"
+        "400":
+          $ref: "#/components/responses/Problem400"
         "403":
           $ref: "#/components/responses/Problem403"
         "404":
@@ -851,63 +1005,29 @@ paths:
         "404":
           $ref: "#/components/responses/Problem404"
 
-  /tasks/{task_id}/submit:
+  /tasks/{task_id}/transition:
     post:
       tags: [tasks]
-      summary: Submit the task for the reporter's acceptance
+      summary: Execute a lifecycle transition on a task
       description: |
-        Moves an In Progress task to In Review. Allowed for the assignee,
-        the task creator (for unassigned work), or Manager roles and above.
-        The reporter is notified. Clears any previous resolution: a new
-        review cycle never inherits an old decision.
-      parameters:
-        - $ref: "#/components/parameters/TaskId"
-      responses:
-        "200":
-          description: Task is now In Review.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Task"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "409":
-          $ref: "#/components/responses/Problem409"
-  /tasks/{task_id}/accept:
-    post:
-      tags: [tasks]
-      summary: Accept a task awaiting review (In Review -> Done)
-      description: |
-        Only the designated reporter, or an Owner/Admin reviewer override,
-        may accept — never the assignee, even when they are also the
-        reporter (that reporter role is not independent). Records
-        `resolution=accepted`, the resolver, and the timestamp.
-      parameters:
-        - $ref: "#/components/parameters/TaskId"
-      responses:
-        "200":
-          description: Task accepted.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Task"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "409":
-          $ref: "#/components/responses/Problem409"
-  /tasks/{task_id}/reject:
-    post:
-      tags: [tasks]
-      summary: Reject a task awaiting review (In Review -> In Progress)
-      description: |
-        The mirror of accept: the reporter (or Owner/Admin override, never
-        the assignee) returns the work with a required, audited reason.
-        Records `resolution=rejected`, the note, resolver, and timestamp;
-        the assignee is notified with the reason.
+        The only way to change a task's status. The lifecycle is strict:
+
+        | From | To | Actor |
+        |------|----|-------|
+        | Backlog | Todo | Assignee |
+        | Todo | In Progress | Assignee |
+        | In Progress | Resolved | Assignee |
+        | Resolved | In Review | Reporter |
+        | In Review | Closed | Reporter (acceptance) |
+        | In Review | In Progress | Reporter (rejection; reason required) |
+
+        No other transition exists, Closed is terminal, and privileged roles
+        have no overrides. A user must not be both assignee and reporter;
+        legacy tasks with overlapping roles cannot be advanced by the
+        overlapping user — correct the roles via PATCH first. Acceptance
+        records `resolution=accepted` and the completion timestamp;
+        rejection records `resolution=rejected` with the audited reason and
+        returns the task to In Progress.
       parameters:
         - $ref: "#/components/parameters/TaskId"
       requestBody:
@@ -915,10 +1035,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TaskReject"
+              $ref: "#/components/schemas/TaskTransition"
       responses:
         "200":
-          description: Task returned to In Progress.
+          description: Transition applied; the updated task is returned.
           content:
             application/json:
               schema:
@@ -1073,7 +1193,7 @@ paths:
       description: |
         Server-side SQL aggregation grouped by assignee. Counts open tasks by
         status and priority plus an overdue count (due date before today UTC
-        and status not done). This is task distribution, NOT effort or
+        and status not closed). This is task distribution, NOT effort or
         capacity. Requires team membership; guests receive 404.
       parameters:
         - $ref: "#/components/parameters/TeamId"
@@ -1634,7 +1754,7 @@ paths:
                       properties:
                         id: { type: string, format: uuid }
                         title: { type: string }
-                        status: { type: string, enum: [backlog, todo, in_progress, in_review, done] }
+                        status: { type: string, enum: [backlog, todo, in_progress, resolved, in_review, closed] }
         "404":
           $ref: "#/components/responses/Problem404"
     post:
@@ -1818,6 +1938,12 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
+    Problem400:
+      description: Bad request (e.g. a status field on the generic task update).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
     Problem404:
       description: Resource not found (or not visible to the caller).
       content:
@@ -1836,6 +1962,12 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
+    Problem500:
+      description: Internal error (e.g. two-factor authentication is not configured on this deployment).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
     Problem429:
       description: Rate limited.
       content:
@@ -1868,12 +2000,83 @@ components:
               message: { type: string }
     User:
       type: object
-      required: [id, email, display_name, created_at]
+      required: [id, email, display_name, created_at, mfa_enabled]
       properties:
         id: { type: string, format: uuid }
         email: { type: string, format: email }
         display_name: { type: string }
         created_at: { type: integer, description: "epoch milliseconds" }
+        mfa_enabled:
+          type: boolean
+          description: Whether TOTP two-factor authentication is enabled for this account.
+    MfaRequired:
+      type: object
+      required: [mfa_required, mfa_token]
+      properties:
+        mfa_required:
+          type: boolean
+          description: Always true in this response shape.
+        mfa_token:
+          type: string
+          maxLength: 512
+          description: |
+            Single-use, 10-minute MFA-pending credential bound to the
+            authenticated user. It authorizes only `POST /auth/2fa/verify`.
+    MfaSetup:
+      type: object
+      required: [uri, secret, issuer, account]
+      properties:
+        uri:
+          type: string
+          description: otpauth:// provisioning URI to encode as a QR code locally.
+        secret:
+          type: string
+          description: Base32 secret for manual authenticator entry.
+        issuer:
+          type: string
+        account:
+          type: string
+          format: email
+    TotpCode:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          minLength: 6
+          maxLength: 6
+          description: Six-digit TOTP code from the authenticator.
+    MfaVerify:
+      type: object
+      required: [mfa_token, code]
+      properties:
+        mfa_token:
+          type: string
+          maxLength: 512
+        code:
+          type: string
+          minLength: 6
+          maxLength: 9
+          description: |
+            Six-digit TOTP code, or a recovery code in `XXXX-XXXX` form
+            (separators optional, case-insensitive).
+    CurrentPassword:
+      type: object
+      required: [current_password]
+      properties:
+        current_password:
+          type: string
+    RecoveryCodes:
+      type: object
+      required: [recovery_codes]
+      properties:
+        recovery_codes:
+          type: array
+          minItems: 10
+          maxItems: 10
+          items:
+            type: string
+            description: '`XXXX-XXXX`; shown exactly once at issuance or regeneration.'
     UserBrief:
       type: object
       required: [id, display_name, email]
@@ -1942,12 +2145,14 @@ components:
         status:
           type: string
           enum: [backlog, todo, in_progress]
-          description: New tasks start in an actionable state; Done requires review acceptance.
+          description: New tasks start in an actionable state; later lifecycle states are reached only via transitions.
         reporter_id:
           type: [string, "null"]
           description: |
             Acceptance reviewer. Defaults to the caller; selecting another
-            user requires the Manager role or above and must be a team member.
+            user requires the Manager role or above and must be a team
+            member. The assignee and reporter must be different users — a
+            creation request that gives one person both roles is rejected.
         priority: { type: string, enum: [low, medium, high, urgent] }
         assignee_id:
           type: [string, "null"]
@@ -1965,18 +2170,14 @@ components:
     TaskUpdate:
       type: object
       minProperties: 1
+      description: |
+        Field edits only. Status changes are rejected with 400 — lifecycle
+        transitions must use `POST /tasks/{task_id}/transition`. The assignee
+        and reporter must remain different users; a change that would give
+        one person both roles is rejected with 422.
       properties:
         title: { type: string, minLength: 1, maxLength: 250 }
         description: { type: [string, "null"], maxLength: 10000 }
-        status:
-          type: string
-          enum: [backlog, todo, in_progress, in_review, done]
-          description: |
-            Validated against the workflow: In Progress -> In Review is a
-            submission; In Review -> Done is an acceptance (reporter or
-            Owner/Admin, never the assignee); In Review -> In Progress is a
-            rejection/return; Done -> actionable states reopen the task
-            (clearing the resolution).
         priority: { type: string, enum: [low, medium, high, urgent] }
         assignee_id:
           type: [string, "null"]
@@ -1984,8 +2185,9 @@ components:
         reporter_id:
           type: [string, "null"]
           description: |
-            Acceptance reviewer; empty string resets to the caller. Changes
-            require the Manager role or above and must reference a member.
+            Acceptance reviewer. Changes require the Manager role or above
+            and must reference a member; the assignee and reporter must be
+            different users.
         due_date:
           type: [string, "null"]
           format: date
@@ -2004,7 +2206,7 @@ components:
         parent_task_id: { type: [string, "null"] }
         title: { type: string }
         description: { type: [string, "null"] }
-        status: { type: string, enum: [backlog, todo, in_progress, in_review, done] }
+        status: { type: string, enum: [backlog, todo, in_progress, resolved, in_review, closed] }
         priority: { type: string, enum: [low, medium, high, urgent] }
         assignee: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
         reporter:
@@ -2012,7 +2214,7 @@ components:
           oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }]
         created_by: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
         resolution:
-          description: Latest acceptance decision; absent during active work or a new cycle.
+          description: Latest acceptance decision; set on acceptance (closing) or rejection (returning to In Progress), cleared when work restarts.
           type: [string, "null"]
           enum: [accepted, rejected, null]
         resolution_note: { type: [string, "null"] }
@@ -2020,7 +2222,7 @@ components:
         resolved_at: { type: [integer, "null"], description: "epoch ms of the latest decision" }
         due_date: { type: [string, "null"], format: date }
         position: { type: number }
-        completed_at: { type: [integer, "null"], description: "epoch ms; set while status is done" }
+        completed_at: { type: [integer, "null"], description: "epoch ms; set when the reporter accepts the task (status closed)" }
         labels:
           type: array
           items: { $ref: "#/components/schemas/LabelBrief" }
@@ -2057,15 +2259,21 @@ components:
         page: { type: integer }
         page_size: { type: integer }
         total: { type: integer }
-    TaskReject:
+    TaskTransition:
       type: object
-      required: [reason]
+      required: [to]
       properties:
+        to:
+          type: string
+          enum: [todo, in_progress, resolved, in_review, closed]
+          description: Target state; must be a legal successor of the current state (see POST /tasks/{task_id}/transition).
         reason:
           type: string
           minLength: 1
           maxLength: 2000
-          description: Audited with the rejection decision.
+          description: |
+            Required when rejecting (In Review -> In Progress) and audited
+            with the rejection decision; otherwise ignored.
     Notification:
       type: object
       required: [id, event, summary, created_at]
@@ -2112,7 +2320,7 @@ components:
       properties:
         task_id: { type: string, format: uuid }
         title: { type: string }
-        status: { type: string, enum: [backlog, todo, in_progress, in_review, done] }
+        status: { type: string, enum: [backlog, todo, in_progress, resolved, in_review, closed] }
         due_date: { type: [string, "null"], format: date }
     DependencyList:
       type: object
@@ -2280,7 +2488,7 @@ components:
             properties:
               id: { type: string, format: uuid }
               title: { type: string }
-              status: { type: string, enum: [backlog, todo, in_progress, in_review, done] }
+              status: { type: string, enum: [backlog, todo, in_progress, resolved, in_review, closed] }
         execution:
           type: object
           description: Task execution statistics — NOT key-result achievement.
@@ -2327,7 +2535,7 @@ components:
             type: object
             required: [status, total, items]
             properties:
-              status: { type: string, enum: [backlog, todo, in_progress, in_review, done] }
+              status: { type: string, enum: [backlog, todo, in_progress, resolved, in_review, closed] }
               total: { type: integer }
               items:
                 type: array

@@ -17,6 +17,8 @@ are no config files and no defaults that embed secrets.
 | `TASKER_DB_IDLE_TIMEOUT_SECS` | `300` | Idle connection reaping. |
 | `TASKER_DB_MAX_LIFETIME_SECS` | `1800` | Connection max age. |
 | `TASKER_RATE_LIMIT_LOGIN_PER_MIN` | `10` | Login attempts per minute per client IP (in-memory, per process). |
+| `TASKER_MFA_ENCRYPTION_KEY` | unset | AES-256 key (64 hex chars = 32 bytes) encrypting TOTP secrets at rest. Unset disables the 2FA endpoints (fail-closed); a malformed value aborts startup. Generate with `openssl rand -hex 32` and back it up — losing it makes enrolled secrets unrecoverable. |
+| `TASKER_RECOVERY_PEPPER` | unset | Independent HMAC-SHA-256 key (64 hex chars = 32 bytes) for recovery-code digests (ADR-0012). Provision independently of the encryption key. Unset disables recovery-code flows (fail-closed); a malformed value aborts startup. Rotating or losing it invalidates stored recovery codes (users regenerate via the authenticated flow). |
 | `TASKER_BODY_LIMIT_BYTES` | `1048576` | Maximum request body size. |
 | `TASKER_ALLOWED_ORIGINS` | *(empty)* | Comma-separated origins allowed by CORS **and** the CSRF origin check. Empty = same-origin only, which is correct when the app is served behind the bundled proxy. |
 | `TASKER_PUBLIC_REGISTRATION` | `false` | Allow `POST /api/v1/auth/register`. Leave disabled; provision members via Team Settings. |

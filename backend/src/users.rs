@@ -92,6 +92,27 @@ pub async fn create_validated(
     .await
 }
 
+/// Active-only variant of [`find_by_id`] used by authentication paths.
+pub async fn find_active_by_id(conn: &mut Conn<'_>, id: &str) -> Result<Option<User>, AppError> {
+    let mut args = Args::new();
+    args.s(id);
+    let row = conn
+        .fetch_optional(
+            "SELECT id, email, display_name, created_at FROM users WHERE id = ? AND is_active = TRUE",
+            args,
+        )
+        .await?;
+    row.map(|r| {
+        Ok(User {
+            id: r.try_get("id")?,
+            email: r.try_get("email")?,
+            display_name: r.try_get("display_name")?,
+            created_at: r.try_get("created_at")?,
+        })
+    })
+    .transpose()
+}
+
 pub async fn find_by_id(conn: &mut Conn<'_>, id: &str) -> Result<Option<User>, AppError> {
     let mut args = Args::new();
     args.s(id);

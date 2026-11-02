@@ -6,7 +6,8 @@ const STATUS_DOT: Record<TaskStatus, string> = {
   todo: "bg-status-todo",
   in_progress: "bg-status-in-progress",
   in_review: "bg-status-in-review",
-  done: "bg-status-done",
+  resolved: "bg-status-resolved",
+  closed: "bg-status-closed",
 };
 
 export function StatusBadge({ status, className }: { status: string; className?: string }) {

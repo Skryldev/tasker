@@ -3,6 +3,62 @@
 Security posture of Phase 1: what is implemented, what it protects against,
 and what remains out of scope.
 
+## Two-factor authentication (TOTP, Phase 7)
+
+- **Enrollment**: `POST /auth/2fa/setup` generates a fresh 160-bit secret,
+  stores it **encrypted with AES-256-GCM**, and returns the `otpauth://`
+  URI + Base32 secret. `POST /auth/2fa/enable` verifies one code at
+  window 0, atomically flips `enabled_at`, and returns ten plaintext
+  recovery codes — the only response that ever contains them. Repeated
+  setup replaces the pending secret; an already-enabled configuration
+  cannot be replaced or re-enabled.
+- **Key management**: secrets are encrypted under `TASKER_MFA_ENCRYPTION_KEY`
+  — exactly 64 hex characters (32 bytes). Generate one per deployment with
+  `openssl rand -hex 32`. Configure it in the deployment environment (systemd
+  `Environment=`, Docker `-e`, or a secrets manager); it is deliberately
+  absent by default so MFA endpoints fail closed (500) rather than falling
+  back to plaintext. **Losing the key makes every enrolled user's secret
+  permanently unrecoverable** — back it up with the same care as the
+  database itself. Decryption failures are uniform internal errors that
+  never reveal the secret or the crypto details.
+- **Login**: a correct password for an enrolled user yields `{mfa_required,
+  mfa_token}` instead of a session. The token is a 256-bit random string
+  (`mfp_`-prefixed), bound to the user, TTL 10 minutes, single-use
+  (server-side `consumed_at` CAS). It authorizes exactly one endpoint
+  (`POST /auth/2fa/verify`) and nothing else; cookie-based session
+  resolution never sees it. Only a successful verification issues the
+  normal session (through the existing session-creation path).
+- **Verification**: six digits, SHA-1, 30 s step, **window 0** (only the
+  current step). Replay prevention persists the consumed step counter in
+  `user_mfa.last_used_step` via a compare-and-set UPDATE — a timestamp
+  alone cannot identify a consumed step. Recovery codes (`XXXX-XXXX`,
+  31-symbol unambiguous alphabet, ~39.6 bits) are stored as **keyed
+  HMAC-SHA-256 digests** (`h1.`-tagged) under the independently
+  provisioned `TASKER_RECOVERY_PEPPER` — never derived from the
+  encryption key, never stored in the database (ADR-0012: unkeyed SHA-256
+  fell to offline brute force in minutes once the database leaked; the
+  pepper does not increase code entropy, it binds the offline attack to a
+  second server-side secret). Codes are consumed atomically (the stored
+  digest array is compared-and-swapped, so concurrent redemptions cannot
+  both succeed); regeneration invalidates every previous code. Legacy
+  unkeyed digests are rejected unconditionally and were cleared by
+  migration 0007.
+- **Rate limiting**: `POST /auth/2fa/verify` allows at most 5 attempts per
+  user per minute and 10 per IP per minute (the stricter applies), using
+  the existing fixed-window limiter. **Single-instance scope**: the
+  counters are process-local, matching the documented deployment model;
+  horizontal deployments must front the service with a shared limiter for
+  distributed enforcement. The IP counter cannot permanently lock a victim
+  out (a valid user still verifies from a different IP), and the per-user
+  counter cannot be driven by an attacker without already possessing a
+  fresh pending token (which requires the correct password).
+- **Disable / regenerate** require the current password; disable removes
+  the encrypted secret, recovery hashes, and any outstanding pending
+  tokens atomically. A deleted user cascades both MFA tables.
+- **No secrets in logs or errors**: codes, secrets, provisioning URIs,
+  recovery codes, passwords, and tokens are never logged; setup/enable
+  responses carry `Cache-Control: no-store`.
+
 ## Authentication
 
 - **Passwords**: Argon2id (OWASP-recommended baseline: 19 MiB memory, t=2,
@@ -42,17 +98,30 @@ and what remains out of scope.
   task assignments atomically (their assignments are cleared in the same
   transaction).
 
-## Workflow authorization (Phase 2)
+## Workflow authorization (Phase 2, corrected in the pre-Phase-5 integrity hotfix)
 
-- The assignee can never accept or reject their own work — even when they
-  are also the task's reporter, because that reporter role is not
-  independent. The Owner/Admin reviewer override (`ReviewAnyTask`
-  capability) exists but is likewise denied to the assignee.
+- The lifecycle is a strict six-state machine
+  (`backlog -> todo -> in_progress -> resolved -> in_review -> closed`,
+  plus the `in_review -> in_progress` rejection return). Only the assignee
+  executes (pick up, start, resolve); only the reporter reviews (submit,
+  accept, reject). No Manager/Admin/Owner override exists — privileged
+  roles govern field edits and deletion, never lifecycle transitions.
+- The identity invariant (`assignee != reporter`) is enforced server-side
+  at creation and on every assignment/reporter update. Requests that would
+  give one person both roles are rejected with 422; neither role is changed
+  silently. Legacy rows that already overlap cannot be advanced by the
+  overlapping user — one of the two roles must be corrected via the generic
+  PATCH first.
+- The generic task update rejects a `status` field with 400: transitions
+  exist only as the dedicated, policy-checked
+  `POST /tasks/{task_id}/transition` endpoint; rejection requires a
+  non-empty reason (<= 2000 chars) and is audited.
 - Task creators do not gain acceptance rights by creation alone.
 - Reporter selection at creation or edit requires the Manager role or above
   and must reference an eligible team member.
 - Cross-team actors receive 404s (no existence disclosure); workflow state
-  conflicts return 409 with a stale-state message rather than mutating.
+  conflicts (illegal transition, stale request, terminal `closed`) return
+  409 rather than mutating.
 - Notifications are strictly recipient-scoped: foreign ids are 404, unread
   counts and lists are keyed on the authenticated user, and no endpoint
   exposes task content beyond the frozen event summary written while the

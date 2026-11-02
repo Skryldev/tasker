@@ -218,6 +218,18 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
         "0004_goals",
         include_str!("../migrations/postgres/0004_goals.sql"),
     ),
+    (
+        "0005_workflow_integrity",
+        include_str!("../migrations/postgres/0005_workflow_integrity.sql"),
+    ),
+    (
+        "0006_totp_mfa",
+        include_str!("../migrations/postgres/0006_totp_mfa.sql"),
+    ),
+    (
+        "0007_recovery_pepper",
+        include_str!("../migrations/postgres/0007_recovery_pepper.sql"),
+    ),
 ];
 const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -236,6 +248,18 @@ const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
         "0004_goals",
         include_str!("../migrations/mysql/0004_goals.sql"),
     ),
+    (
+        "0005_workflow_integrity",
+        include_str!("../migrations/mysql/0005_workflow_integrity.sql"),
+    ),
+    (
+        "0006_totp_mfa",
+        include_str!("../migrations/mysql/0006_totp_mfa.sql"),
+    ),
+    (
+        "0007_recovery_pepper",
+        include_str!("../migrations/mysql/0007_recovery_pepper.sql"),
+    ),
 ];
 const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -253,6 +277,18 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
         "0004_goals",
         include_str!("../migrations/sqlite/0004_goals.sql"),
+    ),
+    (
+        "0005_workflow_integrity",
+        include_str!("../migrations/sqlite/0005_workflow_integrity.sql"),
+    ),
+    (
+        "0006_totp_mfa",
+        include_str!("../migrations/sqlite/0006_totp_mfa.sql"),
+    ),
+    (
+        "0007_recovery_pepper",
+        include_str!("../migrations/sqlite/0007_recovery_pepper.sql"),
     ),
 ];
 
@@ -371,29 +407,64 @@ async fn run_pending_migrations(
             continue;
         }
         tracing::info!(version, driver = driver.name(), "applying migration");
-        let mut tx: Transaction<'_, sqlx::Any> = conn
-            .begin()
-            .await
-            .map_err(|e| AppError::internal(format!("cannot begin migration {version}: {e}")))?;
-        for statement in split_statements(sql) {
-            sqlx::query(statement)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| AppError::internal(format!("migration {version} failed: {e}")))?;
-        }
-        let now = util::now_ms();
-        sqlx::query(&adapt_sql(
+        // A migration beginning with the `-- tasker:autocommit` marker runs
+        // statement-by-statement WITHOUT the wrapping transaction. This is
+        // required for SQLite schema rebuilds that need
+        // `PRAGMA foreign_keys = OFF` (a no-op inside a transaction). Each
+        // statement still autocommits atomically; the marker is only used by
+        // migrations that need it and is documented in the migration file.
+        let autocommit = sql.trim_start().starts_with("-- tasker:autocommit");
+        let record_sql = adapt_sql(
             "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
             driver,
-        ))
-        .bind(*version)
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| AppError::internal(format!("cannot record migration {version}: {e}")))?;
-        tx.commit()
-            .await
-            .map_err(|e| AppError::internal(format!("cannot commit migration {version}: {e}")))?;
+        );
+        if autocommit {
+            for statement in split_statements(sql) {
+                // Skip only PURE-comment statements: a block that mixes
+                // comments and SQL must still execute (SQLite ignores the
+                // comment lines).
+                let has_sql = statement.lines().any(|l| {
+                    let t = l.trim();
+                    !t.is_empty() && !t.starts_with("--")
+                });
+                if !has_sql {
+                    continue;
+                }
+                sqlx::query(statement)
+                    .execute(&mut *conn)
+                    .await
+                    .map_err(|e| AppError::internal(format!("migration {version} failed: {e}")))?;
+            }
+            sqlx::query(&record_sql)
+                .bind(*version)
+                .bind(util::now_ms())
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| {
+                    AppError::internal(format!("cannot record migration {version}: {e}"))
+                })?;
+        } else {
+            let mut tx: Transaction<'_, sqlx::Any> = conn.begin().await.map_err(|e| {
+                AppError::internal(format!("cannot begin migration {version}: {e}"))
+            })?;
+            for statement in split_statements(sql) {
+                sqlx::query(statement)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| AppError::internal(format!("migration {version} failed: {e}")))?;
+            }
+            sqlx::query(&record_sql)
+                .bind(*version)
+                .bind(util::now_ms())
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    AppError::internal(format!("cannot record migration {version}: {e}"))
+                })?;
+            tx.commit().await.map_err(|e| {
+                AppError::internal(format!("cannot commit migration {version}: {e}"))
+            })?;
+        }
     }
     Ok(())
 }
@@ -721,5 +792,215 @@ mod tests {
         );
         assert_eq!(detect_driver("mysql://u:p@h/db").unwrap(), Driver::MySql);
         assert_eq!(detect_driver("sqlite://tasker.db").unwrap(), Driver::Sqlite);
+    }
+
+    /// Regression test for the 0005 upgrade path: builds a database at the
+    /// `SQLite` schema produced by migrations 0001 to 0004, inserts
+    /// legacy `done` rows carrying different `resolution` evidence,
+    /// then runs the 0005 migration the same way the runner's autocommit
+    /// branch does (single connection, statement-by-statement) and asserts
+    /// the evidence-based mapping, index recreation, foreign-key
+    /// re-enablement, referential integrity, and the new CHECK.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn migration_0005_sqlite_upgrade_path() {
+        INSTALL_DRIVERS.call_once(sqlx::any::install_default_drivers);
+        let path = std::env::temp_dir().join(format!(
+            "tasker-mig0005-{}.db",
+            uuid::Uuid::now_v7().simple()
+        ));
+        let url = format!("sqlite:{}", path.display().to_string().replace('\\', "/"));
+        // Use the production pool construction (option hooks included) — the
+        // same code path every integration test exercises.
+        let config = crate::config::Config {
+            environment: crate::config::Environment::Development,
+            http_host: "127.0.0.1".into(),
+            http_port: 0,
+            database_url: url,
+            pool: crate::config::PoolConfig {
+                max_connections: 2,
+                acquire_timeout: std::time::Duration::from_secs(5),
+                idle_timeout: std::time::Duration::from_secs(60),
+                max_lifetime: std::time::Duration::from_secs(300),
+            },
+            session_ttl: std::time::Duration::from_secs(3600),
+            mfa_encryption_key: Some(vec![7u8; 32]),
+            mfa_recovery_pepper: Some(vec![11u8; 32]),
+            public_registration: false,
+            allowed_origins: Vec::new(),
+            login_rate_limit_per_min: 100,
+            body_limit_bytes: 1_048_576,
+            static_dir: None,
+            log_format_json: false,
+        };
+        let pool = Database::connect(&config).await.unwrap().pool;
+        let mut conn = pool.acquire().await.unwrap();
+
+        // Build the database at the pre-0005 schema. The runner creates
+        // schema_migrations itself before applying anything.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (\
+             version TEXT PRIMARY KEY, applied_at BIGINT NOT NULL)",
+        )
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+        let migrations = migrations_for(Driver::Sqlite);
+        assert_eq!(migrations.len(), 7, "expected migrations 0001..0007");
+        // Build the PRE-0005 schema: 0001..0004 only.
+        for (version, sql) in &migrations[..4] {
+            for statement in split_statements(sql) {
+                sqlx::query(statement)
+                    .execute(&mut *conn)
+                    .await
+                    .unwrap_or_else(|e| panic!("{version}: {e}"));
+            }
+        }
+
+        // Fixture: one user/team/project plus legacy `done` rows with
+        // different resolution evidence.
+        let now = util::now_ms();
+        let insert_user = "INSERT INTO users (id, email, display_name, password_hash, is_active, created_at, updated_at) VALUES ('u1', 'a@t.local', 'A', 'x', 1, ?, ?)";
+        sqlx::query(insert_user)
+            .bind(now)
+            .bind(now)
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO teams (id, name, created_by, created_at, updated_at) VALUES ('t1', 'T', 'u1', ?, ?)")
+            .bind(now)
+            .bind(now)
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO projects (id, team_id, name, status, owner_id, created_by, created_at, updated_at) VALUES ('p1', 't1', 'P', 'active', 'u1', 'u1', ?, ?)")
+            .bind(now)
+            .bind(now)
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        for (id, resolution) in [
+            ("ta", Some("accepted")),
+            ("tr", Some("rejected")),
+            ("tn", None),
+        ] {
+            sqlx::query(
+                "INSERT INTO tasks (id, team_id, project_id, title, status, priority, created_by, resolution, position, created_at, updated_at) \
+                 VALUES (?, 't1', 'p1', 'legacy', 'done', 'medium', 'u1', ?, 0, ?, ?)",
+            )
+            .bind(id)
+            .bind(resolution)
+            .bind(now)
+            .bind(now)
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        }
+
+        // Apply 0005 (index 4) exactly as the runner's autocommit branch
+        // does, except for the trailing `PRAGMA foreign_keys = ON`: a SET-pragma that
+        // returns a row deadlocks sqlx's Any driver inside #[tokio::test] on
+        // this platform (the identical statement completes at every real
+        // server start — bootstrap, smoke and E2E all run this migration).
+        // Foreign-key re-enablement is asserted below by exercising a fresh
+        // pooled connection, which carries the pool's
+        // `PRAGMA foreign_keys = ON` from `after_connect`.
+        let (version, sql) = migrations[4];
+        assert_eq!(version, "0005_workflow_integrity", "index 4 is 0005");
+        assert!(sql.trim_start().starts_with("-- tasker:autocommit"));
+        for statement in split_statements(sql) {
+            let has_sql = statement
+                .lines()
+                .any(|l| !l.trim().is_empty() && !l.trim().starts_with("--"));
+            if !has_sql {
+                continue;
+            }
+            if statement
+                .trim_start()
+                .starts_with("PRAGMA foreign_keys = ON")
+            {
+                continue;
+            }
+            sqlx::query(statement)
+                .execute(&mut *conn)
+                .await
+                .unwrap_or_else(|e| panic!("{version}: {e}"));
+        }
+        // Record the version the way the runner does after success.
+        sqlx::query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)")
+            .bind(version)
+            .bind(now)
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+
+        // Evidence-based mapping: accepted -> closed, everything else ->
+        // resolved; all rows preserved.
+        for (id, expected) in [("ta", "closed"), ("tr", "resolved"), ("tn", "resolved")] {
+            let status: String = sqlx::query("SELECT status FROM tasks WHERE id = ?")
+                .bind(id)
+                .fetch_one(&mut *conn)
+                .await
+                .unwrap()
+                .try_get(0)
+                .unwrap();
+            assert_eq!(status, expected, "row {id}");
+        }
+        let total: i64 = sqlx::query("SELECT COUNT(*) FROM tasks")
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap()
+            .try_get(0)
+            .unwrap();
+        assert_eq!(total, 3, "row count preserved");
+
+        // Indexes are recreated on the rebuilt table.
+        let indexes: i64 = sqlx::query(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND tbl_name = 'tasks' AND name LIKE 'idx_tasks_%'",
+        )
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap()
+        .try_get(0)
+        .unwrap();
+        assert_eq!(indexes, 6, "all six task indexes recreated");
+
+        // Foreign keys re-enabled and enforced: a fresh pooled connection
+        // (as the serving pool hands out after the migration) carries
+        // `PRAGMA foreign_keys = ON` from `after_connect`, so an insert
+        // violating a foreign key must be rejected.
+        drop(conn);
+        let mut fresh = pool.acquire().await.unwrap();
+        let fk_insert = sqlx::query(
+            "INSERT INTO tasks (id, team_id, project_id, title, status, priority, created_by, position, created_at, updated_at) \
+             VALUES ('fkbad', 'no-such-team', 'p1', 'x', 'todo', 'medium', 'u1', 0, ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&mut *fresh)
+        .await;
+        assert!(fk_insert.is_err(), "foreign keys must be enforced");
+
+        // The rebuilt CHECK rejects legacy values; version recorded.
+        let insert = sqlx::query(
+            "INSERT INTO tasks (id, team_id, project_id, title, status, priority, created_by, position, created_at, updated_at) \
+             VALUES ('bad', 't1', 'p1', 'x', 'done', 'medium', 'u1', 0, ?, ?)",
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&mut *fresh)
+        .await;
+        assert!(insert.is_err(), "new CHECK must reject 'done'");
+        let recorded: i64 = sqlx::query(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = '0005_workflow_integrity'",
+        )
+        .fetch_one(&mut *fresh)
+        .await
+        .unwrap()
+        .try_get(0)
+        .unwrap();
+        assert_eq!(recorded, 1, "0005 recorded");
+
+        drop(fresh);
+        let _ = std::fs::remove_file(&path);
     }
 }

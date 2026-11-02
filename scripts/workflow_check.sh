@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Phase 2 workflow + notification verification against a running server.
+# Workflow + notification verification against a running server.
+# Exercises the strict lifecycle:
+#   backlog -> todo -> in_progress -> resolved -> in_review -> closed
+#   in_review -> in_progress (reject, reason required)
 # Usage: scripts/workflow_check.sh <base-url>
 set -u
 BASE="${1:-http://localhost:8085}"
@@ -34,33 +37,38 @@ CODE=$(code -b $M -X POST $BASE/api/v1/projects/$P/tasks -H 'Content-Type: appli
   -d "{\"title\":\"Reporter test\",\"reporter_id\":\"$RID\"}")
 echo "member selects other reporter -> $CODE (expect 403)"
 
-TASK=$(curl -s -b $M -X POST $BASE/api/v1/projects/$P/tasks -H 'Content-Type: application/json' \
+# Admin creates the task and assigns the member: the reporter (admin) and the
+# assignee (member) are different people, as the identity invariant requires.
+# A member-created task with self-assignment would be rejected (the creator
+# is the default reporter).
+TASK=$(curl -s -b $C -X POST $BASE/api/v1/projects/$P/tasks -H 'Content-Type: application/json' \
   -d "{\"title\":\"P2 flow\",\"assignee_id\":\"$MID\"}" | python -c "import sys,json;print(json.load(sys.stdin)['id'])")
-st() { curl -s -b $M $BASE/api/v1/tasks/$TASK | python -c "
+st() { curl -s -b $C $BASE/api/v1/tasks/$TASK | python -c "
 import sys,json
 t=json.load(sys.stdin)
 print('status='+t['status'], 'res='+str(t.get('resolution')), 'note='+str(t.get('resolution_note')))"; }
+tr() { code -b "$1" -X POST $BASE/api/v1/tasks/$TASK/transition -H 'Content-Type: application/json' -d "$2"; }
 
 echo "created:        $(st)"
-curl -s -b $M -X PATCH $BASE/api/v1/tasks/$TASK -H 'Content-Type: application/json' \
-  -d '{"status":"in_progress"}' -o /dev/null
-echo "in_progress:    $(st)"
-
-echo "submit:         $(code -b $M -X POST $BASE/api/v1/tasks/$TASK/submit) (expect 200)"
+echo "patch status:   $(code -b $M -X PATCH $BASE/api/v1/tasks/$TASK -H 'Content-Type: application/json' -d '{"status":"in_progress"}') (expect 400 — transitions use the endpoint)"
+echo "member todo:    $(tr $M '{"to":"todo"}') (expect 200)"
+echo "admin starts:   $(tr $C '{"to":"in_progress"}') (expect 403 — reporter cannot execute)"
+echo "member start:   $(tr $M '{"to":"in_progress"}') (expect 200)"
+echo "member resolves:$(tr $M '{"to":"resolved"}') (expect 200)"
+echo "after resolve:  $(st)"
+echo "member submits: $(tr $M '{"to":"in_review"}') (expect 403 — assignee cannot submit)"
+echo "admin submits:  $(tr $C '{"to":"in_review"}') (expect 200)"
 echo "after submit:   $(st)"
-echo "member accepts: $(code -b $M -X POST $BASE/api/v1/tasks/$TASK/accept) (expect 403)"
-echo "blank reject:   $(code -b $C -X POST $BASE/api/v1/tasks/$TASK/reject -H 'Content-Type: application/json' -d '{"reason":"  "}') (expect 422)"
-echo "admin accepts:  $(code -b $C -X POST $BASE/api/v1/tasks/$TASK/accept) (expect 200)"
-echo "after accept:   $(st)"
-echo "stale accept:   $(code -b $C -X POST $BASE/api/v1/tasks/$TASK/accept) (expect 409)"
-
-# reopen by admin, member works, submits again, admin rejects with reason
-curl -s -b $C -X PATCH $BASE/api/v1/tasks/$TASK -H 'Content-Type: application/json' \
-  -d '{"status":"in_progress"}' -o /dev/null
-echo "reopen:         $(st) (resolution cleared)"
-curl -s -b $M -X POST $BASE/api/v1/tasks/$TASK/submit -o /dev/null
-echo "reject w/reason:$(code -b $C -X POST $BASE/api/v1/tasks/$TASK/reject -H 'Content-Type: application/json' -d '{"reason":"fix the intro"}') (expect 200)"
+echo "member accepts: $(tr $M '{"to":"closed"}') (expect 403)"
+echo "blank reject:   $(tr $C '{"to":"in_progress"}') (expect 422 — reason required)"
+echo "admin rejects:  $(tr $C '{"to":"in_progress","reason":"fix the intro"}') (expect 200)"
 echo "after reject:   $(st)"
+echo "re-resolve:     $(tr $M '{"to":"resolved"}') (expect 200)"
+echo "re-submit:      $(tr $C '{"to":"in_review"}') (expect 200)"
+echo "admin accepts:  $(tr $C '{"to":"closed"}') (expect 200)"
+echo "after accept:   $(st)"
+echo "closed->todo:   $(tr $C '{"to":"todo"}') (expect 409 — closed is terminal)"
+echo "stale accept:   $(tr $C '{"to":"closed"}') (expect 409)"
 
 echo "-- notifications --"
 echo "member:  $(curl -s -b $M $BASE/api/v1/notifications | python -c "

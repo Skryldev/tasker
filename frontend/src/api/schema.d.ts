@@ -33,7 +33,161 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Authenticated; session cookie set. */
+                /**
+                 * @description Authenticated. Two shapes:
+                 *     - users WITHOUT two-factor authentication: the user, session cookie set;
+                 *     - users WITH two-factor authentication: `mfa_required` with a
+                 *       short-lived, single-use `mfa_token` (no session is issued yet).
+                 *       The token is submitted with the code to `POST /auth/2fa/verify`.
+                 */
+                200: {
+                    headers: {
+                        "Set-Cookie"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["User"] | components["schemas"]["MfaRequired"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                429: components["responses"]["Problem429"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/2fa/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin TOTP two-factor enrollment (normal session required)
+         * @description Generates a fresh pending TOTP secret, stores it encrypted
+         *     (AES-256-GCM), and returns the `otpauth://` provisioning URI plus the
+         *     Base32 secret for manual entry. MFA is NOT enabled yet. Repeated
+         *     setup replaces the pending secret. Responses are `Cache-Control:
+         *     no-store`. An MFA-pending token cannot call this endpoint.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Pending provisioning information. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MfaSetup"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                409: components["responses"]["Problem409"];
+                500: components["responses"]["Problem500"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/2fa/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm enrollment with a six-digit TOTP code
+         * @description Verifies the code against the pending secret (window 0: only the
+         *     current 30-second step), atomically enables MFA, and returns ten
+         *     plaintext recovery codes — the only response that ever contains
+         *     them. An invalid code does not enable MFA.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TotpCode"];
+                };
+            };
+            responses: {
+                /** @description MFA enabled; recovery codes returned exactly once. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecoveryCodes"];
+                    };
+                };
+                400: components["responses"]["Problem400"];
+                401: components["responses"]["Problem401"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/2fa/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete two-factor login (MFA-pending token required)
+         * @description Accepts either a six-digit TOTP code or a recovery code
+         *     (`XXXX-XXXX`). Rate limited: 5 failed attempts per user per minute
+         *     and 10 per IP per minute (the stricter applies; 429 on excess).
+         *     The MFA-pending token is consumed exactly once on success and a
+         *     normal session cookie is issued. Expired, consumed, or forged
+         *     tokens — and wrong codes — return 401; no session is issued on any
+         *     failed path.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MfaVerify"];
+                };
+            };
+            responses: {
+                /** @description Two-factor check passed; session cookie set. */
                 200: {
                     headers: {
                         "Set-Cookie"?: string;
@@ -45,6 +199,99 @@ export interface paths {
                 };
                 401: components["responses"]["Problem401"];
                 429: components["responses"]["Problem429"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/2fa/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable two-factor authentication (password re-authentication)
+         * @description Requires the current password. Removes the encrypted TOTP secret and
+         *     recovery codes atomically and invalidates outstanding MFA-pending
+         *     tokens. An MFA-pending token cannot call this endpoint.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CurrentPassword"];
+                };
+            };
+            responses: {
+                /** @description Two-factor authentication disabled. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/2fa/recovery-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regenerate recovery codes (password re-authentication)
+         * @description Requires the current password and enabled MFA. Replaces all stored
+         *     recovery-code hashes: every previously issued code is invalidated.
+         *     The new plaintext codes are returned exactly once.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CurrentPassword"];
+                };
+            };
+            responses: {
+                /** @description Ten new recovery codes. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecoveryCodes"];
+                    };
+                };
+                400: components["responses"]["Problem400"];
+                401: components["responses"]["Problem401"];
+                422: components["responses"]["Problem422"];
             };
         };
         delete?: never;
@@ -1074,6 +1321,11 @@ export interface paths {
          *     they created or are assigned to, but may only assign tasks to
          *     themselves and cannot edit labels. Every changed field is recorded
          *     in the task's activity history.
+         *
+         *     Status changes are not accepted here — a request containing `status`
+         *     is rejected with 400; lifecycle transitions must use
+         *     `POST /tasks/{task_id}/transition`. A change that would leave one
+         *     person as both assignee and reporter is rejected with 422.
          */
         patch: {
             parameters: {
@@ -1099,6 +1351,7 @@ export interface paths {
                         "application/json": components["schemas"]["Task"];
                     };
                 };
+                400: components["responses"]["Problem400"];
                 403: components["responses"]["Problem403"];
                 404: components["responses"]["Problem404"];
                 409: components["responses"]["Problem409"];
@@ -1342,7 +1595,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/tasks/{task_id}/submit": {
+    "/tasks/{task_id}/transition": {
         parameters: {
             query?: never;
             header?: never;
@@ -1352,105 +1605,25 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Submit the task for the reporter's acceptance
-         * @description Moves an In Progress task to In Review. Allowed for the assignee,
-         *     the task creator (for unassigned work), or Manager roles and above.
-         *     The reporter is notified. Clears any previous resolution: a new
-         *     review cycle never inherits an old decision.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    task_id: components["parameters"]["TaskId"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Task is now In Review. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Task"];
-                    };
-                };
-                403: components["responses"]["Problem403"];
-                404: components["responses"]["Problem404"];
-                409: components["responses"]["Problem409"];
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/{task_id}/accept": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Accept a task awaiting review (In Review -> Done)
-         * @description Only the designated reporter, or an Owner/Admin reviewer override,
-         *     may accept — never the assignee, even when they are also the
-         *     reporter (that reporter role is not independent). Records
-         *     `resolution=accepted`, the resolver, and the timestamp.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    task_id: components["parameters"]["TaskId"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Task accepted. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Task"];
-                    };
-                };
-                403: components["responses"]["Problem403"];
-                404: components["responses"]["Problem404"];
-                409: components["responses"]["Problem409"];
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tasks/{task_id}/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reject a task awaiting review (In Review -> In Progress)
-         * @description The mirror of accept: the reporter (or Owner/Admin override, never
-         *     the assignee) returns the work with a required, audited reason.
-         *     Records `resolution=rejected`, the note, resolver, and timestamp;
-         *     the assignee is notified with the reason.
+         * Execute a lifecycle transition on a task
+         * @description The only way to change a task's status. The lifecycle is strict:
+         *
+         *     | From | To | Actor |
+         *     |------|----|-------|
+         *     | Backlog | Todo | Assignee |
+         *     | Todo | In Progress | Assignee |
+         *     | In Progress | Resolved | Assignee |
+         *     | Resolved | In Review | Reporter |
+         *     | In Review | Closed | Reporter (acceptance) |
+         *     | In Review | In Progress | Reporter (rejection; reason required) |
+         *
+         *     No other transition exists, Closed is terminal, and privileged roles
+         *     have no overrides. A user must not be both assignee and reporter;
+         *     legacy tasks with overlapping roles cannot be advanced by the
+         *     overlapping user — correct the roles via PATCH first. Acceptance
+         *     records `resolution=accepted` and the completion timestamp;
+         *     rejection records `resolution=rejected` with the audited reason and
+         *     returns the task to In Progress.
          */
         post: {
             parameters: {
@@ -1463,11 +1636,11 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": components["schemas"]["TaskReject"];
+                    "application/json": components["schemas"]["TaskTransition"];
                 };
             };
             responses: {
-                /** @description Task returned to In Progress. */
+                /** @description Transition applied; the updated task is returned. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1777,7 +1950,7 @@ export interface paths {
          * Team workload aggregation (assigned task distribution)
          * @description Server-side SQL aggregation grouped by assignee. Counts open tasks by
          *     status and priority plus an overdue count (due date before today UTC
-         *     and status not done). This is task distribution, NOT effort or
+         *     and status not closed). This is task distribution, NOT effort or
          *     capacity. Requires team membership; guests receive 404.
          */
         get: {
@@ -2727,7 +2900,7 @@ export interface paths {
                                 id: string;
                                 title: string;
                                 /** @enum {string} */
-                                status: "backlog" | "todo" | "in_progress" | "in_review" | "done";
+                                status: "backlog" | "todo" | "in_progress" | "resolved" | "in_review" | "closed";
                             }[];
                         };
                     };
@@ -2935,6 +3108,44 @@ export interface components {
             display_name: string;
             /** @description epoch milliseconds */
             created_at: number;
+            /** @description Whether TOTP two-factor authentication is enabled for this account. */
+            mfa_enabled: boolean;
+        };
+        MfaRequired: {
+            /** @description Always true in this response shape. */
+            mfa_required: boolean;
+            /**
+             * @description Single-use, 10-minute MFA-pending credential bound to the
+             *     authenticated user. It authorizes only `POST /auth/2fa/verify`.
+             */
+            mfa_token: string;
+        };
+        MfaSetup: {
+            /** @description otpauth:// provisioning URI to encode as a QR code locally. */
+            uri: string;
+            /** @description Base32 secret for manual authenticator entry. */
+            secret: string;
+            issuer: string;
+            /** Format: email */
+            account: string;
+        };
+        TotpCode: {
+            /** @description Six-digit TOTP code from the authenticator. */
+            code: string;
+        };
+        MfaVerify: {
+            mfa_token: string;
+            /**
+             * @description Six-digit TOTP code, or a recovery code in `XXXX-XXXX` form
+             *     (separators optional, case-insensitive).
+             */
+            code: string;
+        };
+        CurrentPassword: {
+            current_password: string;
+        };
+        RecoveryCodes: {
+            recovery_codes: string[];
         };
         UserBrief: {
             /** Format: uuid */
@@ -2997,13 +3208,15 @@ export interface components {
             title: string;
             description?: string;
             /**
-             * @description New tasks start in an actionable state; Done requires review acceptance.
+             * @description New tasks start in an actionable state; later lifecycle states are reached only via transitions.
              * @enum {string}
              */
             status?: "backlog" | "todo" | "in_progress";
             /**
              * @description Acceptance reviewer. Defaults to the caller; selecting another
-             *     user requires the Manager role or above and must be a team member.
+             *     user requires the Manager role or above and must be a team
+             *     member. The assignee and reporter must be different users — a
+             *     creation request that gives one person both roles is rejected.
              */
             reporter_id?: string | null;
             /** @enum {string} */
@@ -3016,25 +3229,23 @@ export interface components {
             parent_task_id?: string | null;
             label_ids?: string[];
         };
+        /**
+         * @description Field edits only. Status changes are rejected with 400 — lifecycle
+         *     transitions must use `POST /tasks/{task_id}/transition`. The assignee
+         *     and reporter must remain different users; a change that would give
+         *     one person both roles is rejected with 422.
+         */
         TaskUpdate: {
             title?: string;
             description?: string | null;
-            /**
-             * @description Validated against the workflow: In Progress -> In Review is a
-             *     submission; In Review -> Done is an acceptance (reporter or
-             *     Owner/Admin, never the assignee); In Review -> In Progress is a
-             *     rejection/return; Done -> actionable states reopen the task
-             *     (clearing the resolution).
-             * @enum {string}
-             */
-            status?: "backlog" | "todo" | "in_progress" | "in_review" | "done";
             /** @enum {string} */
             priority?: "low" | "medium" | "high" | "urgent";
             /** @description Team member id; empty string clears the assignment. */
             assignee_id?: string | null;
             /**
-             * @description Acceptance reviewer; empty string resets to the caller. Changes
-             *     require the Manager role or above and must reference a member.
+             * @description Acceptance reviewer. Changes require the Manager role or above
+             *     and must reference a member; the assignee and reporter must be
+             *     different users.
              */
             reporter_id?: string | null;
             /** Format: date */
@@ -3052,7 +3263,7 @@ export interface components {
             title: string;
             description?: string | null;
             /** @enum {string} */
-            status: "backlog" | "todo" | "in_progress" | "in_review" | "done";
+            status: "backlog" | "todo" | "in_progress" | "resolved" | "in_review" | "closed";
             /** @enum {string} */
             priority: "low" | "medium" | "high" | "urgent";
             assignee?: components["schemas"]["UserBrief"] | null;
@@ -3060,7 +3271,7 @@ export interface components {
             reporter?: components["schemas"]["UserBrief"] | null;
             created_by?: components["schemas"]["UserBrief"] | null;
             /**
-             * @description Latest acceptance decision; absent during active work or a new cycle.
+             * @description Latest acceptance decision; set on acceptance (closing) or rejection (returning to In Progress), cleared when work restarts.
              * @enum {string|null}
              */
             resolution?: "accepted" | "rejected" | null;
@@ -3071,7 +3282,7 @@ export interface components {
             /** Format: date */
             due_date?: string | null;
             position: number;
-            /** @description epoch ms; set while status is done */
+            /** @description epoch ms; set when the reporter accepts the task (status closed) */
             completed_at?: number | null;
             labels: components["schemas"]["LabelBrief"][];
             created_at: number;
@@ -3094,9 +3305,17 @@ export interface components {
             page_size: number;
             total: number;
         };
-        TaskReject: {
-            /** @description Audited with the rejection decision. */
-            reason: string;
+        TaskTransition: {
+            /**
+             * @description Target state; must be a legal successor of the current state (see POST /tasks/{task_id}/transition).
+             * @enum {string}
+             */
+            to: "todo" | "in_progress" | "resolved" | "in_review" | "closed";
+            /**
+             * @description Required when rejecting (In Review -> In Progress) and audited
+             *     with the rejection decision; otherwise ignored.
+             */
+            reason?: string;
         };
         Notification: {
             /** Format: uuid */
@@ -3129,7 +3348,7 @@ export interface components {
             task_id: string;
             title: string;
             /** @enum {string} */
-            status: "backlog" | "todo" | "in_progress" | "in_review" | "done";
+            status: "backlog" | "todo" | "in_progress" | "resolved" | "in_review" | "closed";
             /** Format: date */
             due_date?: string | null;
         };
@@ -3266,7 +3485,7 @@ export interface components {
                 id: string;
                 title: string;
                 /** @enum {string} */
-                status: "backlog" | "todo" | "in_progress" | "in_review" | "done";
+                status: "backlog" | "todo" | "in_progress" | "resolved" | "in_review" | "closed";
             }[];
             /** @description Task execution statistics — NOT key-result achievement. */
             execution: {
@@ -3294,7 +3513,7 @@ export interface components {
             project_id: string;
             columns: {
                 /** @enum {string} */
-                status: "backlog" | "todo" | "in_progress" | "in_review" | "done";
+                status: "backlog" | "todo" | "in_progress" | "resolved" | "in_review" | "closed";
                 total: number;
                 items: components["schemas"]["Task"][];
             }[];
@@ -3341,6 +3560,15 @@ export interface components {
                 "application/problem+json": components["schemas"]["Problem"];
             };
         };
+        /** @description Bad request (e.g. a status field on the generic task update). */
+        Problem400: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
         /** @description Resource not found (or not visible to the caller). */
         Problem404: {
             headers: {
@@ -3361,6 +3589,15 @@ export interface components {
         };
         /** @description Validation failed. */
         Problem422: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /** @description Internal error (e.g. two-factor authentication is not configured on this deployment). */
+        Problem500: {
             headers: {
                 [name: string]: unknown;
             };

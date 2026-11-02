@@ -7,7 +7,7 @@
 #   read-board  GET /projects/:id/board
 #   me-tasks    GET /me/tasks
 #   create      POST /projects/:id/tasks
-#   update      PATCH /tasks/:id (status flip)
+#   update      PATCH /tasks/:id (field edit)
 #
 # Requires: npx autocannon (fetched on first use).
 set -euo pipefail
@@ -98,7 +98,7 @@ run create     -H "Cookie: $SESSION" -H "Content-Type: application/json" \
   -m POST -b '{"title":"Load generated task","priority":"low"}' \
   "$BASE/api/v1/projects/$PROJECT/tasks"
 run update     -H "Cookie: $SESSION" -H "Content-Type: application/json" \
-  -m PATCH -b '{"status":"in_progress"}' \
+  -m PATCH -b '{"priority":"high"}' \
   "$BASE/api/v1/tasks/$TASK_ID"
 
 echo

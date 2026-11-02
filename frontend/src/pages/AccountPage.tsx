@@ -7,6 +7,7 @@ import { Input, Label } from "@/components/ui/input";
 import { Separator } from "@/components/ui/avatar";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
+import { MfaSettings } from "@/components/app/MfaSettings";
 
 export function AccountPage() {
   const { user } = useAuth();
@@ -41,6 +42,12 @@ export function AccountPage() {
           <dd>{user?.email}</dd>
         </dl>
       </section>
+
+      <Separator className="mb-8" />
+
+      <div className="mb-8">
+        <MfaSettings enabled={Boolean(user?.mfa_enabled)} />
+      </div>
 
       <Separator className="mb-8" />
 

@@ -1,5 +1,6 @@
-import { useState, type KeyboardEvent } from "react";
+import { useMemo, useState, type KeyboardEvent } from "react";
 import { useMembers } from "@/api/hooks";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
@@ -10,21 +11,23 @@ import { cn } from "@/lib/utils";
  */
 export function CommentBody({ body, teamId }: { body: string; teamId: string }) {
   const members = useMembers(teamId);
-  const known = new Map(
-    (members.data?.items ?? []).map((m) => [m.user.email.toLowerCase(), m.user.display_name]),
-  );
-
-  const parts: Array<{ text: string; mention?: boolean }> = [];
-  const pattern = /@([^\s@,!;:?)\]"']+@[^\s@,!;:?)\]"']+)/g;
-  let last = 0;
-  for (const match of body.matchAll(pattern)) {
-    const idx = match.index !== undefined ? match.index : 0;
-    if (idx > last) parts.push({ text: body.slice(last, idx) });
-    const email = (match[1] ?? "").toLowerCase();
-    parts.push({ text: `@${known.get(email) ?? email}`, mention: known.has(email) });
-    last = idx + match[0].length;
-  }
-  if (last < body.length) parts.push({ text: body.slice(last) });
+  const parts = useMemo<Array<{ text: string; mention?: boolean }>>(() => {
+    const known = new Map(
+      (members.data?.items ?? []).map((m) => [m.user.email.toLowerCase(), m.user.display_name]),
+    );
+    const result: Array<{ text: string; mention?: boolean }> = [];
+    const pattern = /@([^\s@,!;:?)\]"']+@[^\s@,!;:?)\]"']+)/g;
+    let last = 0;
+    for (const match of body.matchAll(pattern)) {
+      const idx = match.index !== undefined ? match.index : 0;
+      if (idx > last) result.push({ text: body.slice(last, idx) });
+      const email = (match[1] ?? "").toLowerCase();
+      result.push({ text: `@${known.get(email) ?? email}`, mention: known.has(email) });
+      last = idx + match[0].length;
+    }
+    if (last < body.length) result.push({ text: body.slice(last) });
+    return result;
+  }, [body, members.data]);
 
   return (
     <p className="mt-1.5 whitespace-pre-wrap text-sm" data-testid="comment-body">
@@ -166,15 +169,9 @@ export function CommentComposer({
         </ul>
       ) : null}
       <div className="mt-2 flex justify-start">
-        <button
-          type="button"
-          onClick={onSubmit}
-          disabled={!value.trim() || pending}
-          className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-2.5 text-2xs font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-          data-testid={testIdSubmit}
-        >
+        <Button size="sm" onClick={onSubmit} disabled={!value.trim() || pending} data-testid={testIdSubmit}>
           {pending ? "Sending…" : "Comment"}
-        </button>
+        </Button>
       </div>
     </div>
   );

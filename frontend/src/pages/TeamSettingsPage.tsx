@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Plus, Tags, Trash2, UserPlus, Users } from "lucide-react";
 import { api, ApiError, type Member } from "@/api/client";
@@ -131,6 +132,7 @@ function MembersSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean 
   const members = useMembers(teamId);
   const { push } = useToast();
   const qc = useQueryClient();
+  const { confirm, element: confirmElement } = useConfirmDialog();
   const [addOpen, setAddOpen] = useState(false);
 
   const invalidate = () => void qc.invalidateQueries({ queryKey: ["members", teamId] });
@@ -157,13 +159,17 @@ function MembersSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean 
   });
 
   const confirmRemove = (member: Member) => {
-    if (window.confirm(`Remove ${member.user.display_name} from the team?`)) {
-      removeMember.mutate(member.user.id);
-    }
+    confirm({
+      title: "Remove this member?",
+      description: `${member.user.display_name} loses access to the team and its projects; their task assignments are cleared.`,
+      confirmLabel: "Remove member",
+      action: () => removeMember.mutate(member.user.id),
+    });
   };
 
   return (
     <section aria-label="Team members">
+      {confirmElement}
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold">Members ({members.data?.items.length ?? 0})</h2>
         {isAdmin ? (

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2, UserPlus, Users } from "lucide-react";
@@ -25,6 +26,7 @@ export function ProjectGuestsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const qc = useQueryClient();
   const { push } = useToast();
+  const { confirm, element: confirmElement } = useConfirmDialog();
   const [addOpen, setAddOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -68,9 +70,12 @@ export function ProjectGuestsPage() {
   });
 
   const confirmRevoke = (name: string, userId: string) => {
-    if (window.confirm(`Revoke ${name}'s access to this project?`)) {
-      revoke.mutate(userId);
-    }
+    confirm({
+      title: "Revoke guest access?",
+      description: `${name} loses read-only access to this project.`,
+      confirmLabel: "Revoke access",
+      action: () => revoke.mutate(userId),
+    });
   };
 
   if (project.isError) {
@@ -87,6 +92,7 @@ export function ProjectGuestsPage() {
 
   return (
     <div className="mx-auto max-w-2xl p-6">
+      {confirmElement}
       <header className="mb-5 flex items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold">

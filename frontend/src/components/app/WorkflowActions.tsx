@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, SendHorizonal, Undo2 } from "lucide-react";
+import { Check, Play, SendHorizonal, Undo2 } from "lucide-react";
 import { api, ApiError, type Task } from "@/api/client";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -14,21 +14,21 @@ import {
 } from "@/components/ui/dialog";
 import { Label, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { useWorkspace } from "@/lib/workspace";
 
 /**
- * Submit / Accept / Reject controls for the task detail panel.
+ * Lifecycle controls for the task detail panel, mirroring the backend state
+ * machine exactly:
  *
- * Permissions mirror the backend: the assignee (or creator/manager) submits;
- * the reporter or an Owner/Admin accepts or rejects — never the assignee,
- * even when they are the reporter. The buttons are rendered optimistically;
+ *   backlog → todo → in_progress → resolved → in_review → closed
+ *                                     ↑__________|  (reject, reason required)
+ *
+ * The assignee drives backlog/todo/in_progress → resolved; the reporter —
+ * never the assignee, even when they hold a privileged role — drives
+ * resolved → in_review → closed or back. The buttons render optimistically;
  * the backend remains the authority and surfaces 403/409 as toasts.
  */
 export function WorkflowActions({ task }: { task: Task }) {
   const { user } = useAuth();
-  const { myRole } = useWorkspace();
-  const isManager = myRole !== undefined && ["owner", "admin", "manager"].includes(myRole);
-  const canReviewOverride = myRole !== undefined && ["owner", "admin"].includes(myRole);
   const { push } = useToast();
   const qc = useQueryClient();
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -52,18 +52,30 @@ export function WorkflowActions({ task }: { task: Task }) {
     );
   };
 
+  const transition = (to: string, why?: string) => api.transitionTask(task.id, to, why);
+
+  const startProgress = useMutation({
+    mutationFn: () => transition(task.status === "backlog" ? "todo" : "in_progress"),
+    onSuccess: refresh,
+    onError,
+  });
+  const resolve = useMutation({
+    mutationFn: () => transition("resolved"),
+    onSuccess: refresh,
+    onError,
+  });
   const submit = useMutation({
-    mutationFn: () => api.submitForReview(task.id),
+    mutationFn: () => transition("in_review"),
     onSuccess: refresh,
     onError,
   });
   const accept = useMutation({
-    mutationFn: () => api.acceptTask(task.id),
+    mutationFn: () => transition("closed"),
     onSuccess: refresh,
     onError,
   });
   const reject = useMutation({
-    mutationFn: () => api.rejectTask(task.id, reason.trim()),
+    mutationFn: () => transition("in_progress", reason.trim()),
     onSuccess: (updated) => {
       setRejectOpen(false);
       setReason("");
@@ -73,15 +85,15 @@ export function WorkflowActions({ task }: { task: Task }) {
   });
 
   const isAssignee = task.assignee?.id === user?.id;
-  void task.reporter;
+  const isReporter = task.reporter?.id === user?.id;
 
   if (task.status === "in_review") {
     return (
       <div className="flex flex-wrap items-center gap-2" data-testid="workflow-actions">
-        {canReviewOverride ? (
+        {isReporter && !isAssignee ? (
           <>
             <Button size="sm" onClick={() => accept.mutate()} disabled={accept.isPending} data-testid="accept-task">
-              <Check /> Accept
+              <Check /> Accept &amp; Close
             </Button>
             <Button
               size="sm"
@@ -118,24 +130,44 @@ export function WorkflowActions({ task }: { task: Task }) {
     );
   }
 
-  if (task.status === "done") {
+  if (task.status === "closed") {
     return null;
   }
 
-  // Submit is offered to the assignee (or creator/manager) from in_progress.
-  const canSubmit =
-    task.status === "in_progress" &&
-    (isAssignee || task.created_by?.id === user?.id || isManager);
-
-  if (!canSubmit) {
-    return null;
+  // Assignee: pick up from backlog, start work from todo.
+  if (isAssignee && (task.status === "backlog" || task.status === "todo")) {
+    const label = task.status === "backlog" ? "Pick up" : "Start work";
+    return (
+      <Button
+        size="sm"
+        onClick={() => startProgress.mutate()}
+        disabled={startProgress.isPending}
+        data-testid="start-task"
+      >
+        <Play /> {startProgress.isPending ? "…" : label}
+      </Button>
+    );
   }
 
-  return (
-    <Button size="sm" onClick={() => submit.mutate()} disabled={submit.isPending} data-testid="submit-task">
-      <SendHorizonal /> {submit.isPending ? "Submitting…" : "Submit for review"}
-    </Button>
-  );
+  // Assignee: work finished — hand over to the reporter.
+  if (task.status === "in_progress" && isAssignee) {
+    return (
+      <Button size="sm" onClick={() => resolve.mutate()} disabled={resolve.isPending} data-testid="resolve-task">
+        <SendHorizonal /> {resolve.isPending ? "Resolving…" : "Mark resolved"}
+      </Button>
+    );
+  }
+
+  // Reporter: submit resolved work for acceptance review.
+  if (task.status === "resolved" && isReporter && !isAssignee) {
+    return (
+      <Button size="sm" onClick={() => submit.mutate()} disabled={submit.isPending} data-testid="submit-task">
+        <SendHorizonal /> {submit.isPending ? "Submitting…" : "Submit for review"}
+      </Button>
+    );
+  }
+
+  return null;
 }
 
 function RejectDialog({

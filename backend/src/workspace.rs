@@ -494,7 +494,7 @@ async fn workload(
         "SELECT t.assignee_id, COUNT(*) AS n \
          FROM tasks t \
          WHERE t.team_id = ? AND t.parent_task_id IS NULL AND t.assignee_id IS NOT NULL \
-           AND t.due_date IS NOT NULL AND t.due_date < '{today}' AND t.status != 'done'{} \
+           AND t.due_date IS NOT NULL AND t.due_date < '{today}' AND t.status != 'closed'{} \
          GROUP BY t.assignee_id",
         filters.clause()
     );
@@ -548,7 +548,7 @@ async fn workload(
     let unassigned_overdue_sql = format!(
         "SELECT COUNT(*) AS n FROM tasks t \
          WHERE t.team_id = ? AND t.parent_task_id IS NULL AND t.assignee_id IS NULL \
-           AND t.due_date IS NOT NULL AND t.due_date < '{today}' AND t.status != 'done'{}",
+           AND t.due_date IS NOT NULL AND t.due_date < '{today}' AND t.status != 'closed'{}",
         filters.clause()
     );
     let mut ua_overdue_args = Args::new();

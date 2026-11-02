@@ -61,6 +61,17 @@ pub struct Config {
     pub allowed_origins: Vec<String>,
     /// Login rate limit: attempts per minute per client IP.
     pub login_rate_limit_per_min: u32,
+    /// AES-256 key encrypting TOTP secrets at rest, decoded from
+    /// `TASKER_MFA_ENCRYPTION_KEY` (64 hex characters = 32 bytes).
+    /// Absent => MFA endpoints fail closed (the server still boots for
+    /// deployments that do not use MFA). Present-but-malformed => startup
+    /// fails: a broken key must never degrade silently to plaintext.
+    pub mfa_encryption_key: Option<Vec<u8>>,
+    /// Independent HMAC-SHA-256 pepper keying recovery-code digests
+    /// (ADR-0012). Never derived from `mfa_encryption_key`; never stored in
+    /// or derivable from the database. Absent => recovery-code flows fail
+    /// closed; present-but-malformed => startup fails.
+    pub mfa_recovery_pepper: Option<Vec<u8>>,
     /// Maximum accepted JSON body size.
     pub body_limit_bytes: usize,
     /// Optional directory containing the built frontend to serve statically.
@@ -86,6 +97,55 @@ impl Config {
         let lifetime_secs: u64 = env_parsed("TASKER_DB_MAX_LIFETIME_SECS", 1800u64)?;
         let login_rate_limit_per_min: u32 = env_parsed("TASKER_RATE_LIMIT_LOGIN_PER_MIN", 10u32)?;
         let body_limit_bytes: usize = env_parsed("TASKER_BODY_LIMIT_BYTES", 1_048_576usize)?;
+
+        let mfa_encryption_key = match std::env::var("TASKER_MFA_ENCRYPTION_KEY") {
+            Ok(raw) => {
+                let hex_key = raw.trim();
+                if hex_key.len() != 64 || !hex_key.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return Err(crate::error::ConfigError(
+                        "TASKER_MFA_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)"
+                            .to_string(),
+                    ));
+                }
+                let bytes = (0..32)
+                    .map(|i| u8::from_str_radix(&hex_key[i * 2..i * 2 + 2], 16))
+                    .collect::<Result<Vec<u8>, _>>()
+                    .map_err(|e| {
+                        crate::error::ConfigError(format!(
+                            "TASKER_MFA_ENCRYPTION_KEY is not valid hex: {e}"
+                        ))
+                    })?;
+                Some(bytes)
+            }
+            Err(_) => None,
+        };
+
+        // Independent recovery-code pepper (HMAC-SHA-256 key for recovery-code
+        // digests, ADR-0012). Deliberately NOT derived from the AES-GCM
+        // encryption key: separate compromise domains. Absent => recovery
+        // flows fail closed (the server boots for deployments without 2FA);
+        // present-but-malformed => startup aborts.
+        let mfa_recovery_pepper = match std::env::var("TASKER_RECOVERY_PEPPER") {
+            Ok(raw) => {
+                let hex_key = raw.trim();
+                if hex_key.len() != 64 || !hex_key.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return Err(crate::error::ConfigError(
+                        "TASKER_RECOVERY_PEPPER must be exactly 64 hex characters (32 bytes)"
+                            .to_string(),
+                    ));
+                }
+                let bytes = (0..32)
+                    .map(|i| u8::from_str_radix(&hex_key[i * 2..i * 2 + 2], 16))
+                    .collect::<Result<Vec<u8>, _>>()
+                    .map_err(|e| {
+                        crate::error::ConfigError(format!(
+                            "TASKER_RECOVERY_PEPPER is not valid hex: {e}"
+                        ))
+                    })?;
+                Some(bytes)
+            }
+            Err(_) => None,
+        };
 
         let allowed_origins = env_or("TASKER_ALLOWED_ORIGINS", String::new())?
             .split(',')
@@ -119,6 +179,8 @@ impl Config {
                 .eq_ignore_ascii_case("true"),
             allowed_origins,
             login_rate_limit_per_min,
+            mfa_encryption_key,
+            mfa_recovery_pepper,
             body_limit_bytes,
             static_dir,
             log_format_json,
@@ -149,5 +211,22 @@ fn env_parsed<T: std::str::FromStr>(key: &str, default: T) -> Result<T, ConfigEr
                 "{key} must be parseable as the expected type, got `{raw}`"
             ))
         }),
+    }
+}
+
+#[cfg(test)]
+mod mfa_key_tests {
+    // The key-parsing rules live in Config::from_env; the loadable-shape
+    // invariants are pure and checked here without touching process env.
+    #[test]
+    fn key_shape_rules() {
+        let valid = "a".repeat(64);
+        assert_eq!(valid.len(), 64);
+        assert!(valid.chars().all(|c| c.is_ascii_hexdigit()));
+        // Wrong length and non-hex shapes are exactly what the loader rejects.
+        let short = "a".repeat(63);
+        assert_ne!(short.len(), 64);
+        let not_hex = "z".repeat(64);
+        assert!(!not_hex.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

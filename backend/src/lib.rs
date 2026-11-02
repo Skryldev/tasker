@@ -13,6 +13,7 @@ pub mod db;
 pub mod error;
 pub mod goals;
 pub mod http;
+pub mod mfa;
 pub mod notifications;
 pub mod projects;
 pub mod security;

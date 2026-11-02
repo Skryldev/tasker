@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import {
   DndContext,
+  KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
@@ -27,16 +28,19 @@ function statusToClass(status: string): string {
       return "bg-status-todo";
     case "in_progress":
       return "bg-status-in-progress";
+    case "resolved":
+      return "bg-status-resolved";
     case "in_review":
       return "bg-status-in-review";
-    case "done":
-      return "bg-status-done";
+    case "closed":
+      return "bg-status-closed";
     default:
       return "bg-status-backlog";
   }
 }
 
-function TaskCard({
+/** Memoized: the board re-renders on drag state changes; cards do not need to. */
+const TaskCard = memo(function TaskCard({
   task,
   onOpen,
   overlay,
@@ -57,6 +61,7 @@ function TaskCard({
       {...listeners}
       role="button"
       tabIndex={0}
+      aria-roledescription="Draggable task"
       aria-label={`Task: ${task.title}`}
       onKeyDown={(e) => {
         if (overlay) return;
@@ -81,7 +86,7 @@ function TaskCard({
       </div>
     </div>
   );
-}
+});
 
 function KanbanColumn({
   column,
@@ -148,7 +153,12 @@ export function KanbanBoard({
   onOpenTask: (task: Task) => void;
   onCreateTask: (status: string) => void;
 }) {
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  // Pointer for mouse/touch; keyboard so cards can be moved with Space +
+  // arrows (dnd-kit announces instructions via the card's aria attributes).
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor),
+  );
   const { push } = useToast();
   const qc = useQueryClient();
   const [activeTask, setActiveTask] = useState<Task | null>(null);
@@ -185,7 +195,10 @@ export function KanbanBoard({
       };
     });
     try {
-      await api.updateTask(task.id, { status: targetStatus as Parameters<typeof api.updateTask>[1]["status"] });
+      // Column moves go through the lifecycle transition endpoint; the backend
+      // enforces the state machine and role rules and rejects illegal moves
+      // (the optimistic card position is rolled back below).
+      await api.transitionTask(task.id, targetStatus);
       void qc.invalidateQueries({ queryKey: ["board", projectId] });
       void qc.invalidateQueries({ queryKey: ["tasks"] });
       void qc.invalidateQueries({ queryKey: ["my-tasks"] });
@@ -203,7 +216,7 @@ export function KanbanBoard({
   if (isLoading) {
     return (
       <div className="flex gap-3 p-4">
-        {[0, 1, 2, 3, 4].map((i) => (
+        {[0, 1, 2, 3, 4, 5].map((i) => (
           <div key={i} className="flex w-[270px] shrink-0 flex-col gap-2">
             <Skeleton className="h-5 w-24" />
             <Skeleton className="h-20 w-full" />
