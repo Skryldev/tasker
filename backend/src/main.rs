@@ -161,7 +161,9 @@ async fn wait_for_shutdown() {
     let terminate = async {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
             Ok(mut sig) => {
-                sig.recv().await;
+                // recv() yields an Option<()> (None after the stream closes);
+                // the signal is intentionally fire-and-forget.
+                let _ = sig.recv().await;
             }
             Err(_) => std::future::pending::<()>().await,
         }
