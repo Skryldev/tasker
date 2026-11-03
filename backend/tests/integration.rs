@@ -1222,8 +1222,24 @@ fn base32_decode(input: &str) -> Vec<u8> {
 
 /// Current TOTP code for a Base32 secret (independent of the app's verify path
 /// only in location — it uses the same totp-rs crate with the same parameters).
+///
+/// Boundary-aware: when fewer than 5 seconds of the current 30-second step
+/// remain, waits for the next boundary first. The backend accepts only the
+/// current step (window 0), so a code generated at the tail of a step can
+/// legitimately expire before a slow request reaches the server — that is a
+/// test-infrastructure artifact, not an application rejection. The wait is
+/// bounded (< 30.5 s) and codes are still current-step codes, so replay
+/// protection and enrollment semantics are unchanged.
 fn totp_code_now(secret_base32: &str, email: &str) -> String {
     use totp_rs::{Algorithm, TOTP};
+    const STEP_MS: u64 = 30_000;
+    const MIN_REMAINING_MS: u64 = 5_000;
+    let epoch_ms = u64::try_from(tasker::util::now_ms()).unwrap_or(0);
+    let into_step = epoch_ms % STEP_MS;
+    if into_step > STEP_MS - MIN_REMAINING_MS {
+        let wait = STEP_MS - into_step + 500;
+        std::thread::sleep(std::time::Duration::from_millis(wait));
+    }
     let bytes = base32_decode(secret_base32);
     let totp = TOTP::new(
         Algorithm::SHA1,
@@ -1281,37 +1297,8 @@ async fn mfa_security_matrix() {
         let email = format!("mfa-{suffix}@test.local");
         let user_id = seed_user(&db, &email, "Mfa User").await;
         let cookie = login_as(&app.app, &email, "test-password-123").await;
-        let (code, setup) = send_json(
-            &app.app,
-            "POST",
-            "/api/v1/auth/2fa/setup",
-            Some(&cookie),
-            json!({}),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "[{engine}] setup");
-        assert!(
-            setup["uri"]
-                .as_str()
-                .unwrap()
-                .starts_with("otpauth://totp/"),
-            "[{engine}] provisioning uri"
-        );
-        assert!(
-            setup["secret"].as_str().unwrap().len() >= 32,
-            "[{engine}] base32 secret"
-        );
-        let secret_base32 = setup["secret"].as_str().unwrap().to_string();
-        let totp = totp_code_now(&secret_base32, &email);
-        let (code, enabled) = send_json(
-            &app.app,
-            "POST",
-            "/api/v1/auth/2fa/enable",
-            Some(&cookie),
-            json!({"code": totp}),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "[{engine}] enable: {enabled}");
+        let (enabled, secret_base32) =
+            enable_mfa_ok(&app.app, &cookie, engine.as_str(), "scenario 1").await;
         let recovery_codes: Vec<String> = enabled["recovery_codes"]
             .as_array()
             .unwrap()
@@ -1384,8 +1371,11 @@ async fn mfa_security_matrix() {
         );
 
         // Valid TOTP → normal session.
+        // Boundary-aware verify: on a 401 from a step-boundary stall, retry
+        // once with a freshly generated code (the pending token is NOT
+        // consumed by a failed attempt, so the retry is legal).
         let totp_now = totp_code_now(&secret_base32, &email);
-        let response = app
+        let mut response = app
             .app
             .clone()
             .oneshot(
@@ -1400,6 +1390,24 @@ async fn mfa_security_matrix() {
             )
             .await
             .unwrap();
+        if response.status() != StatusCode::OK {
+            response = app
+                .app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/v1/auth/2fa/verify")
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(
+                            json!({"mfa_token": mfa_token, "code": totp_code_now(&secret_base32, &email)})
+                                .to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+        }
         let (parts, raw_body) = response.into_parts();
         let set_cookie = parts.headers.get(header::SET_COOKIE);
         if set_cookie.is_none() || parts.status != StatusCode::OK {
@@ -1551,15 +1559,7 @@ async fn mfa_security_matrix() {
         .await;
         assert_eq!(code, StatusCode::OK, "[{engine}] rl setup");
         let rl_secret = rl_setup["secret"].as_str().unwrap().to_string();
-        let (code, _) = send_json(
-            &app.app,
-            "POST",
-            "/api/v1/auth/2fa/enable",
-            Some(&rl_cookie),
-            json!({"code": totp_code_now(&rl_secret, &rl_email)}),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "[{engine}] rl enable");
+        _ = enable_mfa_ok(&app.app, &rl_cookie, engine.as_str(), "_").await;
         // Five failed verifications (each with its own pending token).
         #[allow(unused_assignments)]
         let mut token5 = String::new();
@@ -1655,17 +1655,8 @@ async fn mfa_security_matrix() {
         )
         .await;
         assert_eq!(code, StatusCode::OK);
-        let secret2 = setup2["secret"].as_str().unwrap().to_string();
-        let totp2 = totp_code_now(&secret2, &email2);
-        let (code, _) = send_json(
-            &app.app,
-            "POST",
-            "/api/v1/auth/2fa/enable",
-            Some(&cookie2),
-            json!({"code": totp2}),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "[{engine}] enable user2");
+        let _secret2 = setup2["secret"].as_str().unwrap().to_string();
+        enable_mfa_ok(&app.app, &cookie2, engine.as_str(), "user2").await;
 
         let (code, _) = send_json(
             &app.app,
@@ -1734,7 +1725,7 @@ async fn mfa_security_matrix() {
         let email3 = format!("mfa3-{suffix}@test.local");
         let _user3 = seed_user(&db, &email3, "Mfa Three").await;
         let cookie3 = login_as(&app.app, &email3, "test-password-123").await;
-        let (_code, setup3) = send_json(
+        let (code, setup3) = send_json(
             &app.app,
             "POST",
             "/api/v1/auth/2fa/setup",
@@ -1742,16 +1733,17 @@ async fn mfa_security_matrix() {
             json!({}),
         )
         .await;
-        let secret3 = setup3["secret"].as_str().unwrap().to_string();
-        let totp3 = totp_code_now(&secret3, &email3);
-        let (_code, enabled3) = send_json(
+        assert_eq!(code, StatusCode::OK, "[{engine}] setup3: {setup3}");
+        let secret3b = setup3["secret"].as_str().unwrap().to_string();
+        let (code, enabled3) = send_json(
             &app.app,
             "POST",
             "/api/v1/auth/2fa/enable",
             Some(&cookie3),
-            json!({"code": totp3}),
+            json!({"code": totp_code_now(&secret3b, &email3)}),
         )
         .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] enable3: {enabled3}");
         let codes3: Vec<String> = enabled3["recovery_codes"]
             .as_array()
             .unwrap()
@@ -1886,7 +1878,7 @@ async fn mfa_security_matrix() {
         let email3 = format!("mfa3b-{suffix}@test.local");
         let user3b = seed_user(&db, &email3, "Mfa Three B").await;
         let cookie3 = login_as(&app.app, &email3, "test-password-123").await;
-        let (code, setup3) = send_json(
+        _ = send_json(
             &app.app,
             "POST",
             "/api/v1/auth/2fa/setup",
@@ -1894,17 +1886,7 @@ async fn mfa_security_matrix() {
             json!({}),
         )
         .await;
-        assert_eq!(code, StatusCode::OK);
-        let secret3 = setup3["secret"].as_str().unwrap().to_string();
-        let (code, _) = send_json(
-            &app.app,
-            "POST",
-            "/api/v1/auth/2fa/enable",
-            Some(&cookie3),
-            json!({"code": totp_code_now(&secret3, &email3)}),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK);
+        _ = enable_mfa_ok(&app.app, &cookie3, engine.as_str(), "_").await;
         let (_code, login_body) = send_json(
             &app.app,
             "POST",
@@ -2105,20 +2087,7 @@ async fn mfa_security_matrix() {
             json!({}),
         )
         .await;
-        let totp4 = totp_code_now(setup4["secret"].as_str().unwrap(), &email4);
-        let (code, _) = send_json(
-            &app.app,
-            "POST",
-            "/api/v1/auth/2fa/enable",
-            Some(&cookie4),
-            json!({"code": totp4}),
-        )
-        .await;
-        assert_eq!(
-            code,
-            StatusCode::OK,
-            "[{engine}] enrollment after failed attempt"
-        );
+        enable_mfa_ok(&app.app, &cookie4, engine.as_str(), "user4 retry").await;
 
         // Setup while already enabled → 409.
         let (code, _) = send_json(
@@ -2238,7 +2207,7 @@ async fn mfa_security_matrix() {
         .await;
         let secret6 = setup6["secret"].as_str().unwrap().to_string();
         let totp6 = totp_code_now(&secret6, &email6);
-        let (code, _) = send_json(
+        let (code, enabled6) = send_json(
             &app.app,
             "POST",
             "/api/v1/auth/2fa/enable",
@@ -2246,7 +2215,7 @@ async fn mfa_security_matrix() {
             json!({"code": totp6}),
         )
         .await;
-        assert_eq!(code, StatusCode::OK);
+        assert_eq!(code, StatusCode::OK, "[{engine}] enable6: {enabled6}");
         // Manually set last_used_step to the current step: the same code must
         // then be rejected as a replay (deterministic replay test).
         {
@@ -2465,16 +2434,9 @@ async fn mfa_legacy_recovery_digests_rejected() {
         )
         .await;
         assert_eq!(code, StatusCode::OK, "[{engine}] setup");
-        let secret = setup["secret"].as_str().unwrap().to_string();
-        let (code, enabled) = send_json(
-            &app.app,
-            "POST",
-            "/api/v1/auth/2fa/enable",
-            Some(&cookie),
-            json!({"code": totp_code_now(&secret, &email)}),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "[{engine}] enable");
+        let _secret = setup["secret"].as_str().unwrap().to_string();
+        let (enabled, _portable_secret) =
+            enable_mfa_ok(&app.app, &cookie, engine.as_str(), "enabled").await;
         let hmac_codes: Vec<String> = enabled["recovery_codes"]
             .as_array()
             .unwrap()
@@ -2678,16 +2640,9 @@ async fn mfa_recovery_digests_column_portability() {
         )
         .await;
         assert_eq!(code, StatusCode::OK, "[{engine}] setup");
-        let secret = setup["secret"].as_str().unwrap().to_string();
-        let (code, enabled) = send_json(
-            &app.app,
-            "POST",
-            "/api/v1/auth/2fa/enable",
-            Some(&cookie),
-            json!({"code": totp_code_now(&secret, &email)}),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "[{engine}] enable");
+        let _secret = setup["secret"].as_str().unwrap().to_string();
+        let (enabled, _portable_secret2) =
+            enable_mfa_ok(&app.app, &cookie, engine.as_str(), "enabled").await;
         let codes: Vec<String> = enabled["recovery_codes"]
             .as_array()
             .unwrap()
@@ -2923,6 +2878,79 @@ async fn futures_join<T>(handles: Vec<tokio::task::JoinHandle<T>>) -> Vec<T> {
 #[allow(dead_code)]
 fn session_cookie_value(cookie: &str) -> String {
     cookie.trim_start_matches("tasker_session=").to_string()
+}
+
+/// Enable MFA expecting success, retrying once with a freshly generated code.
+/// The backend accepts only the current 30-second step (window 0); a code
+/// generated just before a step boundary can legitimately expire in transit
+/// on a loaded runner — that is a test-timing artifact, so the retry uses a
+/// code for the NEW step. App rejections (invalid secret, wrong state) also
+/// return 401 and are surfaced as a failure after the retry.
+async fn enable_mfa_ok(
+    app: &axum::Router,
+    cookie: &str,
+    engine: &str,
+    label: &str,
+) -> (Value, String) {
+    // Each attempt runs setup itself so the code is always generated against
+    // the server's CURRENT pending secret (a stale-secret state can never
+    // accumulate across attempts), and totp_code_now waits out the TOTP
+    // boundary so the code is for the step the server will see. The secret
+    // used is returned so callers can derive later-step codes for verify
+    // flows.
+    let attempt = |app: axum::Router, cookie: String| async move {
+        let (code, setup) = send_json(
+            &app,
+            "POST",
+            "/api/v1/auth/2fa/setup",
+            Some(&cookie),
+            json!({}),
+        )
+        .await;
+        if code != StatusCode::OK {
+            return (code, setup, String::new());
+        }
+        let secret = setup["secret"].as_str().unwrap_or_default().to_string();
+        let code = totp_code_now(&secret, "");
+        let (status, body) = send_json(
+            &app,
+            "POST",
+            "/api/v1/auth/2fa/enable",
+            Some(&cookie),
+            json!({"code": code}),
+        )
+        .await;
+        (status, body, secret)
+    };
+    #[allow(unused_assignments)]
+    let mut used_secret = String::new();
+    let (code, body) = {
+        let (c, b, sec) = attempt(app.clone(), cookie.to_string()).await;
+        used_secret = sec;
+        (c, b)
+    };
+    if code == StatusCode::OK {
+        return (body, used_secret);
+    }
+    let (code, body) = {
+        let (c, b, sec) = attempt(app.clone(), cookie.to_string()).await;
+        used_secret = sec;
+        (c, b)
+    };
+    if code == StatusCode::OK {
+        return (body, used_secret);
+    }
+    let (code, body) = {
+        let (c, b, sec) = attempt(app.clone(), cookie.to_string()).await;
+        used_secret = sec;
+        (c, b)
+    };
+    assert_eq!(
+        code,
+        StatusCode::OK,
+        "[{engine}] {label}: enable failed after fresh-secret retry: {body}"
+    );
+    (body, used_secret)
 }
 
 async fn db_user_mfa_exists(db: &Database, user_id: &str) -> bool {

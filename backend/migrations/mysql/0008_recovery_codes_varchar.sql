@@ -1,21 +1,30 @@
 -- Phase 7 remediation follow-up (CI integration-matrix finding).
 --
 -- MySQL's wire protocol reports TEXT columns as BLOB-family types, and
--- sqlx's Any driver cannot decode a BLOB-kind value into String — the
--- recovery-code digest readback (`recovery_codes_hashed` is a JSON array
--- of `h1.` HMAC digests, ~710 bytes at most) fails on MySQL while the
--- same code works on PostgreSQL `text` and SQLite `TEXT`. Re-declare the
--- column as a bounded textual type: VARCHAR(4096) maps to VAR_STRING on
--- the wire, which the Any driver decodes as text.
+-- sqlx's Any compatibility layer maps every BLOB variant to a Blob value
+-- kind that cannot be decoded into String. The project's own rule for the
+-- MySQL dialect (see migrations/mysql/0001_init.sql header) is therefore
+-- "string columns use VARCHAR with utf8mb4" — migration 0006 violated it
+-- by declaring both MFA payload columns as TEXT:
+--
+--   totp_secret_encrypted  AES-256-GCM envelope, "v1." + ~96 base64url
+--                          chars (<= 1024 covers future algorithm tweaks);
+--                          every find_user_mfa readback decodes it.
+--   recovery_codes_hashed  JSON array of `h1.` HMAC digests (~710 bytes).
 --
 -- Forward-only: 0006 is already published and must not be edited. Ordering
 -- is unconstrained — 0007's statement is content-based (`NOT LIKE '%"h1.%'`)
--- and executes identically against a BLOB or a VARCHAR column, so 0008 may
--- safely follow it; MODIFY preserves all values (`[]` and every `h1.`
--- digest, the largest of which is 68 characters). Fresh installations run
--- 0006 → 0007 → 0008 and end in the same state as upgraded databases.
--- 4096 chars of utf8mb4 (16 KiB) is far above the payload bound and within
--- the InnoDB row limit.
+-- and executes identically against a BLOB or a VARCHAR column, so this
+-- migration may safely follow it; MODIFY preserves all values (`[]`, every
+-- `h1.` digest, and every encrypted envelope). Fresh installations run
+-- 0006 → 0007 → 0008 and end in the same state as upgraded databases. Both
+-- sizes are far above the payload bounds and within the InnoDB row limit.
+-- PostgreSQL keeps `TEXT` (its wire type decodes to String through the Any
+-- driver) and SQLite keeps `TEXT` (dynamic typing); no migration is needed
+-- for those dialects.
 
 ALTER TABLE user_mfa
     MODIFY recovery_codes_hashed VARCHAR(4096) NOT NULL CHARACTER SET utf8mb4;
+
+ALTER TABLE user_mfa
+    MODIFY totp_secret_encrypted VARCHAR(1024) NOT NULL CHARACTER SET utf8mb4;
