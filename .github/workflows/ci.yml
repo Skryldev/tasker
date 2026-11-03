@@ -8,6 +8,10 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   backend:
     name: Rust — fmt, clippy, tests (SQLite)
@@ -37,13 +41,27 @@ jobs:
             grep -B2 -A10 'panicked at\|FAILED\|failures:' /tmp/test-out.txt | tail -120
           } >> "$GITHUB_STEP_SUMMARY" || true
           tail -150 /tmp/test-out.txt > /tmp/fail-tail.txt || true
+      - name: cargo test
+        run: |
+          set -o pipefail
+          cargo test 2>&1 | tee /tmp/test-out.txt | tail -20
+
       - name: Report test failures to an issue
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          BODY=$(cat /tmp/fail-tail.txt | tail -c 4000)
-          curl -sf -X POST             -H "Authorization: Bearer $GH_TOKEN"             -H 'Accept: application/vnd.github+json'             'https://api.github.com/repos/Skryldev/tasker/issues'             -d "{"title": "CI test failure (backend, run ${{ github.run_id }})", "body": "$(echo "$BODY" | sed 's/"/\\"/g')"}"             > /dev/null || true
+          tail -150 /tmp/test-out.txt > /tmp/fail-tail.txt || true
+          jq -n --arg title "CI test failure (backend, run $RUN_ID)" \
+                --rawfile body /tmp/fail-tail.txt \
+                '{title: $title, body: $body}' > /tmp/payload.json
+          curl -sf -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/Skryldev/tasker/issues \
+            -d @/tmp/payload.json > /dev/null || true
+
 
   frontend:
     name: Frontend — typecheck, lint, tests, build
@@ -125,15 +143,17 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           tail -150 /tmp/it-out.txt > /tmp/it-fail-tail.txt || true
-          BODY=$(tail -c 4000 /tmp/it-fail-tail.txt | sed 's/"/\\"/g')
+          jq -n --arg title "CI test failure (integration, run $RUN_ID)" \
+                --rawfile body /tmp/it-fail-tail.txt \
+                '{title: $title, body: $body}' > /tmp/payload.json
           curl -sf -X POST \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
-            'https://api.github.com/repos/Skryldev/tasker/issues' \
-            -d "{"title": "CI test failure (integration, run ${{ github.run_id }})", "body": "$BODY"}" \
-            > /dev/null || true
+            https://api.github.com/repos/Skryldev/tasker/issues \
+            -d @/tmp/payload.json > /dev/null || true
 
   e2e:
     name: Playwright E2E workflow
