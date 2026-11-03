@@ -25,7 +25,17 @@ jobs:
           workspaces: backend
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      - name: cargo test
+        run: |
+          set -o pipefail
+          cargo test 2>&1 | tee /tmp/test-out.txt | tail -20
+      - name: Surface test failures in the job summary
+        if: failure()
+        run: |
+          {
+            echo '### Test failures'
+            grep -B2 -A10 'panicked at\|FAILED\|failures:' /tmp/test-out.txt | tail -120
+          } >> "$GITHUB_STEP_SUMMARY" || true
 
   frontend:
     name: Frontend — typecheck, lint, tests, build
@@ -89,10 +99,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend
-      - run: cargo test --test integration
+      - name: cargo test --test integration
+        run: |
+          set -o pipefail
+          cargo test --test integration 2>&1 | tee /tmp/it-out.txt | tail -20
         env:
           TASKER_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/tasker_it
           TASKER_TEST_MYSQL_URL: mysql://root:mysql@localhost:3306/tasker_it
+      - name: Surface integration failures in the job summary
+        if: failure()
+        run: |
+          {
+            echo '### Integration test failures'
+            grep -B2 -A10 'panicked at\|FAILED\|failures:' /tmp/it-out.txt | tail -120
+          } >> "$GITHUB_STEP_SUMMARY" || true
 
   e2e:
     name: Playwright E2E workflow
