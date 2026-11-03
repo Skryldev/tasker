@@ -36,6 +36,14 @@ jobs:
             echo '### Test failures'
             grep -B2 -A10 'panicked at\|FAILED\|failures:' /tmp/test-out.txt | tail -120
           } >> "$GITHUB_STEP_SUMMARY" || true
+          tail -150 /tmp/test-out.txt > /tmp/fail-tail.txt || true
+      - name: Report test failures to an issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BODY=$(cat /tmp/fail-tail.txt | tail -c 4000)
+          curl -sf -X POST             -H "Authorization: Bearer $GH_TOKEN"             -H 'Accept: application/vnd.github+json'             'https://api.github.com/repos/Skryldev/tasker/issues'             -d "{"title": "CI test failure (backend, run ${{ github.run_id }})", "body": "$(echo "$BODY" | sed 's/"/\\"/g')"}"             > /dev/null || true
 
   frontend:
     name: Frontend — typecheck, lint, tests, build
@@ -113,6 +121,19 @@ jobs:
             echo '### Integration test failures'
             grep -B2 -A10 'panicked at\|FAILED\|failures:' /tmp/it-out.txt | tail -120
           } >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Report integration failures to an issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tail -150 /tmp/it-out.txt > /tmp/it-fail-tail.txt || true
+          BODY=$(tail -c 4000 /tmp/it-fail-tail.txt | sed 's/"/\\"/g')
+          curl -sf -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            'https://api.github.com/repos/Skryldev/tasker/issues' \
+            -d "{"title": "CI test failure (integration, run ${{ github.run_id }})", "body": "$BODY"}" \
+            > /dev/null || true
 
   e2e:
     name: Playwright E2E workflow
