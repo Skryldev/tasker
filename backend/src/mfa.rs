@@ -339,12 +339,13 @@ pub async fn store_pending_secret(
     encrypted: &str,
 ) -> Result<(), AppError> {
     let now = util::now_ms();
+    // Six values for six columns — an extra bind here corrupts the MySQL
+    // binary protocol (ER_MALFORMED_PACKET 1835); SQLite silently ignores it.
     let mut args = Args::new();
     args.s(util::new_id())
         .s(user_id)
         .s(encrypted)
         .s("[]")
-        .i(now)
         .i(now)
         .i(now);
     let dialect = conn.driver();
