@@ -2640,9 +2640,45 @@ async fn mfa_recovery_digests_column_portability() {
                     .filter_map(|r| r.try_get::<String, _>(0).ok())
                     .collect()
             };
+            // Diagnostic when the check fails: row count (integer decode)
+            // and raw sample rows (string decode) tell a matching problem
+            // from a decoding problem on the engine's information_schema.
+            let diag = if observed.is_empty() && engine != "sqlite" {
+                let count: Vec<i64> = conn
+                    .fetch_all(
+                        "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'user_mfa'",
+                        tasker::db::Args::new(),
+                    )
+                    .await
+                    .unwrap()
+                    .iter()
+                    .filter_map(|r| r.try_get::<i64, _>(0).ok())
+                    .collect();
+                let sample: Vec<String> = conn
+                    .fetch_all(
+                        "SELECT table_name, column_name, data_type FROM information_schema.columns \
+                         WHERE table_name = 'user_mfa' OR column_name = 'recovery_codes_hashed' LIMIT 20",
+                        tasker::db::Args::new(),
+                    )
+                    .await
+                    .unwrap()
+                    .iter()
+                    .map(|r| {
+                        format!(
+                            "{}|{}|{}",
+                            r.try_get::<String, _>(0).unwrap_or_default(),
+                            r.try_get::<String, _>(1).unwrap_or_default(),
+                            r.try_get::<String, _>(2).unwrap_or_default(),
+                        )
+                    })
+                    .collect();
+                format!(" count={count:?} sample={sample:?}")
+            } else {
+                String::new()
+            };
             assert!(
                 observed.iter().any(|t| t.to_ascii_lowercase() == expected),
-                "[{engine}] recovery_codes_hashed must be {expected}; got {observed:?}"
+                "[{engine}] recovery_codes_hashed must be {expected}; got {observed:?}{diag}"
             );
         }
 
