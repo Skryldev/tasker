@@ -75,12 +75,14 @@ struct TestApp {
 async fn spawn_app(url: &str) -> TestApp {
     // Surface internal error details (incl. sqlx messages) during test runs.
     let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::ERROR)
+        .with_max_level(tracing::Level::INFO)
         .with_test_writer()
         .try_init();
     let config = test_config(url.to_string());
     let db = Database::connect(&config).await.expect("connect");
-    db.migrate().await.expect("migrate");
+    db.migrate()
+        .await
+        .unwrap_or_else(|e| panic!("migrate failed: {e}"));
     let db = Arc::new(db);
     let state = AppState::new((*db).clone(), config);
     TestApp {
@@ -1230,15 +1232,24 @@ fn base32_decode(input: &str) -> Vec<u8> {
 /// test-infrastructure artifact, not an application rejection. The wait is
 /// bounded (< 30.5 s) and codes are still current-step codes, so replay
 /// protection and enrollment semantics are unchanged.
-fn totp_code_now(secret_base32: &str, email: &str) -> String {
+async fn totp_code_now(secret_base32: &str, email: &str) -> String {
     use totp_rs::{Algorithm, TOTP};
     const STEP_MS: u64 = 30_000;
-    const MIN_REMAINING_MS: u64 = 5_000;
+    // 15s: under CI load, generation-to-processing can stall for seconds;
+    // generating only with this much step margin keeps the code in the step
+    // the server will see (window 0). Combined with the helper's fresh-code
+    // retries, a boundary crossing cannot fail three consecutive attempts
+    // unless the machine stalls for the full margin on every attempt.
+    const MIN_REMAINING_MS: u64 = 15_000;
     let epoch_ms = u64::try_from(tasker::util::now_ms()).unwrap_or(0);
     let into_step = epoch_ms % STEP_MS;
     if into_step > STEP_MS - MIN_REMAINING_MS {
+        // tokio::time::sleep YIELDS the worker thread; std::thread::sleep
+        // would block it, starving the in-process test server (which runs on
+        // the same runtime) for the full sleep and pushing every concurrent
+        // request past the TOTP boundary.
         let wait = STEP_MS - into_step + 500;
-        std::thread::sleep(std::time::Duration::from_millis(wait));
+        tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
     }
     let bytes = base32_decode(secret_base32);
     let totp = TOTP::new(
@@ -1374,7 +1385,7 @@ async fn mfa_security_matrix() {
         // Boundary-aware verify: on a 401 from a step-boundary stall, retry
         // once with a freshly generated code (the pending token is NOT
         // consumed by a failed attempt, so the retry is legal).
-        let totp_now = totp_code_now(&secret_base32, &email);
+        let totp_now = totp_code_now(&secret_base32, &email).await;
         let mut response = app
             .app
             .clone()
@@ -1400,7 +1411,7 @@ async fn mfa_security_matrix() {
                         .uri("/api/v1/auth/2fa/verify")
                         .header(header::CONTENT_TYPE, "application/json")
                         .body(Body::from(
-                            json!({"mfa_token": mfa_token, "code": totp_code_now(&secret_base32, &email)})
+                            json!({"mfa_token": mfa_token, "code": totp_code_now(&secret_base32, &email).await})
                                 .to_string(),
                         ))
                         .unwrap(),
@@ -1436,7 +1447,7 @@ async fn mfa_security_matrix() {
         );
 
         // The consumed pending token cannot verify again.
-        let totp_next = totp_code_now(&secret_base32, &email);
+        let totp_next = totp_code_now(&secret_base32, &email).await;
         let (code, _) = send_json(
             &app.app,
             "POST",
@@ -1525,7 +1536,7 @@ async fn mfa_security_matrix() {
             .await
             .unwrap();
         }
-        let fresh = totp_code_now(&secret_base32, &email);
+        let fresh = totp_code_now(&secret_base32, &email).await;
         let (code, _) = send_json(
             &app.app,
             "POST",
@@ -1596,7 +1607,7 @@ async fn mfa_security_matrix() {
         .await;
         assert_eq!(login_code, StatusCode::OK, "[{engine}] mfa login for 6th");
         token5 = login_body["mfa_token"].as_str().unwrap().to_string();
-        let valid_code = totp_code_now(&rl_secret, &rl_email);
+        let valid_code = totp_code_now(&rl_secret, &rl_email).await;
         let (code, _) = send_json(
             &app.app,
             "POST",
@@ -1740,7 +1751,7 @@ async fn mfa_security_matrix() {
             "POST",
             "/api/v1/auth/2fa/enable",
             Some(&cookie3),
-            json!({"code": totp_code_now(&secret3b, &email3)}),
+            json!({"code": totp_code_now(&secret3b, &email3).await}),
         )
         .await;
         assert_eq!(code, StatusCode::OK, "[{engine}] enable3: {enabled3}");
@@ -2099,7 +2110,7 @@ async fn mfa_security_matrix() {
         )
         .await;
         assert_eq!(code, StatusCode::CONFLICT, "[{engine}] setup when enabled");
-        let totp4b = totp_code_now(setup4["secret"].as_str().unwrap(), &email4);
+        let totp4b = totp_code_now(setup4["secret"].as_str().unwrap(), &email4).await;
         let (code, _) = send_json(
             &app.app,
             "POST",
@@ -2206,7 +2217,7 @@ async fn mfa_security_matrix() {
         )
         .await;
         let secret6 = setup6["secret"].as_str().unwrap().to_string();
-        let totp6 = totp_code_now(&secret6, &email6);
+        let totp6 = totp_code_now(&secret6, &email6).await;
         let (code, enabled6) = send_json(
             &app.app,
             "POST",
@@ -2275,7 +2286,7 @@ async fn mfa_security_matrix() {
         )
         .await;
         let token_conc = login_body["mfa_token"].as_str().unwrap().to_string();
-        let new_code = totp_code_now(&secret6, &email6);
+        let new_code = totp_code_now(&secret6, &email6).await;
         let mut submissions = Vec::new();
         for i in 0..3 {
             let router = app.app.clone();
@@ -2328,7 +2339,7 @@ async fn mfa_security_matrix() {
             "POST",
             "/api/v1/auth/2fa/enable",
             Some(&cookie7),
-            json!({"code": totp_code_now(setup7["secret"].as_str().unwrap(), &email7)}),
+            json!({"code": totp_code_now(setup7["secret"].as_str().unwrap(), &email7).await}),
         )
         .await;
         assert_eq!(code, StatusCode::OK);
@@ -2643,6 +2654,7 @@ async fn mfa_recovery_digests_column_portability() {
         let _secret = setup["secret"].as_str().unwrap().to_string();
         let (enabled, _portable_secret2) =
             enable_mfa_ok(&app.app, &cookie, engine.as_str(), "enabled").await;
+        eprintln!("[dbg] portability enabled for {email}");
         let codes: Vec<String> = enabled["recovery_codes"]
             .as_array()
             .unwrap()
@@ -2911,7 +2923,8 @@ async fn enable_mfa_ok(
             return (code, setup, String::new());
         }
         let secret = setup["secret"].as_str().unwrap_or_default().to_string();
-        let code = totp_code_now(&secret, "");
+        let code = totp_code_now(&secret, "").await;
+        let generated_step = tasker::mfa::current_step();
         let (status, body) = send_json(
             &app,
             "POST",
@@ -2920,6 +2933,10 @@ async fn enable_mfa_ok(
             json!({"code": code}),
         )
         .await;
+        eprintln!(
+            "[dbg] enable status={status} generated_step={generated_step} now_step={}",
+            tasker::mfa::current_step()
+        );
         (status, body, secret)
     };
     #[allow(unused_assignments)]
@@ -2932,25 +2949,17 @@ async fn enable_mfa_ok(
     if code == StatusCode::OK {
         return (body, used_secret);
     }
-    let (code, body) = {
-        let (c, b, sec) = attempt(app.clone(), cookie.to_string()).await;
-        used_secret = sec;
-        (c, b)
-    };
-    if code == StatusCode::OK {
-        return (body, used_secret);
+    for _ in 0..2 {
+        let (code, body) = {
+            let (c, b, sec) = attempt(app.clone(), cookie.to_string()).await;
+            used_secret = sec;
+            (c, b)
+        };
+        if code == StatusCode::OK {
+            return (body, used_secret);
+        }
     }
-    let (code, body) = {
-        let (c, b, sec) = attempt(app.clone(), cookie.to_string()).await;
-        used_secret = sec;
-        (c, b)
-    };
-    assert_eq!(
-        code,
-        StatusCode::OK,
-        "[{engine}] {label}: enable failed after fresh-secret retry: {body}"
-    );
-    (body, used_secret)
+    panic!("[{engine}] {label}: enable failed after fresh-secret retries: {body}");
 }
 
 async fn db_user_mfa_exists(db: &Database, user_id: &str) -> bool {
