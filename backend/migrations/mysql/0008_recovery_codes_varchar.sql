@@ -24,7 +24,7 @@
 -- for those dialects.
 
 ALTER TABLE user_mfa
-    MODIFY recovery_codes_hashed VARCHAR(4096) NOT NULL CHARACTER SET utf8mb4;
+    MODIFY recovery_codes_hashed VARCHAR(4096) CHARACTER SET utf8mb4 NOT NULL;
 
 ALTER TABLE user_mfa
-    MODIFY totp_secret_encrypted VARCHAR(1024) NOT NULL CHARACTER SET utf8mb4;
+    MODIFY totp_secret_encrypted VARCHAR(1024) CHARACTER SET utf8mb4 NOT NULL;
