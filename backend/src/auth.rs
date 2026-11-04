@@ -48,7 +48,12 @@ pub async fn create_session(
 ) -> Result<String, AppError> {
     let token = crate::security::token::generate();
     let now = util::now_ms();
-    let expires_at = now.saturating_add(i64::try_from(ttl_secs).unwrap_or(i64::MAX / 2));
+    // `ttl_secs` is seconds; `now` is epoch milliseconds. Convert before
+    // adding — an unconverted add expired every session after ~3.6 seconds.
+    let ttl_ms = i64::try_from(ttl_secs)
+        .unwrap_or(i64::MAX / 2)
+        .saturating_mul(1000);
+    let expires_at = now.saturating_add(ttl_ms);
     let mut args = Args::new();
     args.s(util::new_id())
         .s(user_id)

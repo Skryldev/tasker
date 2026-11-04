@@ -412,10 +412,6 @@ pub async fn consume_pending_token(
     conn: &mut Conn<'_>,
     raw_token: &str,
 ) -> Result<Option<String>, AppError> {
-    eprintln!(
-        "[consume] called for hash {}",
-        &token::hash(raw_token)[..12]
-    );
     let mut args = Args::new();
     args.i(util::now_ms()).s(token::hash(raw_token));
     let affected = conn
@@ -616,11 +612,8 @@ async fn verify(
             10,
             std::time::Duration::from_secs(60),
         )
-        .map_err(|retry| {
-            eprintln!("[rl] IP limit hit for {ip}");
-            AppError::RateLimited {
-                retry_after_secs: retry.as_secs().max(1),
-            }
+        .map_err(|retry| AppError::RateLimited {
+            retry_after_secs: retry.as_secs().max(1),
         })?;
 
     // Resolve (NOT consume) the pending token to learn the user for the
@@ -637,11 +630,8 @@ async fn verify(
             5,
             std::time::Duration::from_secs(60),
         )
-        .map_err(|retry| {
-            eprintln!("[rl] USER limit hit for {pending_user_id}");
-            AppError::RateLimited {
-                retry_after_secs: retry.as_secs().max(1),
-            }
+        .map_err(|retry| AppError::RateLimited {
+            retry_after_secs: retry.as_secs().max(1),
         })?;
 
     let key = require_key(&state)?.to_vec();

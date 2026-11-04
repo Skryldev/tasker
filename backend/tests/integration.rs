@@ -1746,15 +1746,30 @@ async fn mfa_security_matrix() {
         .await;
         assert_eq!(code, StatusCode::OK, "[{engine}] setup3: {setup3}");
         let secret3b = setup3["secret"].as_str().unwrap().to_string();
-        let (code, enabled3) = send_json(
-            &app.app,
-            "POST",
-            "/api/v1/auth/2fa/enable",
-            Some(&cookie3),
-            json!({"code": totp_code_now(&secret3b, &email3).await}),
-        )
-        .await;
-        assert_eq!(code, StatusCode::OK, "[{engine}] enable3: {enabled3}");
+        // Boundary-aware retry: totp_code_now waits out a step tail, and a
+        // second attempt uses a code for the fresh step if the first still
+        // crossed under CI load.
+        let mut enabled3 = Value::Null;
+        let mut enable3_ok = false;
+        for _ in 0..2 {
+            let (code, body) = send_json(
+                &app.app,
+                "POST",
+                "/api/v1/auth/2fa/enable",
+                Some(&cookie3),
+                json!({"code": totp_code_now(&secret3b, &email3).await}),
+            )
+            .await;
+            if code == StatusCode::OK {
+                enabled3 = body;
+                enable3_ok = true;
+                break;
+            }
+        }
+        assert!(
+            enable3_ok,
+            "[{engine}] enable3 failed after fresh-code retries: {enabled3}"
+        );
         let codes3: Vec<String> = enabled3["recovery_codes"]
             .as_array()
             .unwrap()
@@ -2381,12 +2396,7 @@ async fn mfa_security_matrix() {
                     )
                     .await
                     .unwrap();
-                let status = response.status();
-                let body = axum::body::to_bytes(response.into_body(), 4096)
-                    .await
-                    .unwrap();
-                eprintln!("[redemption] {status} {}", String::from_utf8_lossy(&body));
-                status
+                response.status()
             }));
         }
         let statuses = futures_join(redemptions).await;
@@ -2654,7 +2664,6 @@ async fn mfa_recovery_digests_column_portability() {
         let _secret = setup["secret"].as_str().unwrap().to_string();
         let (enabled, _portable_secret2) =
             enable_mfa_ok(&app.app, &cookie, engine.as_str(), "enabled").await;
-        eprintln!("[dbg] portability enabled for {email}");
         let codes: Vec<String> = enabled["recovery_codes"]
             .as_array()
             .unwrap()
@@ -2922,9 +2931,12 @@ async fn enable_mfa_ok(
         if code != StatusCode::OK {
             return (code, setup, String::new());
         }
-        let secret = setup["secret"].as_str().unwrap_or_default().to_string();
+        let secret = setup["secret"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| panic!("[{engine}] {label}: setup returned no secret; body={setup}"))
+            .to_string();
         let code = totp_code_now(&secret, "").await;
-        let generated_step = tasker::mfa::current_step();
         let (status, body) = send_json(
             &app,
             "POST",
@@ -2933,33 +2945,48 @@ async fn enable_mfa_ok(
             json!({"code": code}),
         )
         .await;
-        eprintln!(
-            "[dbg] enable status={status} generated_step={generated_step} now_step={}",
-            tasker::mfa::current_step()
-        );
         (status, body, secret)
     };
-    #[allow(unused_assignments)]
-    let mut used_secret = String::new();
-    let (code, body) = {
-        let (c, b, sec) = attempt(app.clone(), cookie.to_string()).await;
-        used_secret = sec;
-        (c, b)
-    };
-    if code == StatusCode::OK {
-        return (body, used_secret);
-    }
-    for _ in 0..2 {
-        let (code, body) = {
-            let (c, b, sec) = attempt(app.clone(), cookie.to_string()).await;
-            used_secret = sec;
-            (c, b)
-        };
+    let mut last_body = Value::Null;
+    for _ in 0..3 {
+        let (code, body, secret) = attempt(app.clone(), cookie.to_string()).await;
         if code == StatusCode::OK {
-            return (body, used_secret);
+            return (body, secret);
         }
+        last_body = body;
     }
-    panic!("[{engine}] {label}: enable failed after fresh-secret retries: {body}");
+    panic!("[{engine}] {label}: enable failed after fresh-secret retries: {last_body}");
+}
+
+/// Regression guard for a units bug that silently expired every session
+/// ~3.6 seconds after login: `create_session` once added `ttl_secs` (seconds)
+/// directly to `now_ms` (milliseconds), so the stored TTL was the config's
+/// second count in milliseconds. The mfa boundary-sleep retries were the
+/// first flows to outrun that window, surfacing as flaky 401s.
+#[tokio::test]
+async fn session_expires_after_configured_ttl_not_milliseconds() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+        let suffix = Uuid::now_v7();
+        let email = format!("ttl-{suffix}@test.local");
+        seed_user(&db, &email, "Ttl User").await;
+        let _ = login_as(&app.app, &email, "test-password-123").await;
+        let mut conn = db.conn();
+        let row = conn
+            .fetch_optional(
+                "SELECT expires_at - created_at AS ttl_ms FROM sessions",
+                tasker::db::Args::new(),
+            )
+            .await
+            .unwrap()
+            .expect("session row exists after login");
+        let ttl_ms: i64 = row.try_get("ttl_ms").unwrap();
+        assert_eq!(
+            ttl_ms, 3_600_000,
+            "[{engine}] session TTL must be stored in milliseconds (test config TTL is 3600s)"
+        );
+    }
 }
 
 async fn db_user_mfa_exists(db: &Database, user_id: &str) -> bool {
