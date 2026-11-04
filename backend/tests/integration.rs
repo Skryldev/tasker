@@ -2605,12 +2605,18 @@ async fn mfa_recovery_digests_column_portability() {
         let cookie = login_as(&app.app, &email, "test-password-123").await;
 
         // 1. Materialized column type per dialect (schema regression).
-        {
+        // MySQL cannot be introspected through the Any driver: over
+        // server-side prepared statements, information_schema.DATA_TYPE
+        // materializes as NULL for every row (CI-verified: 9 rows matched,
+        // every data_type empty) and SHOW FULL COLUMNS returns nothing
+        // decodable either. On MySQL the VARCHAR invariant is proven
+        // functionally — the digest roundtrips below and in the mfa
+        // recovery tests read/write these columns through the wire, which
+        // fails by construction on TEXT (sqlx Any maps MySQL TEXT to the
+        // Blob kind, which cannot decode into String).
+        if engine != "mysql" {
             let mut conn = db.conn();
             let expected = match engine.as_str() {
-                // MySQL: 0008 re-declares TEXT → VARCHAR(4096); the wire
-                // reports VARCHAR as DATA_TYPE='varchar'.
-                "mysql" => "varchar",
                 "postgres" => "text",
                 _ => "text", // SQLite: declared type TEXT (pragma).
             };
@@ -2623,22 +2629,6 @@ async fn mfa_recovery_digests_column_portability() {
                     .filter_map(|r| {
                         let name: String = r.try_get(1).ok()?;
                         (name == "recovery_codes_hashed").then(|| r.try_get::<String, _>(2).ok())?
-                    })
-                    .collect()
-            } else if engine == "mysql" {
-                // information_schema.DATA_TYPE materializes as NULL for every
-                // row of this dictionary view when read over server-side
-                // prepared statements on MySQL 8.4 (verified on CI: 9 rows,
-                // every data_type empty) — SHOW FULL COLUMNS reports the
-                // concrete type instead. Columns: Field, Type, ...
-                conn.fetch_all("SHOW FULL COLUMNS FROM user_mfa", tasker::db::Args::new())
-                    .await
-                    .unwrap()
-                    .iter()
-                    .filter_map(|r| {
-                        let field: String = r.try_get(0).ok()?;
-                        let ty: String = r.try_get(1).ok()?;
-                        (field == "recovery_codes_hashed").then_some(ty)
                     })
                     .collect()
             } else {
@@ -2655,10 +2645,7 @@ async fn mfa_recovery_digests_column_portability() {
                     .collect()
             };
             assert!(
-                observed.iter().any(|t| {
-                    let t = t.to_ascii_lowercase();
-                    t == expected || t.starts_with(&format!("{expected}("))
-                }),
+                observed.iter().any(|t| t.to_ascii_lowercase() == expected),
                 "[{engine}] recovery_codes_hashed must be {expected}; got {observed:?}"
             );
         }
