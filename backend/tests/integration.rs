@@ -2625,12 +2625,26 @@ async fn mfa_recovery_digests_column_portability() {
                         (name == "recovery_codes_hashed").then(|| r.try_get::<String, _>(2).ok())?
                     })
                     .collect()
+            } else if engine == "mysql" {
+                // information_schema.DATA_TYPE materializes as NULL for every
+                // row of this dictionary view when read over server-side
+                // prepared statements on MySQL 8.4 (verified on CI: 9 rows,
+                // every data_type empty) — SHOW FULL COLUMNS reports the
+                // concrete type instead. Columns: Field, Type, ...
+                conn.fetch_all("SHOW FULL COLUMNS FROM user_mfa", tasker::db::Args::new())
+                    .await
+                    .unwrap()
+                    .iter()
+                    .filter_map(|r| {
+                        let field: String = r.try_get(0).ok()?;
+                        let ty: String = r.try_get(1).ok()?;
+                        (field == "recovery_codes_hashed").then_some(ty)
+                    })
+                    .collect()
             } else {
-                // The integration databases are dedicated per engine, so
-                // table+column uniquely identify the row; MySQL 8.4 does not
-                // match `table_schema = DATABASE()` on this query, and
-                // TABLE_SCHEMA itself is PG's `name` type, which the Any
-                // driver cannot decode — select the type column only.
+                // PG's information_schema handles prepared reads fine; the
+                // integration database is dedicated, so table+column
+                // uniquely identify the row.
                 let sql = "SELECT DATA_TYPE FROM information_schema.columns \
                            WHERE table_name = 'user_mfa' AND column_name = 'recovery_codes_hashed'";
                 conn.fetch_all(sql, tasker::db::Args::new())
@@ -2640,45 +2654,12 @@ async fn mfa_recovery_digests_column_portability() {
                     .filter_map(|r| r.try_get::<String, _>(0).ok())
                     .collect()
             };
-            // Diagnostic when the check fails: row count (integer decode)
-            // and raw sample rows (string decode) tell a matching problem
-            // from a decoding problem on the engine's information_schema.
-            let diag = if observed.is_empty() && engine != "sqlite" {
-                let count: Vec<i64> = conn
-                    .fetch_all(
-                        "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'user_mfa'",
-                        tasker::db::Args::new(),
-                    )
-                    .await
-                    .unwrap()
-                    .iter()
-                    .filter_map(|r| r.try_get::<i64, _>(0).ok())
-                    .collect();
-                let sample: Vec<String> = conn
-                    .fetch_all(
-                        "SELECT table_name, column_name, data_type FROM information_schema.columns \
-                         WHERE table_name = 'user_mfa' OR column_name = 'recovery_codes_hashed' LIMIT 20",
-                        tasker::db::Args::new(),
-                    )
-                    .await
-                    .unwrap()
-                    .iter()
-                    .map(|r| {
-                        format!(
-                            "{}|{}|{}",
-                            r.try_get::<String, _>(0).unwrap_or_default(),
-                            r.try_get::<String, _>(1).unwrap_or_default(),
-                            r.try_get::<String, _>(2).unwrap_or_default(),
-                        )
-                    })
-                    .collect();
-                format!(" count={count:?} sample={sample:?}")
-            } else {
-                String::new()
-            };
             assert!(
-                observed.iter().any(|t| t.to_ascii_lowercase() == expected),
-                "[{engine}] recovery_codes_hashed must be {expected}; got {observed:?}{diag}"
+                observed.iter().any(|t| {
+                    let t = t.to_ascii_lowercase();
+                    t == expected || t.starts_with(&format!("{expected}("))
+                }),
+                "[{engine}] recovery_codes_hashed must be {expected}; got {observed:?}"
             );
         }
 
