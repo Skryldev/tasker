@@ -1,7 +1,7 @@
 //! Teams: creation, settings, membership management, and labels.
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,10 @@ use crate::util;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/teams", get(list_teams).post(create_team))
-        .route("/teams/{team_id}", get(get_team).patch(update_team))
+        .route("/teams/{team_id}", get(get_team).patch(update_team).delete(delete_team))
+        .route("/teams/{team_id}/archive", axum::routing::post(archive_team))
+        .route("/teams/{team_id}/unarchive", axum::routing::post(unarchive_team))
+        .route("/teams/{team_id}/avatar", get(serve_team_avatar))
         .route(
             "/teams/{team_id}/members",
             get(list_members).post(add_member),
@@ -26,6 +29,11 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/teams/{team_id}/members/{user_id}",
             axum::routing::patch(change_member_role).delete(remove_member),
+        )
+        .route("/teams/{team_id}/guests", get(list_guests))
+        .route(
+            "/teams/{team_id}/guests/{user_id}",
+            axum::routing::delete(revoke_guest),
         )
         .route(
             "/teams/{team_id}/labels",
@@ -42,16 +50,23 @@ pub struct Team {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    /// Default timezone for the team (Phase 9). Display-only.
+    pub timezone: Option<String>,
+    /// Set when the team is archived (Phase 9); NULL while active.
+    pub archived_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
     pub my_role: Option<Role>,
 }
 
-const TEAM_COLUMNS: &str = "id, name, description, created_at, updated_at";
+const TEAM_COLUMNS: &str = "id, name, description, timezone, archived_at, created_at, updated_at";
 
 #[derive(Serialize)]
 pub struct MemberResponse {
     pub user: UserBrief,
+    /// @mention handle (Phase 9): powers the member search and the mention
+    /// resolver without changing the embedded user shape.
+    pub username: Option<String>,
     pub role: Role,
     pub created_at: i64,
 }
@@ -69,6 +84,8 @@ fn row_to_team(row: &sqlx::any::AnyRow, my_role: Option<Role>) -> Result<Team, A
         id: row.try_get("id")?,
         name: row.try_get("name")?,
         description: row.try_get("description")?,
+        timezone: row.try_get("timezone")?,
+        archived_at: row.try_get("archived_at")?,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
         my_role,
@@ -180,6 +197,8 @@ async fn create_team(
             id,
             name,
             description,
+            timezone: None,
+            archived_at: None,
             created_at: now,
             updated_at: now,
             my_role: Some(Role::Owner),
@@ -196,7 +215,7 @@ async fn list_teams(
     args.s(&user.id);
     let rows = conn
         .fetch_all(
-            "SELECT t.id, t.name, t.description, t.created_at, t.updated_at, tm.role \
+            "SELECT t.id, t.name, t.description, t.timezone, t.archived_at, t.created_at, t.updated_at, tm.role \
              FROM teams t JOIN team_members tm ON tm.team_id = t.id \
              WHERE tm.user_id = ? ORDER BY t.created_at",
             args,
@@ -208,6 +227,8 @@ async fn list_teams(
             "id": row.try_get::<String, _>("id")?,
             "name": row.try_get::<String, _>("name")?,
             "description": row.try_get::<Option<String>, _>("description")?,
+            "timezone": row.try_get::<Option<String>, _>("timezone")?,
+            "archived_at": row.try_get::<Option<i64>, _>("archived_at")?,
             "created_at": row.try_get::<i64, _>("created_at")?,
             "updated_at": row.try_get::<i64, _>("updated_at")?,
             "my_role": Role::parse(&row.try_get::<String, _>("role")?)?,
@@ -234,6 +255,12 @@ pub struct UpdateTeamRequest {
     pub name: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub timezone: Option<String>,
+    /// `null` clears the team avatar; a data URL sets it. Never echoed back —
+    /// the image is served by `GET /teams/{team_id}/avatar`.
+    #[serde(default)]
+    pub avatar: Option<Option<String>>,
 }
 
 async fn update_team(
@@ -253,21 +280,56 @@ async fn update_team(
             .as_deref()
             .or(existing.description.as_deref()),
     )?;
+
+    let timezone = match &body.timezone {
+        Some(raw) => Some(crate::profile::validate_timezone(raw)?),
+        None => existing.timezone.clone(),
+    };
+    let avatar_update = if let Some(value) = &body.avatar {
+        match value {
+            Some(raw) => {
+                let validated = crate::avatar::validate_data_url(raw)?;
+                Some(format!(
+                    "data:{};base64,{}",
+                    validated.content_type,
+                    crate::profile::encode_avatar_base64(&validated.bytes)
+                ))
+            }
+            None => Some(String::new()), // clear
+        }
+    } else {
+        None
+    };
+
     let mut args = Args::new();
-    args.s(&name)
-        .opt_s(description.clone())
-        .i(util::now_ms())
-        .s(&team_id);
-    conn.execute(
-        "UPDATE teams SET name = ?, description = ?, updated_at = ? WHERE id = ?",
-        args,
-    )
-    .await?;
+    args.s(&name).opt_s(description.clone()).i(util::now_ms());
+    let mut sql = String::from(
+        "UPDATE teams SET name = ?, description = ?, updated_at = ?",
+    );
+    if let Some(tz) = &timezone {
+        sql.push_str(", timezone = ?");
+        args.s(tz.clone());
+    }
+    if let Some(encoded) = &avatar_update {
+        // An empty string means "clear" (NULL): the portable layer stores
+        // NULL so absence stays uniform across engines.
+        if encoded.is_empty() {
+            sql.push_str(", avatar = NULL");
+        } else {
+            sql.push_str(", avatar = ?");
+            args.s(encoded.clone());
+        }
+    }
+    sql.push_str(" WHERE id = ?");
+    args.s(&team_id);
+    conn.execute(&sql, args).await?;
     conn.commit().await?;
     Ok(Json(Team {
         id: team_id,
         name,
         description,
+        timezone,
+        archived_at: existing.archived_at,
         created_at: existing.created_at,
         updated_at: util::now_ms(),
         my_role: existing.my_role,
@@ -285,7 +347,7 @@ async fn list_members(
     args.s(&team_id);
     let rows = conn
         .fetch_all(
-            "SELECT tm.role, tm.created_at, u.id, u.email, u.display_name \
+            "SELECT tm.role, tm.created_at, u.id, u.email, u.display_name, u.username \
              FROM team_members tm JOIN users u ON u.id = tm.user_id \
              WHERE tm.team_id = ? ORDER BY tm.created_at",
             args,
@@ -300,6 +362,7 @@ async fn list_members(
                     email: row.try_get("email")?,
                     display_name: row.try_get("display_name")?,
                 },
+                username: row.try_get("username")?,
                 role: Role::parse(&row.try_get::<String, _>("role")?)?,
                 created_at: row.try_get("created_at")?,
             })
@@ -348,9 +411,9 @@ async fn add_member(
     let mut conn = state.db.begin().await?;
 
     let now = util::now_ms();
-    let (user_id, display_name) =
+    let (user_id, display_name, username) =
         if let Some((existing, _)) = users::find_active_by_email(&mut conn, &email).await? {
-            (existing.id, existing.display_name)
+            (existing.id, existing.display_name, existing.username)
         } else {
             let temp_password = body.temp_password.clone().unwrap_or_default();
             let new_user = users::create_validated(
@@ -362,7 +425,7 @@ async fn add_member(
                 &temp_password,
             )
             .await?;
-            (new_user.id, new_user.display_name)
+            (new_user.id, new_user.display_name, new_user.username)
         };
 
     let mut args = Args::new();
@@ -389,6 +452,7 @@ async fn add_member(
                 email,
                 display_name,
             },
+            username,
             role,
             created_at: now,
         }),
@@ -457,7 +521,7 @@ async fn change_member_role(
     let mut conn = state.db.conn();
     let target = users::find_by_id(&mut conn, &target_user_id).await?;
     Ok(Json(MemberResponse {
-        user: target.map_or_else(
+        user: target.clone().map_or_else(
             || UserBrief {
                 id: target_user_id.clone(),
                 email: String::new(),
@@ -469,6 +533,7 @@ async fn change_member_role(
                 display_name: u.display_name,
             },
         ),
+        username: target.and_then(|u| u.username),
         role: new_role,
         created_at: member_since,
     }))
@@ -530,6 +595,268 @@ async fn remove_member(
     .await?;
     conn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Archive / delete (Phase 9)
+// ---------------------------------------------------------------------------
+
+/// Archive is reversible; the flag only marks the team, it does not alter any
+/// workflow or authorization behavior.
+async fn set_team_archived(
+    state: &AppState,
+    user: &AuthedUser,
+    team_id: &str,
+    archived: bool,
+) -> Result<Json<Team>, AppError> {
+    let mut conn = state.db.begin().await?;
+    require_membership(&mut conn, team_id, &user.id).await?;
+    authorization::require_capability(&mut conn, team_id, &user.id, Capability::UpdateTeam)
+        .await?;
+    let existing = find_team(&mut conn, team_id).await?;
+    let mut args = Args::new();
+    args.opt_i(if archived { Some(util::now_ms()) } else { None })
+        .i(util::now_ms())
+        .s(team_id);
+    conn.execute(
+        "UPDATE teams SET archived_at = ?, updated_at = ? WHERE id = ?",
+        args,
+    )
+    .await?;
+    conn.commit().await?;
+    Ok(Json(Team {
+        archived_at: if archived { Some(util::now_ms()) } else { None },
+        ..existing
+    }))
+}
+
+async fn archive_team(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(team_id): Path<String>,
+) -> Result<Json<Team>, AppError> {
+    set_team_archived(&state, &user, &team_id, true).await
+}
+
+async fn unarchive_team(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(team_id): Path<String>,
+) -> Result<Json<Team>, AppError> {
+    set_team_archived(&state, &user, &team_id, false).await
+}
+
+#[derive(Deserialize)]
+pub struct DeleteTeamRequest {
+    /// The team name, typed by the caller as a deliberate confirmation.
+    pub confirm_name: String,
+    /// The caller's current password (re-verification for an irreversible act).
+    pub current_password: String,
+}
+
+/// Hard-delete a team. Owner-only, and only after re-verifying the caller's
+/// password and the typed team name. The rules-engine rows are removed first
+/// because migration 0009 intentionally RESTRICTs their team references.
+///
+/// Deletion order (single transaction; every step is team-scoped):
+/// 1. detach the `domain_events.causing_execution_id` cycle edge,
+/// 2. rule_action_results, automation_outbox, rule_executions,
+/// 3. domain_events, rule_versions, rules,
+/// 4. the team row — engine-level CASCADEs remove members, projects, labels,
+///    tasks (with comments, notifications, dependencies, templates), and the
+///    goal links (goals reference teams with ON DELETE CASCADE).
+async fn delete_team(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(team_id): Path<String>,
+    Json(body): Json<DeleteTeamRequest>,
+) -> Result<StatusCode, AppError> {
+    let mut conn = state.db.begin().await?;
+    let membership = require_membership(&mut conn, &team_id, &user.id).await?;
+    if membership.role != Role::Owner {
+        return Err(AppError::Forbidden(
+            "only the team owner can delete the team",
+        ));
+    }
+    let team = find_team(&mut conn, &team_id).await?;
+    if body.confirm_name.trim() != team.name {
+        return Err(AppError::validation(
+            "confirm_name",
+            "the typed name does not match the team name",
+        ));
+    }
+
+    let found = users::find_active_by_email(&mut conn, &user.email).await?;
+    let Some((_, password_hash)) = found else {
+        return Err(AppError::Unauthenticated);
+    };
+    if !crate::security::password::verify(&body.current_password, &password_hash) {
+        return Err(AppError::validation(
+            "current_password",
+            "current password is incorrect",
+        ));
+    }
+
+    // Args is positional and single-use; each statement gets a fresh binding.
+    let mut args = Args::new();
+    args.s(&team_id);
+    conn.execute(
+        "UPDATE domain_events SET causing_execution_id = NULL WHERE team_id = ?",
+        args,
+    )
+    .await?;
+    let mut args = Args::new();
+    args.s(&team_id);
+    conn.execute(
+        "DELETE FROM rule_action_results WHERE execution_id IN \
+         (SELECT id FROM rule_executions WHERE team_id = ?)",
+        args,
+    )
+    .await?;
+    let mut args = Args::new();
+    args.s(&team_id);
+    conn.execute(
+        "DELETE FROM automation_outbox WHERE execution_id IN \
+         (SELECT id FROM rule_executions WHERE team_id = ?)",
+        args,
+    )
+    .await?;
+    let mut args = Args::new();
+    args.s(&team_id);
+    conn.execute("DELETE FROM rule_executions WHERE team_id = ?", args)
+        .await?;
+    let mut args = Args::new();
+    args.s(&team_id);
+    conn.execute("DELETE FROM domain_events WHERE team_id = ?", args)
+        .await?;
+    let mut args = Args::new();
+    args.s(&team_id);
+    conn.execute(
+        "DELETE FROM rule_versions WHERE rule_id IN (SELECT id FROM rules WHERE team_id = ?)",
+        args,
+    )
+    .await?;
+    let mut args = Args::new();
+    args.s(&team_id);
+    conn.execute("DELETE FROM rules WHERE team_id = ?", args)
+        .await?;
+    let mut args = Args::new();
+    args.s(&team_id);
+    conn.execute("DELETE FROM teams WHERE id = ?", args).await?;
+    conn.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Guests (team-wide view over project_members viewers)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct TeamGuest {
+    pub user: UserBrief,
+    pub project_id: String,
+    pub project_name: String,
+    pub created_at: i64,
+}
+
+async fn list_guests(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(team_id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let mut conn = state.db.conn();
+    require_membership(&mut conn, &team_id, &user.id).await?;
+    let mut args = Args::new();
+    args.s(&team_id);
+    let rows = conn
+        .fetch_all(
+            "SELECT pm.user_id, pm.created_at, u.email, u.display_name, p.id AS project_id, p.name AS project_name \
+             FROM project_members pm \
+             JOIN projects p ON p.id = pm.project_id \
+             JOIN users u ON u.id = pm.user_id \
+             WHERE p.team_id = ? AND pm.role = 'viewer' \
+             ORDER BY p.name, u.display_name",
+            args,
+        )
+        .await?;
+    let items = rows
+        .iter()
+        .map(|row| {
+            Ok(TeamGuest {
+                user: UserBrief {
+                    id: row.try_get("user_id")?,
+                    display_name: row.try_get("display_name")?,
+                    email: row.try_get("email")?,
+                },
+                project_id: row.try_get("project_id")?,
+                project_name: row.try_get("project_name")?,
+                created_at: row.try_get("created_at")?,
+            })
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+    Ok(Json(serde_json::json!({ "items": items })))
+}
+
+/// Revoke a guest from every project in the team (Manager capability or
+/// above, matching the project-level guest manager rule).
+async fn revoke_guest(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path((team_id, target_user_id)): Path<(String, String)>,
+) -> Result<StatusCode, AppError> {
+    let mut conn = state.db.begin().await?;
+    require_membership(&mut conn, &team_id, &user.id).await?;
+    authorization::require_capability(&mut conn, &team_id, &user.id, Capability::ManageProjects)
+        .await?;
+    let mut args = Args::new();
+    args.s(&target_user_id).s(&team_id);
+    let affected = conn
+        .execute(
+            "DELETE FROM project_members WHERE user_id = ? AND role = 'viewer' \
+             AND project_id IN (SELECT id FROM projects WHERE team_id = ?)",
+            args,
+        )
+        .await?;
+    if affected == 0 {
+        return Err(AppError::NotFound("guest not found in this team"));
+    }
+    conn.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Serve the team avatar as image bytes (same contract as user avatars).
+async fn serve_team_avatar(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(team_id): Path<String>,
+) -> Result<(StatusCode, HeaderMap, Vec<u8>), AppError> {
+    let mut conn = state.db.conn();
+    require_membership(&mut conn, &team_id, &user.id).await?;
+    let mut args = Args::new();
+    args.s(&team_id);
+    let row = conn
+        .fetch_optional("SELECT avatar FROM teams WHERE id = ?", args)
+        .await?
+        .ok_or(AppError::NotFound("team not found"))?;
+    let raw: Option<String> = row.try_get("avatar")?;
+    let Some(raw) = raw else {
+        return Err(AppError::NotFound("avatar not found"));
+    };
+    let validated = crate::avatar::validate_data_url(&raw)
+        .map_err(|_| AppError::NotFound("avatar not found"))?;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        validated
+            .content_type
+            .parse()
+            .map_err(|_| AppError::internal("invalid content type"))?,
+    );
+    headers.insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::header::HeaderValue::from_static("private, max-age=300"),
+    );
+    Ok((StatusCode::OK, headers, validated.bytes))
 }
 
 // ---------------------------------------------------------------------------

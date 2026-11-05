@@ -133,28 +133,35 @@ describe("application states", () => {
 
 describe("theme switching", () => {
   function Probe() {
-    const { theme, toggle } = useTheme();
+    const { theme, appearance, setTheme } = useTheme();
     return (
-      <button type="button" onClick={toggle}>
-        {theme}
-      </button>
+      <>
+        <span data-testid="appearance">{appearance}</span>
+        <button type="button" onClick={() => setTheme("dracula")}>
+          {theme}
+        </button>
+      </>
     );
   }
 
-  it("toggles the dark class on the document element", async () => {
+  it("applies a theme's data-theme attribute and dark class", async () => {
     const user = userEvent.setup();
+    localStorage.setItem("tasker-theme", "light");
     render(
       <ThemeProvider>
         <Probe />
       </ThemeProvider>,
     );
-    const button = screen.getByRole("button");
-    const initial = button.textContent;
-    await user.click(button);
-    expect(button.textContent).toBe(initial === "dark" ? "light" : "dark");
-    expect(document.documentElement.classList.contains("dark")).toBe(
-      button.textContent === "dark",
-    );
+    expect(screen.getByRole("button")).toHaveTextContent("light");
+    expect(screen.getByTestId("appearance")).toHaveTextContent("light");
+    await user.click(screen.getByRole("button"));
+    expect(screen.getByRole("button")).toHaveTextContent("dracula");
+    // Dracula is a dark-only theme: the legacy dark class follows its
+    // appearance and the data-theme attribute carries the id.
+    expect(screen.getByTestId("appearance")).toHaveTextContent("dark");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dracula");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(localStorage.getItem("tasker-theme")).toBe("dracula");
   });
 });
 

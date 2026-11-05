@@ -399,6 +399,40 @@
             "$ref": "#/components/responses/Problem401"
           }
         }
+      },
+      "patch": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Update the session user's profile",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
       }
     },
     "/me/password": {
@@ -469,6 +503,27 @@
           },
           {
             "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "overdue",
+            "in": "query",
+            "required": false,
+            "description": "Restrict to open tasks whose due date has passed.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "mentioned",
+            "in": "query",
+            "required": false,
+            "description": "`unread` restricts to tasks with an unread mention in the trailing 7 days.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "unread"
+              ]
+            }
           }
         ],
         "responses": {
@@ -622,6 +677,22 @@
                   "description": {
                     "type": "string",
                     "maxLength": 1000
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "description": "IANA timezone name."
+                  },
+                  "avatar": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "description": "data URL of a square JPG, PNG or WebP image, at most 2 MB decoded."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "null clears the team avatar."
                   }
                 }
               }
@@ -638,6 +709,45 @@
                 }
               }
             }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Delete the team permanently (Owner only)",
+        "description": "Irreversible. Requires the exact team name and the caller's current password. Removes all projects, tasks, labels, and automation history of the team.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteTeamRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No content."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
           },
           "403": {
             "$ref": "#/components/responses/Problem403"
@@ -3319,6 +3429,328 @@
           }
         }
       }
+    },
+    "/me/summary": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Server-computed My Work Summary for the session user",
+        "responses": {
+          "200": {
+            "description": "Task counts grouped by lifecycle status, overdue count, and unread mentions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyWorkSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          }
+        }
+      }
+    },
+    "/me/sessions": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "List the session user's active sessions",
+        "responses": {
+          "200": {
+            "description": "Active (non-revoked, non-expired) sessions, most recently seen first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          }
+        }
+      }
+    },
+    "/me/sessions/{session_id}": {
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Revoke one of the session user's sessions",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SessionId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Resolve user identities (hover cards, @mention resolution)",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated user ids (at most 100).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Identity cards for the requested ids.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInfoList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          }
+        }
+      }
+    },
+    "/users/{user_id}/avatar": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Serve a user's avatar image",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The avatar image bytes.",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/archive": {
+      "post": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Archive the team (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The archived team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Team"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/unarchive": {
+      "post": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Restore an archived team (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The restored team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Team"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/avatar": {
+      "get": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Serve the team's avatar image",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The avatar image bytes.",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/guests": {
+      "get": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "List every project viewer (guest) across the team's projects",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Guests grouped by project.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamGuestList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/guests/{user_id}": {
+      "delete": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Revoke a guest's access to every project in the team",
+        "description": "Requires the Manager role or above.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3462,6 +3894,15 @@
         "schema": {
           "type": "string",
           "example": "high,urgent"
+        }
+      },
+      "SessionId": {
+        "name": "session_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
         }
       }
     },
@@ -3619,6 +4060,32 @@
           "mfa_enabled": {
             "type": "boolean",
             "description": "Whether TOTP two-factor authentication is enabled for this account."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9_]{3,32}$",
+            "description": "Unique @mention handle; null until the user sets one."
+          },
+          "bio": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200,
+            "description": "Short bio shown on avatar hover cards."
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "IANA timezone used to display dates (e.g. Europe/Berlin)."
+          },
+          "notification_prefs": {
+            "$ref": "#/components/schemas/NotificationPrefs"
           }
         }
       },
@@ -3788,6 +4255,20 @@
               "member",
               null
             ]
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Default timezone for the team."
+          },
+          "archived_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Set when the team is archived; null while active."
           }
         }
       },
@@ -3813,6 +4294,13 @@
           },
           "created_at": {
             "type": "integer"
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The member's @mention handle."
           }
         }
       },
@@ -5244,6 +5732,310 @@
           },
           "created_at": {
             "type": "integer"
+          }
+        }
+      },
+      "NotificationPrefs": {
+        "type": "object",
+        "description": "Per-event notification toggles. Unset storage resolves to all-enabled.",
+        "additionalProperties": false,
+        "required": [
+          "task_assigned",
+          "comment_mention",
+          "task_submitted",
+          "task_accepted",
+          "task_rejected",
+          "task_status_changed"
+        ],
+        "properties": {
+          "task_assigned": {
+            "type": "boolean",
+            "default": true
+          },
+          "comment_mention": {
+            "type": "boolean",
+            "default": true
+          },
+          "task_submitted": {
+            "type": "boolean",
+            "default": true
+          },
+          "task_accepted": {
+            "type": "boolean",
+            "default": true
+          },
+          "task_rejected": {
+            "type": "boolean",
+            "default": true
+          },
+          "task_status_changed": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "UpdateProfileRequest": {
+        "type": "object",
+        "description": "Profile fields to change. Absent fields are untouched.",
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "username": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9_]{3,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null clears the username."
+          },
+          "bio": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null clears the bio."
+          },
+          "timezone": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "IANA timezone name."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null clears the timezone."
+          },
+          "avatar": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "data URL of a square JPG, PNG or WebP image, at most 2 MB decoded."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null clears the avatar."
+          },
+          "notification_prefs": {
+            "$ref": "#/components/schemas/NotificationPrefs"
+          }
+        }
+      },
+      "MyWorkSummary": {
+        "type": "object",
+        "required": [
+          "by_status",
+          "overdue",
+          "unread_mentions_7d"
+        ],
+        "properties": {
+          "by_status": {
+            "type": "object",
+            "required": [
+              "backlog",
+              "todo",
+              "in_progress",
+              "in_review",
+              "resolved",
+              "closed"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "backlog": {
+                "type": "integer"
+              },
+              "todo": {
+                "type": "integer"
+              },
+              "in_progress": {
+                "type": "integer"
+              },
+              "in_review": {
+                "type": "integer"
+              },
+              "resolved": {
+                "type": "integer"
+              },
+              "closed": {
+                "type": "integer"
+              }
+            }
+          },
+          "overdue": {
+            "type": "integer",
+            "description": "Open tasks assigned to the caller whose due date passed."
+          },
+          "unread_mentions_7d": {
+            "type": "integer",
+            "description": "Unread comment mentions in the trailing 7 days."
+          }
+        }
+      },
+      "SessionInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "last_seen_at",
+          "current"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "last_seen_at": {
+            "type": "integer"
+          },
+          "ip_address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "user_agent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "current": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SessionList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionInfo"
+            }
+          }
+        }
+      },
+      "UserInfo": {
+        "type": "object",
+        "description": "Identity card for hover cards and @mention resolution.",
+        "required": [
+          "id",
+          "display_name",
+          "email"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bio": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "UserInfoList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserInfo"
+            }
+          }
+        }
+      },
+      "TeamGuest": {
+        "type": "object",
+        "description": "A project viewer (guest) within one of the team's projects.",
+        "required": [
+          "user",
+          "project_id",
+          "project_name",
+          "created_at"
+        ],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserBrief"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "TeamGuestList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TeamGuest"
+            }
+          }
+        }
+      },
+      "DeleteTeamRequest": {
+        "type": "object",
+        "required": [
+          "confirm_name",
+          "current_password"
+        ],
+        "properties": {
+          "confirm_name": {
+            "type": "string",
+            "description": "The exact team name."
+          },
+          "current_password": {
+            "type": "string"
           }
         }
       }

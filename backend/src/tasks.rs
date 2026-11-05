@@ -876,6 +876,7 @@ fn sort_direction(order: Option<&str>) -> Result<&'static str, AppError> {
 /// re-bound for the COUNT and page queries.
 enum FilterValue {
     S(String),
+    I(i64),
 }
 
 /// Build the shared WHERE clause and its bind values for task listing.
@@ -949,6 +950,9 @@ fn bind_values(args: &mut Args<'_>, values: &[FilterValue]) {
         match value {
             FilterValue::S(s) => {
                 args.s(s.clone());
+            }
+            FilterValue::I(i) => {
+                args.i(*i);
             }
         }
     }
@@ -1836,6 +1840,13 @@ pub struct MyTasksQuery {
     pub status: Option<String>,
     #[serde(default)]
     pub priority: Option<String>,
+    /// `true` restricts to open tasks whose due date has passed (Phase 9).
+    #[serde(default)]
+    pub overdue: Option<bool>,
+    /// `unread` restricts to tasks with an unread mention of the caller in
+    /// the trailing 7 days (Phase 9, My Work Summary link).
+    #[serde(default)]
+    pub mentioned: Option<String>,
     #[serde(default)]
     pub sort: Option<String>,
     #[serde(default)]
@@ -1898,6 +1909,22 @@ async fn my_tasks(
         for p in &priorities {
             values.push(FilterValue::S(p.clone()));
         }
+    }
+    if query.overdue == Some(true) {
+        where_clause.push_str(
+            " AND t.due_date IS NOT NULL AND t.due_date < ? \
+             AND t.status IN ('backlog', 'todo', 'in_progress', 'in_review')",
+        );
+        values.push(FilterValue::S(util::parse_today_iso()));
+    }
+    if query.mentioned.as_deref() == Some("unread") {
+        where_clause.push_str(
+            " AND EXISTS (SELECT 1 FROM notifications n WHERE n.task_id = t.id \
+             AND n.recipient_id = ? AND n.event = 'comment_mention' \
+             AND n.read_at IS NULL AND n.created_at > ?)",
+        );
+        values.push(FilterValue::S(user.id.clone()));
+        values.push(FilterValue::I(util::now_ms() - 7 * 24 * 60 * 60 * 1000));
     }
 
     let count_sql = format!("SELECT COUNT(*) AS n FROM tasks t WHERE {where_clause}");

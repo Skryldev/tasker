@@ -31,6 +31,11 @@ export type Board = components["schemas"]["Board"];
 export type BoardColumn = NonNullable<Board["columns"]>[number];
 export type PaginatedTasks = components["schemas"]["PaginatedTasks"];
 export type PaginatedMyTasks = components["schemas"]["PaginatedMyTasks"];
+export type NotificationPrefs = components["schemas"]["NotificationPrefs"];
+export type MyWorkSummary = components["schemas"]["MyWorkSummary"];
+export type SessionInfo = components["schemas"]["SessionInfo"];
+export type UserInfo = components["schemas"]["UserInfo"];
+export type TeamGuest = components["schemas"]["TeamGuest"];
 
 /** RFC 9457 problem details, as returned by every non-2xx response. */
 export interface Problem {
@@ -129,6 +134,36 @@ export const api = {
   me(): Promise<User> {
     return request("get", "/me") as Promise<User>;
   },
+  updateProfile(body: {
+    display_name?: string;
+    username?: string | null;
+    bio?: string | null;
+    timezone?: string | null;
+    avatar?: string | null;
+    notification_prefs?: Partial<NotificationPrefs>;
+  }): Promise<User> {
+    return request("patch", "/me", { body }) as Promise<User>;
+  },
+  mySummary(): Promise<MyWorkSummary> {
+    return request("get", "/me/summary") as Promise<MyWorkSummary>;
+  },
+  listSessions(): Promise<{ items: SessionInfo[] }> {
+    return request("get", "/me/sessions") as Promise<{ items: SessionInfo[] }>;
+  },
+  revokeSession(sessionId: string): Promise<void> {
+    return request("delete", `/me/sessions/${sessionId}`) as Promise<void>;
+  },
+  listUsers(ids: string[]): Promise<{ items: UserInfo[] }> {
+    return request("get", "/users", { query: { ids: ids.join(",") } }) as Promise<{
+      items: UserInfo[];
+    }>;
+  },
+  userAvatarUrl(userId: string): string {
+    return `/api/v1/users/${userId}/avatar`;
+  },
+  teamAvatarUrl(teamId: string): string {
+    return `/api/v1/teams/${teamId}/avatar`;
+  },
   changePassword(currentPassword: string, newPassword: string): Promise<void> {
     return request("put", "/me/password", {
       body: { current_password: currentPassword, new_password: newPassword },
@@ -145,10 +180,41 @@ export const api = {
   getTeam(teamId: string): Promise<Team> {
     return request("get", "/teams/{team_id}".replace("{team_id}", teamId)) as Promise<Team>;
   },
-  updateTeam(teamId: string, body: { name?: string; description?: string }): Promise<Team> {
+  updateTeam(
+    teamId: string,
+    body: {
+      name?: string;
+      description?: string;
+      timezone?: string | null;
+      avatar?: string | null;
+    },
+  ): Promise<Team> {
     return request("patch", "/teams/{team_id}".replace("{team_id}", teamId), {
       body,
     }) as Promise<Team>;
+  },
+  archiveTeam(teamId: string): Promise<Team> {
+    return request("post", `/teams/${teamId}/archive`) as Promise<Team>;
+  },
+  unarchiveTeam(teamId: string): Promise<Team> {
+    return request("post", `/teams/${teamId}/unarchive`) as Promise<Team>;
+  },
+  deleteTeam(
+    teamId: string,
+    confirmName: string,
+    currentPassword: string,
+  ): Promise<void> {
+    return request("delete", `/teams/${teamId}`, {
+      body: { confirm_name: confirmName, current_password: currentPassword },
+    }) as Promise<void>;
+  },
+  teamGuests(teamId: string): Promise<{ items: TeamGuest[] }> {
+    return request("get", `/teams/${teamId}/guests`) as Promise<{
+      items: TeamGuest[];
+    }>;
+  },
+  revokeTeamGuest(teamId: string, userId: string): Promise<void> {
+    return request("delete", `/teams/${teamId}/guests/${userId}`) as Promise<void>;
   },
   listMembers(teamId: string): Promise<{ items: Member[] }> {
     return request("get", "/teams/{team_id}/members".replace("{team_id}", teamId)) as Promise<{

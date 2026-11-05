@@ -3,7 +3,7 @@
 use serde::Serialize;
 use sqlx::Row;
 
-use crate::db::{Args, Conn};
+use crate::db::{Args, Conn, map_unique_violation};
 use crate::error::AppError;
 use crate::util;
 
@@ -12,15 +12,35 @@ pub struct User {
     pub id: String,
     pub email: String,
     pub display_name: String,
+    pub username: Option<String>,
+    pub bio: Option<String>,
+    pub timezone: Option<String>,
     pub created_at: i64,
 }
 
-/// Reduced user shape embedded in task/comment responses.
+const USER_COLUMNS: &str =
+    "id, email, display_name, username, bio, timezone, created_at";
+
+/// Reduced user shape embedded in task/comment responses. Hover-card data
+/// (username, bio) is fetched separately via the batch user-info endpoint so
+/// embedded payloads stay small.
 #[derive(Debug, Clone, Serialize)]
 pub struct UserBrief {
     pub id: String,
     pub display_name: String,
     pub email: String,
+}
+
+fn row_to_user(row: &sqlx::any::AnyRow) -> Result<User, AppError> {
+    Ok(User {
+        id: row.try_get("id")?,
+        email: row.try_get("email")?,
+        display_name: row.try_get("display_name")?,
+        username: row.try_get("username")?,
+        bio: row.try_get("bio")?,
+        timezone: row.try_get("timezone")?,
+        created_at: row.try_get("created_at")?,
+    })
 }
 
 /// Look up an **active** user by email with their password hash.
@@ -35,7 +55,7 @@ pub async fn find_active_by_email(
     args.s(email.trim().to_lowercase());
     let row = conn
         .fetch_optional(
-            "SELECT id, email, display_name, password_hash, created_at \
+            "SELECT id, email, display_name, username, bio, timezone, created_at, password_hash \
              FROM users WHERE email = ? AND is_active = TRUE",
             args,
         )
@@ -46,6 +66,9 @@ pub async fn find_active_by_email(
                 id: r.try_get("id")?,
                 email: r.try_get("email")?,
                 display_name: r.try_get("display_name")?,
+                username: r.try_get("username")?,
+                bio: r.try_get("bio")?,
+                timezone: r.try_get("timezone")?,
                 created_at: r.try_get("created_at")?,
             },
             r.try_get("password_hash")?,
@@ -98,39 +121,31 @@ pub async fn find_active_by_id(conn: &mut Conn<'_>, id: &str) -> Result<Option<U
     args.s(id);
     let row = conn
         .fetch_optional(
-            "SELECT id, email, display_name, created_at FROM users WHERE id = ? AND is_active = TRUE",
+            &format!("SELECT {USER_COLUMNS} FROM users WHERE id = ? AND is_active = TRUE"),
             args,
         )
         .await?;
-    row.map(|r| {
-        Ok(User {
-            id: r.try_get("id")?,
-            email: r.try_get("email")?,
-            display_name: r.try_get("display_name")?,
-            created_at: r.try_get("created_at")?,
-        })
-    })
-    .transpose()
+    row.map(|r| row_to_user(&r)).transpose()
 }
 
 pub async fn find_by_id(conn: &mut Conn<'_>, id: &str) -> Result<Option<User>, AppError> {
     let mut args = Args::new();
     args.s(id);
     let row = conn
-        .fetch_optional(
-            "SELECT id, email, display_name, created_at FROM users WHERE id = ?",
-            args,
-        )
+        .fetch_optional(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = ?"), args)
         .await?;
-    row.map(|r| {
-        Ok(User {
-            id: r.try_get("id")?,
-            email: r.try_get("email")?,
-            display_name: r.try_get("display_name")?,
-            created_at: r.try_get("created_at")?,
-        })
-    })
-    .transpose()
+    row.map(|r| row_to_user(&r)).transpose()
+}
+
+/// The stored avatar data URL for a user, if any. Never serialized into
+/// JSON responses; served as image bytes by `GET /users/{user_id}/avatar`.
+pub async fn find_avatar(conn: &mut Conn<'_>, id: &str) -> Result<Option<String>, AppError> {
+    let mut args = Args::new();
+    args.s(id);
+    let row = conn
+        .fetch_optional("SELECT avatar FROM users WHERE id = ?", args)
+        .await?;
+    Ok(row.and_then(|r| r.try_get::<Option<String>, _>("avatar").ok().flatten()))
 }
 
 pub struct NewUser<'a> {
@@ -160,24 +175,19 @@ pub async fn insert(conn: &mut Conn<'_>, user: &NewUser<'_>) -> Result<User, App
         )
         .await;
     if let Err(e) = result {
-        return Err(crate::db::map_unique_violation(
+        return Err(map_unique_violation(
             e,
             "a user with this email already exists".into(),
         ));
     }
     let row = conn
         .fetch_optional(
-            "SELECT id, email, display_name, created_at FROM users WHERE id = ?",
+            &format!("SELECT {USER_COLUMNS} FROM users WHERE id = ?"),
             args2,
         )
         .await?
         .ok_or_else(|| AppError::internal("user insert did not persist"))?;
-    Ok(User {
-        id: row.try_get("id")?,
-        email: row.try_get("email")?,
-        display_name: row.try_get("display_name")?,
-        created_at: row.try_get("created_at")?,
-    })
+    row_to_user(&row)
 }
 
 /// Fetch a batch of users for embedding into responses (bounded by caller).
@@ -207,6 +217,68 @@ pub async fn find_many_brief(
         );
     }
     Ok(map)
+}
+
+/// A validated profile change. `None` means "field not present in the
+/// request"; `Some(None)` clears a nullable field; `Some(Some(v))` sets it.
+pub struct ProfileUpdate<'a> {
+    pub display_name: Option<&'a str>,
+    pub username: Option<Option<String>>,
+    pub bio: Option<Option<String>>,
+    pub timezone: Option<Option<String>>,
+    pub avatar: Option<Option<String>>,
+    pub notification_prefs: Option<String>,
+}
+
+/// Persist a profile change. All values must be validated by the caller;
+/// username uniqueness is enforced by the unique index and mapped to a 409.
+pub async fn update_profile(
+    conn: &mut Conn<'_>,
+    user_id: &str,
+    update: &ProfileUpdate<'_>,
+) -> Result<(), AppError> {
+    let mut sets: Vec<&str> = Vec::new();
+    let mut args = Args::new();
+
+    if let Some(name) = update.display_name {
+        sets.push("display_name = ?");
+        args.s(name);
+    }
+    if let Some(value) = &update.username {
+        sets.push("username = ?");
+        args.opt_s(value.clone());
+    }
+    if let Some(value) = &update.bio {
+        sets.push("bio = ?");
+        args.opt_s(value.clone());
+    }
+    if let Some(value) = &update.timezone {
+        sets.push("timezone = ?");
+        args.opt_s(value.clone());
+    }
+    if let Some(value) = &update.avatar {
+        sets.push("avatar = ?");
+        args.opt_s(value.clone());
+    }
+    if let Some(json) = &update.notification_prefs {
+        sets.push("notification_prefs = ?");
+        args.s(json.clone());
+    }
+    if sets.is_empty() {
+        return Ok(());
+    }
+    sets.push("updated_at = ?");
+    args.i(util::now_ms());
+    args.s(user_id);
+
+    let sql = format!("UPDATE users SET {} WHERE id = ?", sets.join(", "));
+    if let Err(e) = conn.execute(&sql, args).await {
+        return Err(map_unique_violation(
+            e,
+            "this username is already taken".into(),
+        ));
+    }
+    Ok(())
 }
 
 pub async fn update_password(

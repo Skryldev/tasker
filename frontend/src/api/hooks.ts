@@ -5,7 +5,7 @@ import {
   useQueryClient,
   keepPreviousData,
 } from "@tanstack/react-query";
-import { api, ApiError, type Task, type TaskCreate, type TaskUpdate } from "./client";
+import { api, ApiError, type NotificationPrefs, type Task, type TaskCreate, type TaskUpdate } from "./client";
 
 export const queryKeys = {
   me: ["me"] as const,
@@ -21,6 +21,10 @@ export const queryKeys = {
   comments: (taskId: string) => ["comments", taskId] as const,
   activity: (taskId: string) => ["activity", taskId] as const,
   myTasks: (filters: unknown) => ["my-tasks", filters] as const,
+  mySummary: ["my-summary"] as const,
+  sessions: ["sessions"] as const,
+  userInfo: (ids: string) => ["user-info", ids] as const,
+  teamGuests: (teamId: string) => ["team-guests", teamId] as const,
 };
 
 export function useMe() {
@@ -29,6 +33,60 @@ export function useMe() {
     queryFn: api.me,
     retry: (count, error) => error instanceof ApiError && error.status >= 500 && count < 2,
     staleTime: 60_000,
+  });
+}
+
+// Profile (Phase 9) -----------------------------------------------------------
+
+export function useUpdateProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.updateProfile,
+    onSuccess: (user) => {
+      qc.setQueryData(queryKeys.me, user);
+      void qc.invalidateQueries({ queryKey: queryKeys.me });
+    },
+  });
+}
+
+export function useMySummary() {
+  return useQuery({ queryKey: queryKeys.mySummary, queryFn: api.mySummary });
+}
+
+export function useSessions() {
+  return useQuery({ queryKey: queryKeys.sessions, queryFn: api.listSessions });
+}
+
+export function useRevokeSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) => api.revokeSession(sessionId),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.sessions }),
+  });
+}
+
+/**
+ * Batched identity lookup (hover cards, @mention resolution). The id list is
+ * normalized so all components asking for the same users share one cache
+ * entry and one request.
+ */
+export function useUserInfo(ids: string[]) {
+  const key = [...ids].sort().join(",");
+  return useQuery({
+    queryKey: queryKeys.userInfo(key),
+    queryFn: () => api.listUsers([...ids].sort()),
+    enabled: ids.length > 0,
+    staleTime: 60_000,
+  });
+}
+
+export function useUpdateNotificationPrefs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (prefs: NotificationPrefs) => api.updateProfile({ notification_prefs: prefs }),
+    onSuccess: (user) => {
+      qc.setQueryData(queryKeys.me, user);
+    },
   });
 }
 
@@ -60,6 +118,84 @@ export function useLabels(teamId: string | undefined) {
   });
 }
 
+export function useTeamGuests(teamId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.teamGuests(teamId ?? ""),
+    queryFn: () => api.teamGuests(teamId!),
+    enabled: Boolean(teamId),
+  });
+}
+
+export function useRevokeTeamGuest(teamId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => {
+      if (!teamId) return Promise.reject(new Error("no team selected"));
+      return api.revokeTeamGuest(teamId, userId);
+    },
+    onSuccess: () => {
+      if (teamId) void qc.invalidateQueries({ queryKey: queryKeys.teamGuests(teamId) });
+    },
+  });
+}
+
+export function useArchiveTeam(teamId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => {
+      if (!teamId) return Promise.reject(new Error("no team selected"));
+      return api.archiveTeam(teamId);
+    },
+    onSuccess: () => {
+      if (teamId) {
+        void qc.invalidateQueries({ queryKey: queryKeys.teams });
+        void qc.invalidateQueries({ queryKey: queryKeys.team(teamId) });
+      }
+    },
+  });
+}
+
+export function useUnarchiveTeam(teamId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => {
+      if (!teamId) return Promise.reject(new Error("no team selected"));
+      return api.unarchiveTeam(teamId);
+    },
+    onSuccess: () => {
+      if (teamId) {
+        void qc.invalidateQueries({ queryKey: queryKeys.teams });
+        void qc.invalidateQueries({ queryKey: queryKeys.team(teamId) });
+      }
+    },
+  });
+}
+
+export function useDeleteTeam() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      teamId,
+      confirmName,
+      currentPassword,
+    }: {
+      teamId: string;
+      confirmName: string;
+      currentPassword: string;
+    }) => api.deleteTeam(teamId, confirmName, currentPassword),
+    onSuccess: () => {
+      void qc.removeQueries({ queryKey: ["team"] });
+      void qc.removeQueries({ queryKey: ["members"] });
+      void qc.removeQueries({ queryKey: ["projects"] });
+      void qc.removeQueries({ queryKey: ["tasks"] });
+      void qc.removeQueries({ queryKey: ["board"] });
+      void qc.removeQueries({ queryKey: ["my-tasks"] });
+      void qc.invalidateQueries({ queryKey: queryKeys.teams });
+      void qc.invalidateQueries({ queryKey: queryKeys.me });
+    },
+  });
+}
+
 export function useProjects(teamId: string | undefined, includeArchived = false) {
   return useQuery({
     queryKey: [...queryKeys.projects(teamId ?? ""), includeArchived],
@@ -86,6 +222,10 @@ export interface TaskFilters {
   order?: string;
   page?: number;
   page_size?: number;
+  /** Open tasks past their due date (My Work Summary link). */
+  overdue?: boolean;
+  /** `"unread"`: tasks with an unread mention in the last 7 days. */
+  mentioned?: string;
 }
 
 function cleanFilters(f: TaskFilters): Record<string, string | number | undefined> {
@@ -99,6 +239,8 @@ function cleanFilters(f: TaskFilters): Record<string, string | number | undefine
     order: f.order,
     page: f.page && f.page > 1 ? f.page : undefined,
     page_size: f.page_size && f.page_size !== 25 ? f.page_size : undefined,
+    overdue: f.overdue ? "true" : undefined,
+    mentioned: f.mentioned,
   };
 }
 

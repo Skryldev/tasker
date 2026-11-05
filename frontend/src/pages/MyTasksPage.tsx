@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ListTodo, Search } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { CalendarClock, AtSign, ListTodo, Search, X } from "lucide-react";
 import { api } from "@/api/client";
 import { useMyTasks } from "@/api/hooks";
 import { Input } from "@/components/ui/input";
@@ -18,23 +19,39 @@ import { TaskTable } from "@/components/app/TaskTable";
 import { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES, STATUS_LABELS } from "@/lib/utils";
 
 export function MyTasksPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [priorityFilter, setPriorityFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+
+  // Status filter syncs with the URL so My Work Summary tiles can deep-link
+  // into a filtered list (e.g. /?status=in_progress).
+  const urlStatus = searchParams.get("status");
+  const [statusFilter, setStatusFilter] = useState(urlStatus ?? "all");
+  useEffect(() => {
+    setStatusFilter(urlStatus ?? "all");
+    setPage(1);
+  }, [urlStatus]);
+  // Overdue / mentioned are read-only URL filters with a dismiss chip: they
+  // are entry points, not primary controls.
+  const overdueOnly = searchParams.get("overdue") === "1";
+  const mentionedOnly = searchParams.get("mentioned") === "1";
+
+  const [priorityFilter, setPriorityFilter] = useState("all");
 
   const filters = useMemo(
     () => ({
       q: search || undefined,
       status: statusFilter !== "all" ? statusFilter : undefined,
       priority: priorityFilter !== "all" ? priorityFilter : undefined,
+      overdue: overdueOnly || undefined,
+      mentioned: mentionedOnly ? "unread" : undefined,
       sort: "due_date",
       order: "asc",
       page,
       page_size: 25,
     }),
-    [search, statusFilter, priorityFilter, page],
+    [search, statusFilter, priorityFilter, overdueOnly, mentionedOnly, page],
   );
 
   const tasks = useMyTasks(filters);
@@ -57,6 +74,36 @@ export function MyTasksPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2" data-testid="my-tasks-filters">
+            {overdueOnly ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-2xs font-medium text-warning-foreground"
+                data-testid="filter-overdue"
+                onClick={() => {
+                  const next = new URLSearchParams(searchParams);
+                  next.delete("overdue");
+                  setSearchParams(next, { replace: true });
+                }}
+                aria-label="Clear overdue filter"
+              >
+                <CalendarClock className="h-3 w-3" /> Overdue <X className="h-3 w-3" />
+              </button>
+            ) : null}
+            {mentionedOnly ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-md border border-info/40 bg-info/10 px-2 py-1 text-2xs font-medium text-info"
+                data-testid="filter-mentioned"
+                onClick={() => {
+                  const next = new URLSearchParams(searchParams);
+                  next.delete("mentioned");
+                  setSearchParams(next, { replace: true });
+                }}
+                aria-label="Clear unread mentions filter"
+              >
+                <AtSign className="h-3 w-3" /> Unread mentions <X className="h-3 w-3" />
+              </button>
+            ) : null}
             <div className="relative">
               <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input

@@ -1,12 +1,12 @@
 import { StrictMode, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import "@/index.css";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 import { AppShell } from "@/components/app/AppShell";
 import { ThemeProvider } from "@/lib/theme";
 import { ToastProvider } from "@/components/ui/toast";
-import { AuthProvider, useAuth } from "@/lib/auth";
+import { AuthProvider, handleUnauthorizedError, useAuth } from "@/lib/auth";
 import { LoginPage } from "@/pages/LoginPage";
 import { MyTasksPage } from "@/pages/MyTasksPage";
 import type { ReactNode } from "react";
@@ -41,32 +41,6 @@ const ProjectGuestsPage = lazy(() =>
   import("@/pages/ProjectGuestsPage").then((m) => ({ default: m.ProjectGuestsPage })),
 );
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      refetchOnWindowFocus: false,
-      staleTime: 15_000,
-    },
-  },
-});
-
-/** Redirects unauthenticated visitors to the login screen. */
-function RequireAuth({ children }: { children: ReactNode }) {
-  const { user, isLoading } = useAuth();
-  if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center" aria-busy="true">
-        <span className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-label="Loading" />
-      </div>
-    );
-  }
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-  return <>{children}</>;
-}
-
 const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
   {
@@ -92,6 +66,40 @@ const router = createBrowserRouter([
     ],
   },
 ]);
+
+const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    // A 401 from any query means the session is gone: clear all cached
+    // server state and redirect. Non-401 errors keep their in-page error UI.
+    onError: (error) =>
+      handleUnauthorizedError(error, queryClient, (path) => {
+        void router.navigate(path, { replace: true });
+      }),
+  }),
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+      staleTime: 15_000,
+    },
+  },
+});
+
+/** Redirects unauthenticated visitors to the login screen. */
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { user, isLoading } = useAuth();
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center" aria-busy="true">
+        <span className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-label="Loading" />
+      </div>
+    );
+  }
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+  return <>{children}</>;
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

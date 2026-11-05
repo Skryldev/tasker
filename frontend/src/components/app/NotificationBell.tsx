@@ -14,7 +14,8 @@ import { Skeleton } from "@/components/ui/badge";
 import { EmptyState } from "@/components/app/EmptyState";
 import { useNotifications, useNotificationMutations, useUnreadCount } from "@/api/notifications";
 import type { Notification } from "@/api/client";
-import { cn, timeAgo } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { Timestamp } from "@/components/app/Timestamp";
 
 const EVENT_ICONS: Record<string, typeof Bell> = {
   task_assigned: ClipboardList,
@@ -138,7 +139,7 @@ export function NotificationBell() {
                       ) : null}
                     </span>
                     <span className="text-2xs text-muted-foreground">
-                      {timeAgo(notification.created_at)}
+                      <Timestamp value={notification.created_at} />
                     </span>
                   </span>
                 </DropdownMenuItem>

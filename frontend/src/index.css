@@ -50,7 +50,7 @@
     --card-foreground: 240 8% 92%;
     --popover: 240 11% 9%;
     --popover-foreground: 240 8% 92%;
-    --primary: 243 80% 66%;
+    --primary: 243 84% 70%;
     --primary-foreground: 240 20% 8%;
     --secondary: 240 8% 15%;
     --secondary-foreground: 240 6% 88%;
@@ -79,7 +79,7 @@
     --success-foreground: 240 12% 6%;
     --warning: 38 92% 54%;
     --warning-foreground: 240 12% 6%;
-    --info: 243 80% 66%;
+    --info: 243 84% 70%;
   }
 
   * {
@@ -135,6 +135,291 @@
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Multi-theme engine (Phase 9). Each theme is a self-contained token set
+   applied through `[data-theme="…"]` on <html> (see src/lib/theme.tsx). These
+   blocks intentionally come AFTER `:root` and `.dark`: equal specificity, so
+   the active theme always wins over the baseline palettes. Dark themes also
+   carry the `dark` class (set by ThemeProvider) for legacy `dark:` utilities
+   and Doran's `data-doran-theme` bridge above, which resolve whatever tokens
+   the active theme defines. Every theme keeps WCAG AA on body text
+   (foreground/background) and on primary/primary-foreground — asserted in
+   src/lib/__tests__/themes.test.ts.
+   --------------------------------------------------------------------------- */
+
+[data-theme="midnight"] {
+  --background: 222 47% 8%;
+  --foreground: 217 33% 90%;
+  --card: 222 42% 10%;
+  --card-foreground: 217 33% 90%;
+  --popover: 222 45% 9%;
+  --popover-foreground: 217 33% 90%;
+  --primary: 168 68% 40%;
+  --primary-foreground: 168 60% 8%;
+  --secondary: 220 30% 16%;
+  --secondary-foreground: 217 30% 88%;
+  --muted: 220 32% 14%;
+  --muted-foreground: 218 18% 64%;
+  --accent: 220 34% 18%;
+  --accent-foreground: 217 33% 92%;
+  --destructive: 0 66% 56%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 220 26% 20%;
+  --input: 220 26% 22%;
+  --ring: 168 68% 45%;
+  --sidebar: 222 47% 6%;
+  --sidebar-foreground: 218 20% 74%;
+  --priority-urgent: 0 70% 60%;
+  --priority-high: 27 88% 60%;
+  --priority-medium: 42 88% 56%;
+  --priority-low: 218 14% 58%;
+  --status-backlog: 218 14% 58%;
+  --status-todo: 217 60% 66%;
+  --status-in-progress: 199 80% 55%;
+  --status-in-review: 262 60% 68%;
+  --status-resolved: 174 50% 46%;
+  --status-closed: 152 50% 46%;
+  --success: 152 55% 46%;
+  --success-foreground: 152 60% 8%;
+  --warning: 38 92% 54%;
+  --warning-foreground: 38 80% 8%;
+  --info: 199 80% 55%;
+}
+
+[data-theme="nord"] {
+  --background: 220 16% 22%;
+  --foreground: 220 26% 93%;
+  --card: 220 16% 26%;
+  --card-foreground: 220 26% 93%;
+  --popover: 220 17% 24%;
+  --popover-foreground: 220 26% 93%;
+  --primary: 194 43% 67%;
+  --primary-foreground: 220 16% 16%;
+  --secondary: 220 16% 30%;
+  --secondary-foreground: 219 28% 88%;
+  --muted: 220 15% 28%;
+  --muted-foreground: 220 13% 70%;
+  --accent: 220 16% 31%;
+  --accent-foreground: 220 26% 93%;
+  --destructive: 354 60% 48%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 220 14% 32%;
+  --input: 220 14% 34%;
+  --ring: 194 43% 67%;
+  --sidebar: 220 17% 19%;
+  --sidebar-foreground: 220 14% 76%;
+  --priority-urgent: 354 60% 58%;
+  --priority-high: 25 60% 58%;
+  --priority-medium: 43 60% 58%;
+  --priority-low: 220 10% 58%;
+  --status-backlog: 220 10% 58%;
+  --status-todo: 213 32% 62%;
+  --status-in-progress: 194 43% 62%;
+  --status-in-review: 291 25% 62%;
+  --status-resolved: 172 30% 50%;
+  --status-closed: 92 28% 55%;
+  --success: 92 28% 55%;
+  --success-foreground: 220 16% 16%;
+  --warning: 43 74% 63%;
+  --warning-foreground: 220 16% 16%;
+  --info: 194 43% 62%;
+}
+
+[data-theme="dracula"] {
+  --background: 231 15% 18%;
+  --foreground: 60 30% 96%;
+  --card: 231 15% 21%;
+  --card-foreground: 60 30% 96%;
+  --popover: 231 15% 19%;
+  --popover-foreground: 60 30% 96%;
+  --primary: 265 89% 78%;
+  --primary-foreground: 231 15% 14%;
+  --secondary: 231 13% 26%;
+  --secondary-foreground: 60 30% 90%;
+  --muted: 231 13% 24%;
+  --muted-foreground: 233 14% 70%;
+  --accent: 231 13% 28%;
+  --accent-foreground: 60 30% 96%;
+  --destructive: 0 96% 66%;
+  --destructive-foreground: 231 15% 12%;
+  --border: 231 12% 30%;
+  --input: 231 12% 33%;
+  --ring: 265 89% 78%;
+  --sidebar: 231 15% 16%;
+  --sidebar-foreground: 233 14% 78%;
+  --priority-urgent: 0 96% 66%;
+  --priority-high: 31 100% 71%;
+  --priority-medium: 65 92% 62%;
+  --priority-low: 233 14% 62%;
+  --status-backlog: 233 14% 62%;
+  --status-todo: 265 89% 78%;
+  --status-in-progress: 191 97% 77%;
+  --status-in-review: 291 47% 74%;
+  --status-resolved: 135 94% 65%;
+  --status-closed: 135 60% 52%;
+  --success: 135 94% 65%;
+  --success-foreground: 135 60% 12%;
+  --warning: 65 92% 62%;
+  --warning-foreground: 65 60% 12%;
+  --info: 191 97% 77%;
+}
+
+[data-theme="solarized-light"] {
+  --background: 44 87% 94%;
+  --foreground: 192 81% 14%;
+  --card: 44 78% 96%;
+  --card-foreground: 192 81% 14%;
+  --popover: 44 74% 95%;
+  --popover-foreground: 192 81% 14%;
+  --primary: 200 69% 40%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 44 42% 88%;
+  --secondary-foreground: 192 81% 14%;
+  --muted: 44 47% 91%;
+  --muted-foreground: 195 23% 34%;
+  --accent: 44 42% 88%;
+  --accent-foreground: 192 81% 14%;
+  --destructive: 18 70% 38%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 44 27% 80%;
+  --input: 44 27% 78%;
+  --ring: 200 69% 40%;
+  --sidebar: 44 50% 91%;
+  --sidebar-foreground: 195 23% 28%;
+  --priority-urgent: 18 70% 38%;
+  --priority-high: 29 74% 38%;
+  --priority-medium: 45 90% 32%;
+  --priority-low: 195 12% 46%;
+  --status-backlog: 195 12% 46%;
+  --status-todo: 200 69% 40%;
+  --status-in-progress: 205 74% 38%;
+  --status-in-review: 262 49% 42%;
+  --status-resolved: 165 68% 28%;
+  --status-closed: 152 58% 30%;
+  --success: 165 68% 28%;
+  --success-foreground: 44 87% 94%;
+  --warning: 45 90% 40%;
+  --warning-foreground: 192 81% 14%;
+  --info: 200 69% 40%;
+}
+
+[data-theme="solarized-dark"] {
+  --background: 192 100% 11%;
+  --foreground: 195 12% 62%;
+  --card: 192 100% 13%;
+  --card-foreground: 195 12% 66%;
+  --popover: 192 100% 12%;
+  --popover-foreground: 195 12% 66%;
+  --primary: 200 71% 40%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 192 70% 17%;
+  --secondary-foreground: 195 12% 74%;
+  --muted: 192 80% 15%;
+  --muted-foreground: 195 12% 52%;
+  --accent: 192 70% 19%;
+  --accent-foreground: 195 12% 82%;
+  --destructive: 0 65% 42%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 192 60% 22%;
+  --input: 192 60% 24%;
+  --ring: 200 71% 45%;
+  --sidebar: 192 100% 9%;
+  --sidebar-foreground: 195 12% 66%;
+  --priority-urgent: 0 65% 48%;
+  --priority-high: 29 74% 48%;
+  --priority-medium: 45 90% 48%;
+  --priority-low: 195 10% 46%;
+  --status-backlog: 195 10% 46%;
+  --status-todo: 200 71% 48%;
+  --status-in-progress: 205 74% 46%;
+  --status-in-review: 262 40% 52%;
+  --status-resolved: 165 60% 40%;
+  --status-closed: 152 50% 42%;
+  --success: 165 60% 40%;
+  --success-foreground: 192 100% 11%;
+  --warning: 45 90% 45%;
+  --warning-foreground: 192 100% 11%;
+  --info: 200 71% 50%;
+}
+
+[data-theme="rose-pine"] {
+  --background: 248 25% 11%;
+  --foreground: 250 26% 92%;
+  --card: 248 22% 14%;
+  --card-foreground: 250 26% 92%;
+  --popover: 248 23% 13%;
+  --popover-foreground: 250 26% 92%;
+  --primary: 7 65% 83%;
+  --primary-foreground: 248 25% 11%;
+  --secondary: 248 18% 19%;
+  --secondary-foreground: 250 26% 88%;
+  --muted: 248 18% 17%;
+  --muted-foreground: 248 12% 66%;
+  --accent: 248 18% 20%;
+  --accent-foreground: 250 26% 92%;
+  --destructive: 349 69% 70%;
+  --destructive-foreground: 248 25% 11%;
+  --border: 248 14% 24%;
+  --input: 248 14% 26%;
+  --ring: 7 65% 83%;
+  --sidebar: 249 26% 9%;
+  --sidebar-foreground: 248 14% 76%;
+  --priority-urgent: 349 69% 70%;
+  --priority-high: 35 76% 66%;
+  --priority-medium: 40 88% 64%;
+  --priority-low: 248 10% 58%;
+  --status-backlog: 248 10% 58%;
+  --status-todo: 267 42% 76%;
+  --status-in-progress: 189 41% 69%;
+  --status-in-review: 35 76% 66%;
+  --status-resolved: 190 34% 56%;
+  --status-closed: 2 55% 73%;
+  --success: 190 34% 56%;
+  --success-foreground: 248 25% 11%;
+  --warning: 40 88% 64%;
+  --warning-foreground: 248 25% 11%;
+  --info: 189 41% 69%;
+}
+
+[data-theme="catppuccin-mocha"] {
+  --background: 240 21% 15%;
+  --foreground: 229 39% 88%;
+  --card: 240 21% 17%;
+  --card-foreground: 229 39% 88%;
+  --popover: 240 21% 16%;
+  --popover-foreground: 229 39% 88%;
+  --primary: 267 70% 80%;
+  --primary-foreground: 240 21% 12%;
+  --secondary: 240 16% 22%;
+  --secondary-foreground: 229 25% 84%;
+  --muted: 240 18% 20%;
+  --muted-foreground: 233 13% 66%;
+  --accent: 240 16% 24%;
+  --accent-foreground: 229 39% 90%;
+  --destructive: 343 74% 72%;
+  --destructive-foreground: 240 21% 12%;
+  --border: 240 15% 26%;
+  --input: 240 15% 28%;
+  --ring: 267 70% 80%;
+  --sidebar: 240 23% 13%;
+  --sidebar-foreground: 233 13% 74%;
+  --priority-urgent: 343 74% 72%;
+  --priority-high: 27 86% 72%;
+  --priority-medium: 41 88% 70%;
+  --priority-low: 233 13% 60%;
+  --status-backlog: 233 13% 60%;
+  --status-todo: 267 70% 80%;
+  --status-in-progress: 217 74% 74%;
+  --status-in-review: 190 62% 73%;
+  --status-resolved: 120 45% 66%;
+  --status-closed: 120 36% 55%;
+  --success: 120 45% 66%;
+  --success-foreground: 240 21% 12%;
+  --warning: 41 88% 70%;
+  --warning-foreground: 240 21% 12%;
+  --info: 190 62% 73%;
 }
 
 /* Respect the user's motion preference globally: dialogs, dropdowns, toasts

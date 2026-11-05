@@ -230,6 +230,14 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
         "0007_recovery_pepper",
         include_str!("../migrations/postgres/0007_recovery_pepper.sql"),
     ),
+    (
+        "0009_rules",
+        include_str!("../migrations/postgres/0009_rules.sql"),
+    ),
+    (
+        "0010_profile_team_settings",
+        include_str!("../migrations/postgres/0010_profile_team_settings.sql"),
+    ),
 ];
 const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -264,6 +272,14 @@ const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
         "0008_recovery_codes_varchar",
         include_str!("../migrations/mysql/0008_recovery_codes_varchar.sql"),
     ),
+    (
+        "0009_rules",
+        include_str!("../migrations/mysql/0009_rules.sql"),
+    ),
+    (
+        "0010_profile_team_settings",
+        include_str!("../migrations/mysql/0010_profile_team_settings.sql"),
+    ),
 ];
 const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -293,6 +309,14 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
         "0007_recovery_pepper",
         include_str!("../migrations/sqlite/0007_recovery_pepper.sql"),
+    ),
+    (
+        "0009_rules",
+        include_str!("../migrations/sqlite/0009_rules.sql"),
+    ),
+    (
+        "0010_profile_team_settings",
+        include_str!("../migrations/sqlite/0010_profile_team_settings.sql"),
     ),
 ];
 
@@ -849,7 +873,7 @@ mod tests {
         .await
         .unwrap();
         let migrations = migrations_for(Driver::Sqlite);
-        assert_eq!(migrations.len(), 7, "expected migrations 0001..0007");
+        assert_eq!(migrations.len(), 9, "expected migrations 0001..0010");
         // Build the PRE-0005 schema: 0001..0004 only.
         for (version, sql) in &migrations[..4] {
             for statement in split_statements(sql) {

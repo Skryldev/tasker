@@ -1,13 +1,58 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { KeyRound } from "lucide-react";
-import { api, ApiError } from "@/api/client";
+import { KeyRound, Loader2, MonitorSmartphone } from "lucide-react";
+import {
+  api,
+  ApiError,
+  type NotificationPrefs,
+  type SessionInfo,
+  type User,
+} from "@/api/client";
+import {
+  useMySummary,
+  useRevokeSession,
+  useSessions,
+  useUpdateNotificationPrefs,
+  useUpdateProfile,
+} from "@/api/hooks";
+import { Avatar, Separator } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
-import { Separator } from "@/components/ui/avatar";
+import { TimezoneSelect } from "@/components/app/TimezoneSelect";
 import { useToast } from "@/components/ui/toast";
-import { useAuth } from "@/lib/auth";
+import { useAuth, useLogout } from "@/lib/auth";
+import { fileToAvatarDataUrl, AvatarError } from "@/lib/avatar";
+import { STATUS_LABELS, TASK_STATUSES, timeAgo } from "@/lib/utils";
 import { MfaSettings } from "@/components/app/MfaSettings";
+
+/** The six notification events a user can toggle (contract vocabulary). */
+const PREF_EVENTS: { key: keyof NotificationPrefs; label: string; hint: string }[] = [
+  { key: "task_assigned", label: "Task assigned", hint: "Someone assigns a task to you" },
+  { key: "comment_mention", label: "Comment mention", hint: "Someone @mentions you in a comment" },
+  { key: "task_submitted", label: "Task submitted", hint: "An assignee submits work for review" },
+  { key: "task_accepted", label: "Task accepted", hint: "Your submission is accepted" },
+  { key: "task_rejected", label: "Task rejected", hint: "Your submission is rejected" },
+  { key: "task_status_changed", label: "Status changed", hint: "A task you reported changes status" },
+];
+
+/** Contract default: every event enabled (pre-Phase-9 behavior). */
+const DEFAULT_PREFS: NotificationPrefs = {
+  task_assigned: true,
+  comment_mention: true,
+  task_submitted: true,
+  task_accepted: true,
+  task_rejected: true,
+  task_status_changed: true,
+};
+
+function fieldError(error: unknown, field: string): string | undefined {
+  if (error instanceof ApiError) {
+    const messages = error.fieldMessages();
+    if (messages[field]) return messages[field];
+  }
+  return undefined;
+}
 
 export function AccountPage() {
   const { user } = useAuth();
@@ -29,35 +74,36 @@ export function AccountPage() {
   });
 
   return (
-    <div className="mx-auto max-w-lg p-6">
-      <h1 className="mb-1 text-lg font-semibold">Account</h1>
-      <p className="mb-6 text-xs text-muted-foreground">Your profile and security settings.</p>
+    <div className="mx-auto max-w-2xl p-6">
+      <h1 className="mb-1 text-lg font-semibold">Profile</h1>
+      <p className="mb-6 text-xs text-muted-foreground">
+        Your work identity, notifications, and account security.
+      </p>
 
-      <section aria-label="Profile" className="mb-8 rounded-lg border p-4">
-        <h2 className="mb-3 text-sm font-semibold">Profile</h2>
-        <dl className="grid grid-cols-[7rem_1fr] gap-y-2 text-sm">
-          <dt className="text-muted-foreground">Display name</dt>
-          <dd className="font-medium">{user?.display_name}</dd>
-          <dt className="text-muted-foreground">Email</dt>
-          <dd>{user?.email}</dd>
-        </dl>
-      </section>
+      {user ? <WorkIdentitySection user={user} /> : null}
 
-      <Separator className="mb-8" />
+      <Separator className="my-8" />
 
-      <div className="mb-8">
-        <MfaSettings enabled={Boolean(user?.mfa_enabled)} />
-      </div>
+      {user ? (
+        <NotificationPrefsSection
+          prefs={user.notification_prefs ?? DEFAULT_PREFS}
+        />
+      ) : null}
 
-      <Separator className="mb-8" />
+      <Separator className="my-8" />
 
-      <section aria-label="Change password" className="rounded-lg border p-4">
-        <h2 className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
-          <KeyRound className="h-4 w-4" /> Change password
-        </h2>
-        <p className="mb-3 text-xs text-muted-foreground">
-          Changing your password signs out all other sessions.
-        </p>
+      <MyWorkSummarySection />
+
+      <Separator className="my-8" />
+
+      <section aria-label="Security" className="mb-8">
+        <h2 className="mb-3 text-sm font-semibold">Security</h2>
+        <div className="mb-6">
+          <MfaSettings enabled={Boolean(user?.mfa_enabled)} />
+        </div>
+        <Separator className="mb-6" />
+        <SessionsSection />
+        <Separator className="my-6" />
         <form
           className="flex max-w-sm flex-col gap-3"
           onSubmit={(e) => {
@@ -71,6 +117,12 @@ export function AccountPage() {
           noValidate
           data-testid="change-password-form"
         >
+          <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+            <KeyRound className="h-4 w-4" /> Change password
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            Changing your password signs out all other sessions.
+          </p>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="current-password">Current password</Label>
             <Input
@@ -103,6 +155,459 @@ export function AccountPage() {
           </Button>
         </form>
       </section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Work identity
+// ---------------------------------------------------------------------------
+
+function WorkIdentitySection({ user }: { user: User }) {
+  const { push } = useToast();
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const [displayName, setDisplayName] = useState(user.display_name);
+  const [username, setUsername] = useState(user.username ?? "");
+  const [bio, setBio] = useState(user.bio ?? "");
+  const [timezone, setTimezone] = useState(user.timezone ?? "none");
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const update = useUpdateProfile();
+
+  const save = () => {
+    setLocalError(null);
+    const usernameTrimmed = username.trim();
+    if (usernameTrimmed && !/^[a-z0-9_]{3,32}$/.test(usernameTrimmed)) {
+      setLocalError("Username must be 3-32 characters of a-z, 0-9 or _.");
+      return;
+    }
+    if (bio.length > 200) {
+      setLocalError("Bio must be at most 200 characters.");
+      return;
+    }
+    update.mutate(
+      {
+        display_name: displayName.trim(),
+        username: usernameTrimmed || null,
+        bio: bio.trim() || null,
+        timezone: timezone === "none" ? null : timezone,
+      },
+      {
+        onSuccess: () => push("success", "Profile saved"),
+        onError: (error) => {
+          const message =
+            error instanceof ApiError ? error.message : "Could not save the profile.";
+          setLocalError(message);
+        },
+      },
+    );
+  };
+
+  const onPickFile = async (file: File | undefined) => {
+    if (!file) return;
+    setLocalError(null);
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file);
+      update.mutate(
+        { avatar: dataUrl },
+        {
+          onSuccess: () => push("success", "Avatar updated"),
+          onError: (error) =>
+            setLocalError(
+              error instanceof ApiError ? error.message : "Could not upload the avatar.",
+            ),
+        },
+      );
+    } catch (error) {
+      setLocalError(error instanceof AvatarError ? error.message : "Could not read that file.");
+    }
+  };
+
+  const usernameError = fieldError(update.error, "username");
+  const bioError = fieldError(update.error, "bio");
+  const timezoneError = fieldError(update.error, "timezone");
+  return (
+    <section aria-label="Work identity">
+      <h2 className="mb-3 text-sm font-semibold">Work identity</h2>
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+        noValidate
+        data-testid="profile-identity-form"
+      >
+        <div className="flex items-center gap-4">
+          <Avatar
+            name={user.display_name}
+            size="md"
+            className="h-16 w-16 rounded-full text-lg"
+            src={api.userAvatarUrl(user.id)}
+          />
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="avatar-upload" className="text-xs">
+              Avatar — square JPG, PNG or WebP, up to 2 MB. It is center-cropped automatically.
+            </Label>
+            <input
+              id="avatar-upload"
+              ref={fileInput}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                void onPickFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fileInput.current?.click()}
+                data-testid="avatar-pick"
+              >
+                Upload…
+              </Button>
+              {user.id ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={update.isPending}
+                  onClick={() => update.mutate({ avatar: null }, { onSuccess: () => push("success", "Avatar removed") })}
+                >
+                  Remove
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="display-name">Display name</Label>
+            <Input
+              id="display-name"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              className="max-w-xs"
+            />
+            {fieldError(update.error, "display_name") ? (
+              <p className="text-2xs text-destructive" role="alert">
+                {fieldError(update.error, "display_name")}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="username">Username</Label>
+            <Input
+              id="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value.toLowerCase())}
+              placeholder="ada_lovelace"
+              className="max-w-xs font-mono"
+              aria-invalid={Boolean(usernameError)}
+              data-testid="username-input"
+            />
+            <p className="text-2xs text-muted-foreground">
+              Unique across the instance; used for @mentions.
+            </p>
+            {usernameError ? (
+              <p className="text-2xs text-destructive" role="alert">{usernameError}</p>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="bio">Bio</Label>
+          <textarea
+            id="bio"
+            value={bio}
+            maxLength={200}
+            rows={2}
+            onChange={(e) => setBio(e.target.value)}
+            className="max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-invalid={Boolean(bioError)}
+            data-testid="bio-input"
+          />
+          <p className="text-2xs text-muted-foreground">
+            {bio.length}/200 — shown when teammates hover your avatar.
+          </p>
+          {bioError ? (
+            <p className="text-2xs text-destructive" role="alert">{bioError}</p>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="timezone">Timezone</Label>
+          <div className="max-w-xs">
+            <TimezoneSelect
+              id="timezone"
+              value={timezone}
+              onChange={setTimezone}
+              ariaInvalid={Boolean(timezoneError)}
+            />
+          </div>
+          <p className="text-2xs text-muted-foreground">
+            Applies to absolute timestamps. Due dates stay on the product's
+            Persian calendar regardless of timezone.
+          </p>
+          {timezoneError ? (
+            <p className="text-2xs text-destructive" role="alert">{timezoneError}</p>
+          ) : null}
+        </div>
+
+        {localError ? (
+          <p className="text-2xs text-destructive" role="alert">{localError}</p>
+        ) : null}
+
+        <Button
+          type="submit"
+          size="sm"
+          className="self-start"
+          disabled={update.isPending || !displayName.trim()}
+          data-testid="profile-save"
+        >
+          {update.isPending ? "Saving…" : "Save profile"}
+        </Button>
+      </form>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Notification preferences
+// ---------------------------------------------------------------------------
+
+function NotificationPrefsSection({ prefs }: { prefs: NotificationPrefs }) {
+  const { push } = useToast();
+  const update = useUpdateNotificationPrefs();
+
+  const toggle = (key: keyof NotificationPrefs) => {
+    update.mutate(
+      { ...prefs, [key]: !prefs[key] },
+      {
+        onSuccess: (user) =>
+          push(
+            "success",
+            (user.notification_prefs ?? DEFAULT_PREFS)[key] ? "Notifications on" : "Notifications off",
+            PREF_EVENTS.find((e) => e.key === key)?.label,
+          ),
+        onError: (error) =>
+          push(
+            "error",
+            "Could not save the preference",
+            error instanceof ApiError ? error.message : undefined,
+          ),
+      },
+    );
+  };
+
+  return (
+    <section aria-label="Notification preferences">
+      <h2 className="mb-1 text-sm font-semibold">Notification preferences</h2>
+      <p className="mb-3 text-xs text-muted-foreground">
+        In-app notifications only. All events are on by default.
+      </p>
+      <ul className="max-w-md overflow-hidden rounded-lg border" data-testid="notification-prefs">
+        {PREF_EVENTS.map(({ key, label, hint }) => (
+          <li key={key} className="flex items-center justify-between gap-3 border-b px-4 py-2.5 last:border-0">
+            <div>
+              <p className="text-sm font-medium">{label}</p>
+              <p className="text-2xs text-muted-foreground">{hint}</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={prefs[key]}
+              aria-label={label}
+              disabled={update.isPending}
+              onClick={() => toggle(key)}
+              data-testid={`pref-${key.replaceAll("_", "-")}`}
+              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                prefs[key] ? "bg-primary" : "bg-input"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-4 w-4 rounded-full bg-background shadow transition-all ${
+                  prefs[key] ? "left-[18px]" : "left-0.5"
+                }`}
+              />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// My Work Summary
+// ---------------------------------------------------------------------------
+
+function MyWorkSummarySection() {
+  const summary = useMySummary();
+
+  if (summary.isError) {
+    return (
+      <section aria-label="My work summary">
+        <h2 className="mb-3 text-sm font-semibold">My work</h2>
+        <p className="text-xs text-destructive" role="alert">
+          Could not load your work summary.
+        </p>
+      </section>
+    );
+  }
+
+  const byStatus = summary.data?.by_status;
+
+  const tileLink = (to: string, label: string, count: number | undefined, testId: string) => (
+    <Link
+      to={to}
+      className="flex flex-col items-center gap-1 rounded-lg border p-3 transition-colors hover:bg-accent"
+      data-testid={testId}
+    >
+      <span className="text-lg font-semibold">{count ?? "…"}</span>
+      <span className="text-2xs text-muted-foreground">{label}</span>
+    </Link>
+  );
+
+  return (
+    <section aria-label="My work summary">
+      <h2 className="mb-1 text-sm font-semibold">My work</h2>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Counts are computed by the server; each number opens the matching list.
+      </p>
+      <div className="grid grid-cols-4 gap-2 sm:grid-cols-8" data-testid="my-work-summary">
+        {TASK_STATUSES.map((status) =>
+          tileLink(
+            `/?status=${status}`,
+            STATUS_LABELS[status],
+            byStatus?.[status],
+            `summary-${status.replaceAll("_", "-")}`,
+          ),
+        )}
+      </div>
+      <div className="mt-2 grid max-w-md grid-cols-2 gap-2">
+        {tileLink("/?overdue=1", "Overdue", summary.data?.overdue, "summary-overdue")}
+        {tileLink(
+          "/?mentioned=1",
+          "Unread mentions (7d)",
+          summary.data?.unread_mentions_7d,
+          "summary-mentions",
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sessions
+// ---------------------------------------------------------------------------
+
+/** Best-effort device label from a stored User-Agent string. */
+function deviceLabel(userAgent: string | null | undefined): string {
+  if (!userAgent) return "Unknown device";
+  const ua = userAgent;
+  const os = /Windows/.test(ua)
+    ? "Windows"
+    : /Android/.test(ua)
+      ? "Android"
+      : /iPhone|iPad/.test(ua)
+        ? "iOS"
+        : /Mac OS X/.test(ua)
+          ? "macOS"
+          : /Linux/.test(ua)
+            ? "Linux"
+            : null;
+  const browser = /Edg\//.test(ua)
+    ? "Edge"
+    : /OPR\//.test(ua)
+      ? "Opera"
+      : /Chrome\//.test(ua)
+        ? "Chrome"
+        : /Firefox\//.test(ua)
+          ? "Firefox"
+          : /Safari\//.test(ua)
+            ? "Safari"
+            : null;
+  return [browser, os].filter(Boolean).join(" on ") || "Unknown device";
+}
+
+function SessionsSection() {
+  const sessions = useSessions();
+  const revoke = useRevokeSession();
+  const logout = useLogout();
+  const { push } = useToast();
+
+  const onRevoke = (session: SessionInfo) => {
+    if (session.current) {
+      // Revoking the current session is a sign-out: run the full logout
+      // teardown (cache clear + auth context reset + redirect). The backend
+      // logout handler still clears the cookie for an already-dead session.
+      logout.mutate();
+      return;
+    }
+    revoke.mutate(session.id, {
+      onSuccess: () => push("success", "Session revoked"),
+      onError: (error) =>
+        push(
+          "error",
+          "Could not revoke the session",
+          error instanceof ApiError ? error.message : undefined,
+        ),
+    });
+  };
+
+  return (
+    <div>
+      <h3 className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
+        <MonitorSmartphone className="h-4 w-4" /> Active sessions
+      </h3>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Devices signed in to your account. Revoking a session signs that device out.
+      </p>
+      {sessions.isLoading ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="sessions-loading">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading sessions…
+        </div>
+      ) : (
+        <ul className="max-w-md overflow-hidden rounded-lg border" data-testid="session-list">
+          {sessions.data?.items.length === 0 ? (
+            <li className="px-4 py-3 text-xs text-muted-foreground">No active sessions.</li>
+          ) : null}
+          {sessions.data?.items.map((session) => (
+            <li key={session.id} className="flex items-center justify-between gap-3 border-b px-4 py-2.5 last:border-0">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">
+                  {deviceLabel(session.user_agent)}
+                  {session.current ? (
+                    <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-2xs font-semibold text-primary">
+                      This device
+                    </span>
+                  ) : null}
+                </p>
+                <p className="truncate text-2xs text-muted-foreground">
+                  Last seen {timeAgo(session.last_seen_at)}
+                  {session.ip_address ? ` · ${session.ip_address}` : ""}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={revoke.isPending}
+                onClick={() => onRevoke(session)}
+                data-testid={`revoke-session-${session.current ? "current" : "other"}`}
+              >
+                Revoke
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@
 pub mod activity;
 pub mod auth;
 pub mod authorization;
+pub mod avatar;
 pub mod comments;
 pub mod config;
 pub mod db;
@@ -15,7 +16,9 @@ pub mod goals;
 pub mod http;
 pub mod mfa;
 pub mod notifications;
+pub mod profile;
 pub mod projects;
+pub mod rules;
 pub mod security;
 pub mod state;
 pub mod tasks;

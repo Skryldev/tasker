@@ -85,7 +85,7 @@ async fn find_valid_session(
     args.s(token_hash).i(util::now_ms());
     let row = conn
         .fetch_optional(
-            "SELECT u.id, u.email, u.display_name, u.created_at, s.id AS session_id \
+            "SELECT u.id, u.email, u.display_name, u.username, u.bio, u.timezone, u.created_at, s.id AS session_id \
              FROM sessions s JOIN users u ON u.id = s.user_id \
              WHERE s.token_hash = ? AND s.revoked_at IS NULL \
                AND s.expires_at > ? AND u.is_active = TRUE",
@@ -98,6 +98,9 @@ async fn find_valid_session(
                 id: r.try_get("id")?,
                 email: r.try_get("email")?,
                 display_name: r.try_get("display_name")?,
+                username: r.try_get("username")?,
+                bio: r.try_get("bio")?,
+                timezone: r.try_get("timezone")?,
                 created_at: r.try_get("created_at")?,
             },
             r.try_get::<String, _>("session_id")?,
@@ -241,9 +244,36 @@ pub struct UserResponse {
     pub id: String,
     pub email: String,
     pub display_name: String,
+    pub username: Option<String>,
+    pub bio: Option<String>,
+    pub timezone: Option<String>,
     pub created_at: i64,
     /// Whether TOTP two-factor authentication is enabled for this account.
     pub mfa_enabled: bool,
+    /// Per-event notification toggles (Phase 9). Unset storage = all enabled.
+    pub notification_prefs: crate::notifications::NotificationPrefs,
+}
+
+impl UserResponse {
+    /// Build the response for a full user, loading their real preferences.
+    pub async fn for_user(
+        conn: &mut Conn<'_>,
+        user: User,
+        mfa_enabled: bool,
+    ) -> Result<Self, AppError> {
+        let notification_prefs = crate::profile::load_prefs(conn, &user.id).await?;
+        Ok(Self {
+            id: user.id,
+            email: user.email,
+            display_name: user.display_name,
+            username: user.username,
+            bio: user.bio,
+            timezone: user.timezone,
+            created_at: user.created_at,
+            mfa_enabled,
+            notification_prefs,
+        })
+    }
 }
 
 impl From<User> for UserResponse {
@@ -252,8 +282,12 @@ impl From<User> for UserResponse {
             id: u.id,
             email: u.email,
             display_name: u.display_name,
+            username: u.username,
+            bio: u.bio,
+            timezone: u.timezone,
             created_at: u.created_at,
             mfa_enabled: false,
+            notification_prefs: Default::default(),
         }
     }
 }
@@ -336,7 +370,9 @@ async fn login(
     Ok((
         StatusCode::OK,
         response_headers,
-        Json(LoginResponse::User(UserResponse::from(user))),
+        Json(LoginResponse::User(
+            UserResponse::for_user(&mut conn, user, false).await?,
+        )),
     ))
 }
 
@@ -387,9 +423,8 @@ async fn me(
     let full = users::find_by_id(&mut conn, &user.id)
         .await?
         .ok_or(AppError::Unauthenticated)?;
-    let mut response = UserResponse::from(full);
-    response.mfa_enabled = crate::mfa::is_enabled(&mut conn, &user.id).await?;
-    Ok(Json(response))
+    let mfa_enabled = crate::mfa::is_enabled(&mut conn, &user.id).await?;
+    Ok(Json(UserResponse::for_user(&mut conn, full, mfa_enabled).await?))
 }
 
 #[derive(Deserialize)]

@@ -419,7 +419,33 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Update the session user's profile */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateProfileRequest"];
+                };
+            };
+            responses: {
+                /** @description The updated profile. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["User"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                422: components["responses"]["Problem422"];
+            };
+        };
         trace?: never;
     };
     "/me/password": {
@@ -487,6 +513,10 @@ export interface paths {
                     order?: components["parameters"]["Order"];
                     page?: components["parameters"]["Page"];
                     page_size?: components["parameters"]["PageSize"];
+                    /** @description Restrict to open tasks whose due date has passed. */
+                    overdue?: boolean;
+                    /** @description `unread` restricts to tasks with an unread mention in the trailing 7 days. */
+                    mentioned?: "unread";
                 };
                 header?: never;
                 path?: never;
@@ -615,7 +645,38 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete the team permanently (Owner only)
+         * @description Irreversible. Requires the exact team name and the caller's current password. Removes all projects, tasks, labels, and automation history of the team.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DeleteTeamRequest"];
+                };
+            };
+            responses: {
+                /** @description No content. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
         options?: never;
         head?: never;
         /** Update team details (Owner/Admin) */
@@ -633,6 +694,10 @@ export interface paths {
                     "application/json": {
                         name?: string;
                         description?: string;
+                        /** @description IANA timezone name. */
+                        timezone?: string;
+                        /** @description null clears the team avatar. */
+                        avatar?: string | null;
                     };
                 };
             };
@@ -3081,6 +3146,407 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Server-computed My Work Summary for the session user */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Task counts grouped by lifecycle status, overdue count, and unread mentions. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MyWorkSummary"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the session user's active sessions */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Active (non-revoked, non-expired) sessions, most recently seen first. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SessionList"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke one of the session user's sessions */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    session_id: components["parameters"]["SessionId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No content. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Resolve user identities (hover cards, @mention resolution) */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Comma-separated user ids (at most 100). */
+                    ids?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Identity cards for the requested ids. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UserInfoList"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/{user_id}/avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Serve a user's avatar image */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    user_id: components["parameters"]["UserId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The avatar image bytes. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "image/png": string;
+                        "image/jpeg": string;
+                        "image/webp": string;
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive the team (Owner/Admin) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The archived team. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Team"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore an archived team (Owner/Admin) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The restored team. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Team"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Serve the team's avatar image */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The avatar image bytes. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "image/png": string;
+                        "image/jpeg": string;
+                        "image/webp": string;
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/guests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List every project viewer (guest) across the team's projects */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Guests grouped by project. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamGuestList"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/guests/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a guest's access to every project in the team
+         * @description Requires the Manager role or above.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    user_id: components["parameters"]["UserId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No content. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3110,6 +3576,13 @@ export interface components {
             created_at: number;
             /** @description Whether TOTP two-factor authentication is enabled for this account. */
             mfa_enabled: boolean;
+            /** @description Unique @mention handle; null until the user sets one. */
+            username?: string | null;
+            /** @description Short bio shown on avatar hover cards. */
+            bio?: string | null;
+            /** @description IANA timezone used to display dates (e.g. Europe/Berlin). */
+            timezone?: string | null;
+            notification_prefs?: components["schemas"]["NotificationPrefs"];
         };
         MfaRequired: {
             /** @description Always true in this response shape. */
@@ -3163,12 +3636,18 @@ export interface components {
             updated_at: number;
             /** @enum {string|null} */
             my_role?: "owner" | "admin" | "manager" | "member" | null;
+            /** @description Default timezone for the team. */
+            timezone?: string | null;
+            /** @description Set when the team is archived; null while active. */
+            archived_at?: number | null;
         };
         Member: {
             user: components["schemas"]["UserBrief"];
             /** @enum {string} */
             role: "owner" | "admin" | "manager" | "member";
             created_at: number;
+            /** @description The member's @mention handle. */
+            username?: string | null;
         };
         Label: {
             /** Format: uuid */
@@ -3540,6 +4019,89 @@ export interface components {
             actor?: components["schemas"]["UserBrief"] | null;
             created_at: number;
         };
+        /** @description Per-event notification toggles. Unset storage resolves to all-enabled. */
+        NotificationPrefs: {
+            /** @default true */
+            task_assigned: boolean;
+            /** @default true */
+            comment_mention: boolean;
+            /** @default true */
+            task_submitted: boolean;
+            /** @default true */
+            task_accepted: boolean;
+            /** @default true */
+            task_rejected: boolean;
+            /** @default true */
+            task_status_changed: boolean;
+        };
+        /** @description Profile fields to change. Absent fields are untouched. */
+        UpdateProfileRequest: {
+            display_name?: string;
+            /** @description null clears the username. */
+            username?: string | null;
+            /** @description null clears the bio. */
+            bio?: string | null;
+            /** @description null clears the timezone. */
+            timezone?: string | null;
+            /** @description null clears the avatar. */
+            avatar?: string | null;
+            notification_prefs?: components["schemas"]["NotificationPrefs"];
+        };
+        MyWorkSummary: {
+            by_status: {
+                backlog: number;
+                todo: number;
+                in_progress: number;
+                in_review: number;
+                resolved: number;
+                closed: number;
+            };
+            /** @description Open tasks assigned to the caller whose due date passed. */
+            overdue: number;
+            /** @description Unread comment mentions in the trailing 7 days. */
+            unread_mentions_7d: number;
+        };
+        SessionInfo: {
+            /** Format: uuid */
+            id: string;
+            created_at: number;
+            last_seen_at: number;
+            ip_address?: string | null;
+            user_agent?: string | null;
+            current: boolean;
+        };
+        SessionList: {
+            items: components["schemas"]["SessionInfo"][];
+        };
+        /** @description Identity card for hover cards and @mention resolution. */
+        UserInfo: {
+            /** Format: uuid */
+            id: string;
+            display_name: string;
+            /** Format: email */
+            email: string;
+            username?: string | null;
+            bio?: string | null;
+        };
+        UserInfoList: {
+            items: components["schemas"]["UserInfo"][];
+        };
+        /** @description A project viewer (guest) within one of the team's projects. */
+        TeamGuest: {
+            user: components["schemas"]["UserBrief"];
+            /** Format: uuid */
+            project_id: string;
+            project_name: string;
+            created_at: number;
+        };
+        TeamGuestList: {
+            items: components["schemas"]["TeamGuest"][];
+        };
+        DeleteTeamRequest: {
+            /** @description The exact team name. */
+            confirm_name: string;
+            current_password: string;
+        };
     };
     responses: {
         /** @description Authentication required. */
@@ -3632,6 +4194,7 @@ export interface components {
         TaskStatusFilter: string;
         /** @description Comma-separated priority values. */
         TaskPriorityFilter: string;
+        SessionId: string;
     };
     requestBodies: never;
     headers: never;

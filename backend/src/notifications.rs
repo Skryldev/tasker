@@ -29,6 +29,95 @@ pub mod events {
     pub const TASK_STATUS_CHANGED: &str = "task_status_changed";
 }
 
+/// The events a user can turn off in their profile (Phase 9). Every other
+/// event type is always delivered.
+pub const GATEABLE_EVENTS: [&str; 6] = [
+    events::TASK_ASSIGNED,
+    events::COMMENT_MENTION,
+    events::TASK_SUBMITTED,
+    events::TASK_ACCEPTED,
+    events::TASK_REJECTED,
+    events::TASK_STATUS_CHANGED,
+];
+
+/// Per-event notification toggles, persisted as a JSON object in
+/// `users.notification_prefs`. Missing rows and missing fields default to
+/// `true` — the pre-Phase-9 behavior — so provisioning needs no backfill.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotificationPrefs {
+    pub task_assigned: bool,
+    pub comment_mention: bool,
+    pub task_submitted: bool,
+    pub task_accepted: bool,
+    pub task_rejected: bool,
+    pub task_status_changed: bool,
+}
+
+impl Default for NotificationPrefs {
+    fn default() -> Self {
+        Self {
+            task_assigned: true,
+            comment_mention: true,
+            task_submitted: true,
+            task_accepted: true,
+            task_rejected: true,
+            task_status_changed: true,
+        }
+    }
+}
+
+impl NotificationPrefs {
+    /// Whether `event` may be delivered to this recipient.
+    #[must_use]
+    pub fn allows(&self, event: &str) -> bool {
+        match event {
+            events::TASK_ASSIGNED => self.task_assigned,
+            events::COMMENT_MENTION => self.comment_mention,
+            events::TASK_SUBMITTED => self.task_submitted,
+            events::TASK_ACCEPTED => self.task_accepted,
+            events::TASK_REJECTED => self.task_rejected,
+            events::TASK_STATUS_CHANGED => self.task_status_changed,
+            // Unlisted events are always delivered.
+            _ => true,
+        }
+    }
+
+    /// Reject keys outside the closed vocabulary so typo'd clients cannot
+    /// silently persist a no-op setting.
+    pub fn validate_keys(prefs: &serde_json::Value) -> Result<(), AppError> {
+        let Some(map) = prefs.as_object() else {
+            return Err(AppError::validation(
+                "notification_prefs",
+                "notification_prefs must be an object",
+            ));
+        };
+        for key in map.keys() {
+            if !matches!(
+                key.as_str(),
+                "task_assigned"
+                    | "comment_mention"
+                    | "task_submitted"
+                    | "task_accepted"
+                    | "task_rejected"
+                    | "task_status_changed"
+            ) {
+                return Err(AppError::validation(
+                    "notification_prefs",
+                    format!("unknown notification event `{key}`"),
+                ));
+            }
+            if !map.get(key).is_some_and(serde_json::Value::is_boolean) {
+                return Err(AppError::validation(
+                    "notification_prefs",
+                    format!("notification preference `{key}` must be a boolean"),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// A pending notification produced by one operation. Recipient/event pairs
 /// are deduplicated when the batch is written.
 #[derive(Debug, Clone)]
@@ -40,18 +129,66 @@ pub struct NewNotification {
     pub summary: String,
 }
 
+/// Load stored preferences for a batch of users (missing rows → defaults).
+async fn prefs_for(
+    conn: &mut Conn<'_>,
+    user_ids: &[String],
+) -> Result<std::collections::HashMap<String, NotificationPrefs>, AppError> {
+    let mut map = std::collections::HashMap::new();
+    if user_ids.is_empty() {
+        return Ok(map);
+    }
+    let placeholders = vec!["?"; user_ids.len()].join(", ");
+    let sql = format!(
+        "SELECT id, notification_prefs FROM users WHERE id IN ({placeholders})"
+    );
+    let mut args = Args::new();
+    for id in user_ids {
+        args.s(id.clone());
+    }
+    for row in conn.fetch_all(&sql, args).await? {
+        let id: String = row.try_get("id")?;
+        let raw: Option<String> = row.try_get("notification_prefs")?;
+        let prefs = raw
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<NotificationPrefs>(s).ok())
+            .unwrap_or_default();
+        map.insert(id, prefs);
+    }
+    Ok(map)
+}
+
 /// Insert a batch of notifications inside the caller's transaction.
 /// Duplicates of `(recipient_id, event)` within one batch are collapsed, and
 /// self-notifications (recipient == actor) are suppressed here so no call
-/// site can forget the rule.
+/// site can forget the rule. Recipients with the event's notification
+/// preference turned off do not receive it (Phase 9).
 pub async fn record_batch(conn: &mut Conn<'_>, batch: &[NewNotification]) -> Result<(), AppError> {
     let mut seen: std::collections::HashSet<(&str, &str)> = std::collections::HashSet::new();
+    // One preferences read per batch: only recipients of gateable events.
+    let mut gated: Vec<String> = batch
+        .iter()
+        .filter(|e| GATEABLE_EVENTS.contains(&e.event))
+        .map(|e| e.recipient_id.clone())
+        .collect();
+    gated.sort();
+    gated.dedup();
+    let prefs = prefs_for(conn, &gated).await?;
     for entry in batch {
         if entry.recipient_id == entry.actor_id {
             continue;
         }
         if !seen.insert((entry.event, entry.recipient_id.as_str())) {
             continue;
+        }
+        if GATEABLE_EVENTS.contains(&entry.event) {
+            let allowed = match prefs.get(&entry.recipient_id) {
+                Some(p) => p.allows(entry.event),
+                None => true,
+            };
+            if !allowed {
+                continue;
+            }
         }
         let mut args = Args::new();
         args.s(util::new_id())

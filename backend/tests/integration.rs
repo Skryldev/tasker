@@ -2989,6 +2989,827 @@ async fn session_expires_after_configured_ttl_not_milliseconds() {
     }
 }
 
+/// Rules Engine schema (migration 0009): fresh-migration decoding, unique
+/// constraints, CHECK constraints, composite rule-version foreign keys, and
+/// the RESTRICT deletion policy. Runs on every engine CI provides
+/// (`SQLite` always; `PostgreSQL 17` and `MySQL 8.4` via env-provided URLs).
+#[tokio::test]
+async fn rules_schema_migrations_and_constraints() {
+    /// Insert a team row directly (FK target for rules).
+    async fn insert_team(db: &Database, name: &str, creator: &str) -> String {
+        let mut conn = db.conn();
+        let id = tasker::util::new_id();
+        let now = tasker::util::now_ms();
+        let mut args = tasker::db::Args::new();
+        args.s(&id)
+            .s(name)
+            .opt_s(None::<String>) // description
+            .s(creator)
+            .i(now)
+            .i(now);
+        conn.execute(
+            "INSERT INTO teams (id, name, description, created_by, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+            args,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("insert_team failed: {e}"));
+        id
+    }
+
+    /// Insert a rule row; `condition`/`actions` are raw JSON strings (this
+    /// test exercises the persistence layer, not the DSL validator).
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_rule(
+        db: &Database,
+        id: &str,
+        team_id: &str,
+        name: &str,
+        description: Option<&str>,
+        trigger_type: &str,
+        enabled: bool,
+        current_version: i64,
+        condition_json: &str,
+        actions_json: &str,
+        created_by: &str,
+        archived_at: Option<i64>,
+    ) -> Result<(), tasker::error::AppError> {
+        let now = tasker::util::now_ms();
+        let mut conn = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(id)
+            .s(team_id)
+            .s(name)
+            .opt_s(description)
+            .s(trigger_type)
+            .b(enabled)
+            .i(current_version)
+            .s(condition_json)
+            .s(actions_json)
+            .s(created_by)
+            .i(now)
+            .i(now)
+            .opt_i(archived_at);
+        conn.execute(
+            "INSERT INTO rules (id, team_id, name, description, trigger_type, enabled, \
+             current_version, condition_json, actions_json, created_by, created_at, \
+             updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            args,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_rule_version(
+        db: &Database,
+        rule_id: &str,
+        version: i64,
+        trigger_type: &str,
+        condition_json: &str,
+        actions_json: &str,
+        created_by: &str,
+    ) -> Result<(), tasker::error::AppError> {
+        let mut conn = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(rule_id)
+            .i(version)
+            .s(trigger_type)
+            .s(condition_json)
+            .s(actions_json)
+            .s(created_by)
+            .i(tasker::util::now_ms());
+        conn.execute(
+            "INSERT INTO rule_versions (rule_id, version, trigger_type, condition_json, \
+             actions_json, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            args,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_event(
+        db: &Database,
+        id: &str,
+        event_type: &str,
+        team_id: &str,
+        task_id: &str,
+        actor_id: Option<&str>,
+        previous_state: Option<&str>,
+        new_state: Option<&str>,
+        origin: &str,
+        occurred_at: i64,
+    ) -> Result<(), tasker::error::AppError> {
+        let mut conn = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(id)
+            .s(event_type)
+            .i(1i64)
+            .s(team_id)
+            .s(task_id)
+            .opt_s(actor_id)
+            .opt_s(previous_state)
+            .opt_s(new_state)
+            .s(origin)
+            .opt_i(None::<i64>) // causing_execution_id
+            .i(occurred_at);
+        conn.execute(
+            "INSERT INTO domain_events (id, event_type, schema_version, team_id, task_id, \
+             actor_id, previous_state, new_state, origin, causing_execution_id, occurred_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            args,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_execution(
+        db: &Database,
+        id: &str,
+        rule_id: &str,
+        rule_version: i64,
+        event_id: &str,
+        team_id: &str,
+        task_id: &str,
+        condition_result: &str,
+        planned_actions: Option<&str>,
+    ) -> Result<(), tasker::error::AppError> {
+        let mut conn = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(id)
+            .s(rule_id)
+            .i(rule_version)
+            .s(event_id)
+            .s(team_id)
+            .s(task_id)
+            .s("task_status_changed")
+            .s(condition_result)
+            .s("planned")
+            .opt_s(planned_actions)
+            .opt_s(None::<String>) // error_category
+            .opt_s(None::<String>) // error_detail
+            .i(tasker::util::now_ms())
+            .opt_i(None::<i64>); // completed_at
+        conn.execute(
+            "INSERT INTO rule_executions (id, rule_id, rule_version, event_id, team_id, \
+             task_id, trigger_type, condition_result, status, planned_actions, \
+             error_category, error_detail, created_at, completed_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            args,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_outbox(
+        db: &Database,
+        id: &str,
+        execution_id: &str,
+        event_id: &str,
+        rule_id: &str,
+        rule_version: i64,
+        action_type: &str,
+        payload: &str,
+        idempotency_key: &str,
+        status: &str,
+        claim_token: Option<&str>,
+    ) -> Result<(), tasker::error::AppError> {
+        let now = tasker::util::now_ms();
+        let mut conn = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(id)
+            .s(execution_id)
+            .s(event_id)
+            .s(rule_id)
+            .i(rule_version)
+            .s(format!("task-{id}")) // historical task id (no FK)
+            .s(action_type)
+            .i(1i64)
+            .s(payload)
+            .s(idempotency_key)
+            .s(status)
+            .i(0i64) // attempts
+            .i(now) // next_attempt_at
+            .opt_s(claim_token)
+            .opt_s(None::<String>) // worker_id
+            .opt_i(None::<i64>) // claimed_at
+            .opt_i(None::<i64>) // lease_expires_at
+            .opt_s(None::<String>) // last_error_category
+            .opt_s(None::<String>) // last_error_detail
+            .i(now)
+            .i(now)
+            .opt_i(None::<i64>); // completed_at
+        conn.execute(
+            "INSERT INTO automation_outbox (id, execution_id, event_id, rule_id, rule_version, \
+             task_id, action_type, schema_version, payload, idempotency_key, status, attempts, \
+             next_attempt_at, claim_token, worker_id, claimed_at, lease_expires_at, \
+             last_error_category, last_error_detail, created_at, updated_at, completed_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            args,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_action_result(
+        db: &Database,
+        id: &str,
+        outbox_id: &str,
+        execution_id: &str,
+        action_type: &str,
+        outcome: &str,
+        author_id: Option<&str>,
+    ) -> Result<(), tasker::error::AppError> {
+        let mut conn = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(id)
+            .s(outbox_id)
+            .s(execution_id)
+            .s(action_type)
+            .s(outcome)
+            .opt_s(None::<String>) // recipient_id
+            .opt_s(author_id)
+            .opt_s(None::<String>) // body_hash
+            .opt_s(None::<String>) // detail
+            .i(tasker::util::now_ms());
+        conn.execute(
+            "INSERT INTO rule_action_results (id, outbox_id, execution_id, action_type, \
+             outcome, recipient_id, author_id, body_hash, detail, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            args,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    for (engine, url) in test_db_urls() {
+        // spawn_app runs the full migration sequence 0001..0009: a failure
+        // here is itself a fresh-migration test result.
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+        let suffix = Uuid::now_v7().simple();
+        let now = tasker::util::now_ms();
+
+        let u1 = seed_user(&db, &format!("rule-a-{suffix}@test.local"), "Rule Admin A").await;
+        let u2 = seed_user(&db, &format!("rule-b-{suffix}@test.local"), "Rule Admin B").await;
+        let t1 = insert_team(&db, &format!("rules-team-a-{suffix}"), &u1).await;
+        let t2 = insert_team(&db, &format!("rules-team-b-{suffix}"), &u2).await;
+
+        // -- 1. Fresh migration + sqlx Any decoding: boundary-length and
+        //       multibyte values must round-trip as String/bool/i64. On MySQL
+        //       this is exactly the TEXT→BLOB wire-type trap 0008 exists for.
+        let condition = "x".repeat(4_000);
+        let actions = "y".repeat(2_000);
+        let name = format!("Règle 自動化 {suffix}");
+        let r1 = Uuid::now_v7().to_string();
+        insert_rule(
+            &db,
+            &r1,
+            &t1,
+            &name,
+            Some("boundary rule"),
+            "task_status_changed",
+            true,
+            1,
+            &condition,
+            &actions,
+            &u1,
+            None,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("[{engine}] boundary rule insert failed: {e}"));
+        let mut conn = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(&r1);
+        // Repo convention (see comments.rs): never SELECT a raw BOOLEAN
+        // column through the Any driver - MySQL reports TINYINT, which
+        // sqlx Any cannot describe. Normalize in SQL and decode as i64.
+        let row = conn
+            .fetch_optional(
+                "SELECT name, description, trigger_type,                  CASE WHEN enabled THEN 1 ELSE 0 END AS enabled, current_version,                  condition_json, actions_json, created_at, archived_at                  FROM rules WHERE id = ?",
+                args,
+            )
+            .await
+            .unwrap()
+            .expect("rule row");
+        let got_name: String = row.try_get("name").unwrap();
+        assert_eq!(
+            got_name.chars().count(),
+            name.chars().count(),
+            "[{engine}] name"
+        );
+        let got_condition: String = row.try_get("condition_json").unwrap();
+        assert_eq!(
+            got_condition.chars().count(),
+            4_000,
+            "[{engine}] condition_json"
+        );
+        let got_actions: String = row.try_get("actions_json").unwrap();
+        assert_eq!(
+            got_actions.chars().count(),
+            2_000,
+            "[{engine}] actions_json"
+        );
+        let got_enabled: i64 = row.try_get("enabled").unwrap();
+        assert_eq!(
+            got_enabled, 1,
+            "[{engine}] boolean decode via CASE normalization"
+        );
+        let got_version: i64 = row.try_get("current_version").unwrap();
+        assert_eq!(got_version, 1, "[{engine}] integer decode");
+        let got_archived: Option<i64> = row.try_get("archived_at").unwrap();
+        assert_eq!(got_archived, None, "[{engine}] nullable timestamp decode");
+
+        // -- 2. Team-scoped name uniqueness; archived names stay reserved.
+        let dup = insert_rule(
+            &db,
+            &Uuid::now_v7().to_string(),
+            &t1,
+            &name,
+            None,
+            "task_status_changed",
+            false,
+            1,
+            &condition,
+            &actions,
+            &u1,
+            None,
+        )
+        .await;
+        assert!(
+            dup.is_err(),
+            "[{engine}] duplicate name within team must fail"
+        );
+        let cross_team = insert_rule(
+            &db,
+            &Uuid::now_v7().to_string(),
+            &t2,
+            &name,
+            None,
+            "task_assigned",
+            false,
+            1,
+            &condition,
+            &actions,
+            &u2,
+            None,
+        )
+        .await;
+        assert!(
+            cross_team.is_ok(),
+            "[{engine}] same name in another team must be allowed"
+        );
+        let archived = insert_rule(
+            &db,
+            &Uuid::now_v7().to_string(),
+            &t1,
+            &name,
+            None,
+            "task_assigned",
+            false,
+            1,
+            &condition,
+            &actions,
+            &u1,
+            Some(now),
+        )
+        .await;
+        assert!(
+            archived.is_err(),
+            "[{engine}] archived rule name must stay reserved"
+        );
+
+        // -- 3. rule_versions: composite PK; immutable duplicate rejection.
+        insert_rule_version(
+            &db,
+            &r1,
+            1,
+            "task_status_changed",
+            &condition,
+            &actions,
+            &u1,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("[{engine}] version insert failed: {e}"));
+        let dup_version = insert_rule_version(
+            &db,
+            &r1,
+            1,
+            "task_status_changed",
+            &condition,
+            &actions,
+            &u1,
+        )
+        .await;
+        assert!(
+            dup_version.is_err(),
+            "[{engine}] duplicate (rule_id, version) must fail"
+        );
+
+        // -- 4. domain_events: historical task ids without a task FK.
+        let e1 = Uuid::now_v7().to_string();
+        let previous_state = "s".repeat(500);
+        let new_state = "n".repeat(500);
+        insert_event(
+            &db,
+            &e1,
+            "task_status_changed",
+            &t1,
+            &Uuid::now_v7().to_string(),
+            Some(&u1),
+            Some(&previous_state),
+            Some(&new_state),
+            "user",
+            now,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("[{engine}] event insert failed: {e}"));
+        let bad_team_event = insert_event(
+            &db,
+            &Uuid::now_v7().to_string(),
+            "task_status_changed",
+            &Uuid::now_v7().to_string(),
+            &Uuid::now_v7().to_string(),
+            None,
+            None,
+            None,
+            "user",
+            now,
+        )
+        .await;
+        assert!(
+            bad_team_event.is_err(),
+            "[{engine}] event with unknown team must fail"
+        );
+
+        // -- 5. rule_executions: composite version FK + unique (rule, event).
+        let x1 = Uuid::now_v7().to_string();
+        let planned = "p".repeat(1_000);
+        insert_execution(
+            &db,
+            &x1,
+            &r1,
+            1,
+            &e1,
+            &t1,
+            &Uuid::now_v7().to_string(),
+            "matched",
+            Some(&planned),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("[{engine}] execution insert failed: {e}"));
+        let dup_exec = insert_execution(
+            &db,
+            &Uuid::now_v7().to_string(),
+            &r1,
+            1,
+            &e1,
+            &t1,
+            &Uuid::now_v7().to_string(),
+            "matched",
+            None,
+        )
+        .await;
+        assert!(
+            dup_exec.is_err(),
+            "[{engine}] duplicate (rule_id, event_id) must fail"
+        );
+        // Unique (rule_id, event_id) fires first for the same event; use a
+        // fresh event to isolate the composite-version FK violation.
+        let e2 = Uuid::now_v7().to_string();
+        insert_event(
+            &db,
+            &e2,
+            "task_status_changed",
+            &t1,
+            &Uuid::now_v7().to_string(),
+            None,
+            None,
+            None,
+            "user",
+            now,
+        )
+        .await
+        .unwrap();
+        let bad_version_exec = insert_execution(
+            &db,
+            &Uuid::now_v7().to_string(),
+            &r1,
+            9,
+            &e2,
+            &t1,
+            &Uuid::now_v7().to_string(),
+            "matched",
+            None,
+        )
+        .await;
+        assert!(
+            bad_version_exec.is_err(),
+            "[{engine}] unknown rule version must fail"
+        );
+        let bad_event_exec = insert_execution(
+            &db,
+            &Uuid::now_v7().to_string(),
+            &r1,
+            1,
+            &Uuid::now_v7().to_string(),
+            &t1,
+            &Uuid::now_v7().to_string(),
+            "matched",
+            None,
+        )
+        .await;
+        assert!(
+            bad_event_exec.is_err(),
+            "[{engine}] unknown event must fail"
+        );
+
+        // -- 6. automation_outbox: payload decode, idempotency uniqueness,
+        //       CHECK constraints, composite version FK, claim-token invariant.
+        let ob1 = Uuid::now_v7().to_string();
+        let payload = "q".repeat(4_000);
+        let idem = "0".repeat(64);
+        insert_outbox(
+            &db,
+            &ob1,
+            &x1,
+            &e1,
+            &r1,
+            1,
+            "add_comment",
+            &payload,
+            &idem,
+            "pending",
+            None,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("[{engine}] outbox insert failed: {e}"));
+        let mut conn = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(&ob1);
+        let row = conn
+            .fetch_optional("SELECT * FROM automation_outbox WHERE id = ?", args)
+            .await
+            .unwrap()
+            .expect("outbox row");
+        let got_payload: String = row.try_get("payload").unwrap();
+        assert_eq!(
+            got_payload.chars().count(),
+            4_000,
+            "[{engine}] payload decode"
+        );
+        let got_status: String = row.try_get("status").unwrap();
+        assert_eq!(got_status, "pending", "[{engine}] status decode");
+        let got_token: Option<String> = row.try_get("claim_token").unwrap();
+        assert_eq!(got_token, None, "[{engine}] nullable claim token decode");
+
+        let dup_idem = insert_outbox(
+            &db,
+            &Uuid::now_v7().to_string(),
+            &x1,
+            &e1,
+            &r1,
+            1,
+            "add_comment",
+            &payload,
+            &idem,
+            "pending",
+            None,
+        )
+        .await;
+        assert!(
+            dup_idem.is_err(),
+            "[{engine}] duplicate idempotency key must fail"
+        );
+        let bad_action = insert_outbox(
+            &db,
+            &Uuid::now_v7().to_string(),
+            &x1,
+            &e1,
+            &r1,
+            1,
+            "post_to_slack",
+            &payload,
+            &"1".repeat(64),
+            "pending",
+            None,
+        )
+        .await;
+        assert!(
+            bad_action.is_err(),
+            "[{engine}] unknown action_type must fail (CHECK)"
+        );
+        let bad_status = insert_outbox(
+            &db,
+            &Uuid::now_v7().to_string(),
+            &x1,
+            &e1,
+            &r1,
+            1,
+            "add_comment",
+            &payload,
+            &"2".repeat(64),
+            "queued",
+            None,
+        )
+        .await;
+        assert!(
+            bad_status.is_err(),
+            "[{engine}] unknown status must fail (CHECK)"
+        );
+        let token_pending = insert_outbox(
+            &db,
+            &Uuid::now_v7().to_string(),
+            &x1,
+            &e1,
+            &r1,
+            1,
+            "add_comment",
+            &payload,
+            &"3".repeat(64),
+            "pending",
+            Some(&Uuid::now_v7().to_string()),
+        )
+        .await;
+        assert!(
+            token_pending.is_err(),
+            "[{engine}] pending row with claim token must fail (fencing CHECK)"
+        );
+        let processing_no_token = insert_outbox(
+            &db,
+            &Uuid::now_v7().to_string(),
+            &x1,
+            &e1,
+            &r1,
+            1,
+            "add_comment",
+            &payload,
+            &"4".repeat(64),
+            "processing",
+            None,
+        )
+        .await;
+        assert!(
+            processing_no_token.is_err(),
+            "[{engine}] processing row without claim token must fail (fencing CHECK)"
+        );
+        let ob2 = Uuid::now_v7().to_string();
+        let claimed = insert_outbox(
+            &db,
+            &ob2,
+            &x1,
+            &e1,
+            &r1,
+            1,
+            "add_comment",
+            &payload,
+            &"5".repeat(64),
+            "processing",
+            Some(&Uuid::now_v7().to_string()),
+        )
+        .await;
+        assert!(
+            claimed.is_ok(),
+            "[{engine}] processing row with token must be allowed"
+        );
+        let bad_version_outbox = insert_outbox(
+            &db,
+            &Uuid::now_v7().to_string(),
+            &x1,
+            &e1,
+            &r1,
+            9,
+            "add_comment",
+            &payload,
+            &"6".repeat(64),
+            "pending",
+            None,
+        )
+        .await;
+        assert!(
+            bad_version_outbox.is_err(),
+            "[{engine}] outbox unknown rule version must fail"
+        );
+
+        // -- 7. rule_action_results: idempotency ledger uniqueness.
+        let res1 = Uuid::now_v7().to_string();
+        insert_action_result(&db, &res1, &ob1, &x1, "add_comment", "completed", Some(&u1))
+            .await
+            .unwrap_or_else(|e| panic!("[{engine}] action result insert failed: {e}"));
+        let dup_result = insert_action_result(
+            &db,
+            &Uuid::now_v7().to_string(),
+            &ob1,
+            &x1,
+            "add_comment",
+            "completed",
+            None,
+        )
+        .await;
+        assert!(
+            dup_result.is_err(),
+            "[{engine}] duplicate outbox_id result must fail"
+        );
+        let bad_result_exec = insert_action_result(
+            &db,
+            &Uuid::now_v7().to_string(),
+            &ob2,
+            &Uuid::now_v7().to_string(),
+            "add_comment",
+            "completed",
+            None,
+        )
+        .await;
+        assert!(
+            bad_result_exec.is_err(),
+            "[{engine}] result with unknown execution must fail"
+        );
+
+        // -- 8. RESTRICT deletion policy protects the whole history chain.
+        let delete_team = {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(&t1);
+            conn.execute("DELETE FROM teams WHERE id = ?", args).await
+        };
+        assert!(
+            delete_team.is_err(),
+            "[{engine}] team delete must be restricted"
+        );
+        let delete_user = {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(&u1);
+            conn.execute("DELETE FROM users WHERE id = ?", args).await
+        };
+        assert!(
+            delete_user.is_err(),
+            "[{engine}] user delete must be restricted"
+        );
+        let delete_rule = {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(&r1);
+            conn.execute("DELETE FROM rules WHERE id = ?", args).await
+        };
+        assert!(
+            delete_rule.is_err(),
+            "[{engine}] rule delete must be restricted"
+        );
+        let delete_version = {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(&r1).i(1i64);
+            conn.execute(
+                "DELETE FROM rule_versions WHERE rule_id = ? AND version = ?",
+                args,
+            )
+            .await
+        };
+        assert!(
+            delete_version.is_err(),
+            "[{engine}] rule version delete must be restricted"
+        );
+        let delete_event = {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(&e1);
+            conn.execute("DELETE FROM domain_events WHERE id = ?", args)
+                .await
+        };
+        assert!(
+            delete_event.is_err(),
+            "[{engine}] domain event delete must be restricted"
+        );
+        let delete_execution = {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(&x1);
+            conn.execute("DELETE FROM rule_executions WHERE id = ?", args)
+                .await
+        };
+        assert!(
+            delete_execution.is_err(),
+            "[{engine}] execution delete must be restricted"
+        );
+        let delete_outbox = {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(&ob1);
+            conn.execute("DELETE FROM automation_outbox WHERE id = ?", args)
+                .await
+        };
+        assert!(
+            delete_outbox.is_err(),
+            "[{engine}] outbox delete must be restricted"
+        );
+    }
+}
+
 async fn db_user_mfa_exists(db: &Database, user_id: &str) -> bool {
     let mut conn = db.conn();
     let mut args = tasker::db::Args::new();
@@ -4664,5 +5485,485 @@ async fn goals_matrix() {
         );
         let (code, _) = get_json(&app.app, &format!("/api/v1/goals/{goal_id}"), &admin).await;
         assert_eq!(code, StatusCode::NOT_FOUND);
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Phase 9: Advanced Profile + Advanced Team Settings
+// ---------------------------------------------------------------------------
+
+/// Minimal synthetic PNG as a data URL — the server only parses the header,
+/// so a crafted IHDR is enough to exercise format, size, and square checks.
+fn phase9_png_data_url(width: u32, height: u32) -> String {
+    let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    png.extend_from_slice(&13u32.to_be_bytes());
+    png.extend_from_slice(b"IHDR");
+    png.extend_from_slice(&width.to_be_bytes());
+    png.extend_from_slice(&height.to_be_bytes());
+    png.extend_from_slice(&[8, 6, 0, 0, 0]);
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::from("data:image/png;base64,");
+    for chunk in png.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[(n >> 18) as usize & 63] as char);
+        out.push(TABLE[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { TABLE[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { TABLE[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
+#[tokio::test]
+async fn profile_and_team_settings_matrix() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let suffix = Uuid::now_v7();
+        let admin_email = format!("p9-admin-{suffix}@test.local");
+        let member_email = format!("p9-member-{suffix}@test.local");
+        let guest_email = format!("p9-guest-{suffix}@test.local");
+        seed_user(&app.db, &admin_email, "P9 Admin").await;
+        seed_user(&app.db, &member_email, "P9 Member").await;
+        seed_user(&app.db, &guest_email, "P9 Guest").await;
+
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let guest = login_as(&app.app, &guest_email, "test-password-123").await;
+
+        // -- Profile update -------------------------------------------------
+        let (code, profile) = send_json(
+            &app.app,
+            "PATCH",
+            "/api/v1/me",
+            Some(&admin),
+            json!({
+                "display_name": "Ada Admin",
+                "username": "ada_admin",
+                "bio": "Tasker maintainer",
+                "timezone": "Europe/Berlin"
+            }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] patch /me");
+        assert_eq!(profile["username"], "ada_admin");
+        assert_eq!(profile["bio"], "Tasker maintainer");
+        assert_eq!(profile["timezone"], "Europe/Berlin");
+        assert_eq!(profile["display_name"], "Ada Admin");
+
+        // GET /me reflects the profile and the default (all-on) prefs.
+        let (code, me) = get_json(&app.app, "/api/v1/me", &admin).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(me["username"], "ada_admin");
+        assert_eq!(me["notification_prefs"]["comment_mention"], true);
+
+        // Invalid username / bio / timezone / non-square avatar.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            "/api/v1/me",
+            Some(&admin),
+            json!({"username": "Not Valid!"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] bad username");
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            "/api/v1/me",
+            Some(&admin),
+            json!({"bio": "x".repeat(201)}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] long bio");
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            "/api/v1/me",
+            Some(&admin),
+            json!({"timezone": "Not/A zone!!"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] bad timezone");
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            "/api/v1/me",
+            Some(&admin),
+            json!({"avatar": phase9_png_data_url(64, 48)}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] non-square avatar");
+
+        // Username uniqueness across the instance.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            "/api/v1/me",
+            Some(&member),
+            json!({"username": "ada_admin"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] duplicate username");
+
+        // Avatar upload + byte serving.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            "/api/v1/me",
+            Some(&admin),
+            json!({"avatar": phase9_png_data_url(64, 64)}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] square avatar accepted");
+        let admin_id = profile["id"].as_str().unwrap().to_string();
+        let response = app
+            .app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(&format!("/api/v1/users/{admin_id}/avatar"))
+                    .header(header::COOKIE, &member)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "[{engine}] avatar served");
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
+
+        // -- My Work Summary ------------------------------------------------
+        let (code, team) =
+            send_json(&app.app, "POST", "/api/v1/teams", Some(&admin), json!({"name":"P9T"})).await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role":"member", "temp_password":"member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name":"P9P"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+        let member_id = {
+            let (code, members) =
+                get_json(&app.app, &format!("/api/v1/teams/{team_id}/members"), &admin).await;
+            assert_eq!(code, StatusCode::OK);
+            members["items"].as_array().unwrap()
+                .iter().find(|m| m["role"] == "member").unwrap()["user"]["id"]
+                .as_str().unwrap().to_string()
+        };
+
+        // Two open tasks (one overdue) + one task to drive to closed.
+        for (title, due) in [
+            ("P9 overdue", Some("2020-01-01")),
+            ("P9 future", Some("2099-01-01")),
+            ("P9 plain", None),
+        ] {
+            let (code, _) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/projects/{project_id}/tasks"),
+                Some(&admin),
+                json!({"title": title, "assignee_id": member_id, "due_date": due}),
+            )
+            .await;
+            assert_eq!(code, StatusCode::CREATED, "[{engine}] seed task {title}");
+        }
+        let (code, list) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/tasks?status=backlog"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let tasks = list["items"].as_array().unwrap().to_vec();
+        assert_eq!(tasks.len(), 3, "[{engine}] seeded tasks");
+        let close_id = tasks.iter().find(|t| t["title"] == "P9 plain").unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        // Drive one task through the full lifecycle to closed:
+        // assignee resolves, reporter (the creator) submits, then accepts.
+        for (actor, stage) in [(&member, "todo"), (&member, "in_progress"), (&member, "resolved"), (&admin, "in_review"), (&admin, "closed")] {
+            let (code, _) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/tasks/{close_id}/transition"),
+                Some(actor),
+                json!({"to": stage}),
+            )
+            .await;
+            assert_eq!(code, StatusCode::OK, "[{engine}] transition to {stage}");
+        }
+
+        // Unread mention: admin mentions the member by email token.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{close_id}/comments"),
+            Some(&admin),
+            json!({"body": format!("ping @{member_email}")}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] mention comment");
+
+        let (code, summary) = get_json(&app.app, "/api/v1/me/summary", &member).await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] summary");
+        assert_eq!(summary["by_status"]["backlog"], 2, "[{engine}] backlog count");
+        assert_eq!(summary["by_status"]["closed"], 1, "[{engine}] closed count");
+        assert_eq!(summary["overdue"], 1, "[{engine}] overdue count");
+        assert_eq!(summary["unread_mentions_7d"], 1, "[{engine}] unread mentions");
+
+        // The summary's link targets: overdue + mentioned filters.
+        let (code, filtered) = get_json(&app.app, "/api/v1/me/tasks?overdue=true", &member).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(filtered["total"], 1, "[{engine}] overdue filter");
+        let (code, filtered) = get_json(
+            &app.app,
+            "/api/v1/me/tasks?mentioned=unread",
+            &member,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(filtered["total"], 1, "[{engine}] mentioned filter");
+
+        // -- Notification preference gating ---------------------------------
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            "/api/v1/me",
+            Some(&member),
+            json!({"notification_prefs": {"comment_mention": false}}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let (code, prefs) = get_json(&app.app, "/api/v1/me", &member).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(prefs["notification_prefs"]["comment_mention"], false);
+        assert_eq!(prefs["notification_prefs"]["task_assigned"], true);
+
+        // A new mention is suppressed; an assignment still arrives.
+        let future_id = tasks.iter().find(|t| t["title"] == "P9 future").unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{future_id}/comments"),
+            Some(&admin),
+            json!({"body": format!("quiet @{member_email}")}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "P9 assigned", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, notifications) = get_json(&app.app, "/api/v1/notifications", &member).await;
+        assert_eq!(code, StatusCode::OK);
+        let items = notifications["items"].as_array().unwrap();
+        assert!(
+            items.iter().any(|n| n["event"] == "task_assigned"),
+            "[{engine}] assignment delivered"
+        );
+        let unread_mentions = items
+            .iter()
+            .filter(|n| n["event"] == "comment_mention" && n["read_at"].is_null())
+            .count();
+        assert_eq!(unread_mentions, 1, "[{engine}] gated mention suppressed");
+
+        // -- Sessions --------------------------------------------------------
+        let (code, sessions) = get_json(&app.app, "/api/v1/me/sessions", &member).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(sessions["items"].as_array().unwrap().len(), 1);
+        assert_eq!(sessions["items"][0]["current"], true);
+
+        let member2 = login_as(&app.app, &member_email, "test-password-123").await;
+        let (code, sessions) = get_json(&app.app, "/api/v1/me/sessions", &member).await;
+        assert_eq!(sessions["items"].as_array().unwrap().len(), 2, "[{engine}] two sessions");
+        let other_id = sessions["items"].as_array().unwrap()
+            .iter().find(|s| s["current"] == false).unwrap()["id"]
+            .as_str().unwrap().to_string();
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/me/sessions/{other_id}"),
+            Some(&member),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] revoke other");
+        let (code, _) = get_json(&app.app, "/api/v1/me", &member2).await;
+        assert_eq!(code, StatusCode::UNAUTHORIZED, "[{engine}] revoked session rejected");
+
+        // Revoking the current session is allowed and signs the caller out.
+        let (code, sessions) = get_json(&app.app, "/api/v1/me/sessions", &member).await;
+        let current_id = sessions["items"].as_array().unwrap()
+            .iter().find(|s| s["current"] == true).unwrap()["id"]
+            .as_str().unwrap().to_string();
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/me/sessions/{current_id}"),
+            Some(&member),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] revoke current");
+        let (code, _) = get_json(&app.app, "/api/v1/me", &member).await;
+        assert_eq!(code, StatusCode::UNAUTHORIZED, "[{engine}] current session revoked");
+        // Re-login for the team settings part.
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+
+        // -- Team settings ----------------------------------------------------
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/teams/{team_id}"),
+            Some(&admin),
+            json!({"timezone": "Asia/Tehran", "avatar": phase9_png_data_url(32, 32)}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] team timezone+avatar");
+        let (code, team_now) = get_json(&app.app, &format!("/api/v1/teams/{team_id}"), &admin).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(team_now["timezone"], "Asia/Tehran");
+        let response = app
+            .app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(&format!("/api/v1/teams/{team_id}/avatar"))
+                    .header(header::COOKIE, &admin)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "[{engine}] team avatar served");
+
+        // Members list carries the @mention handle for search.
+        let (code, members) =
+            get_json(&app.app, &format!("/api/v1/teams/{team_id}/members"), &admin).await;
+        assert_eq!(code, StatusCode::OK);
+        let owner_entry = members["items"].as_array().unwrap()
+            .iter().find(|m| m["user"]["email"] == admin_email.as_str()).unwrap();
+        assert_eq!(owner_entry["username"], "ada_admin", "[{engine}] member username");
+
+        // Guests: grant a project viewer, then team-level view + revoke.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/guests"),
+            Some(&admin),
+            json!({"email": guest_email}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] grant guest");
+        let (code, guests) =
+            get_json(&app.app, &format!("/api/v1/teams/{team_id}/guests"), &admin).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(guests["items"].as_array().unwrap().len(), 1, "[{engine}] team guests list");
+        let guest_id = guests["items"][0]["user"]["id"].as_str().unwrap().to_string();
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/teams/{team_id}/guests/{guest_id}"),
+            Some(&member),
+        )
+        .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] member revoke guest");
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/teams/{team_id}/guests/{guest_id}"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] owner revoke guest");
+        let (code, guests) =
+            get_json(&app.app, &format!("/api/v1/teams/{team_id}/guests"), &admin).await;
+        assert_eq!(guests["items"].as_array().unwrap().len(), 0, "[{engine}] guests empty");
+
+        // Archive / unarchive.
+        let (code, archived) = send_request(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/archive"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] archive");
+        assert!(archived["archived_at"].is_i64(), "[{engine}] archived_at set");
+        let (code, _) = send_request(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/unarchive"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] unarchive");
+        let (code, restored) = get_json(&app.app, &format!("/api/v1/teams/{team_id}"), &admin).await;
+        assert!(restored["archived_at"].is_null(), "[{engine}] archived_at cleared");
+
+        // Team delete: owner-only; name + password re-verification.
+        let (code, _) = send_json(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/teams/{team_id}"),
+            Some(&member),
+            json!({"confirm_name": "P9T", "current_password": "test-password-123"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] member delete forbidden");
+        let (code, _) = send_json(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/teams/{team_id}"),
+            Some(&admin),
+            json!({"confirm_name": "wrong", "current_password": "test-password-123"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] wrong confirm name");
+        let (code, _) = send_json(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/teams/{team_id}"),
+            Some(&admin),
+            json!({"confirm_name": "P9T", "current_password": "nope-nope-nope"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] wrong password");
+        let (code, _) = send_json(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/teams/{team_id}"),
+            Some(&admin),
+            json!({"confirm_name": "P9T", "current_password": "test-password-123"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] owner delete");
+        let (code, _) = get_json(&app.app, &format!("/api/v1/teams/{team_id}"), &admin).await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] team gone");
+        let (code, _) = get_json(&app.app, &format!("/api/v1/projects/{project_id}"), &admin).await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] projects cascaded");
     }
 }

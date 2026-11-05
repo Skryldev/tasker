@@ -6,14 +6,28 @@
     <meta name="color-scheme" content="light dark" />
     <title>Tasker — Team Work Management</title>
     <script>
-      // Apply saved theme before first paint to avoid flashes.
+      // Apply the saved theme before first paint to avoid flashes. The map
+      // mirrors the theme registry in src/lib/theme.tsx (id -> appearance).
       (function () {
         try {
+          var darkThemes = {
+            dark: 1,
+            midnight: 1,
+            nord: 1,
+            dracula: 1,
+            "solarized-dark": 1,
+            "rose-pine": 1,
+            "catppuccin-mocha": 1,
+          };
           var theme = localStorage.getItem("tasker-theme");
-          if (
-            theme === "dark" ||
-            (!theme && window.matchMedia("(prefers-color-scheme: dark)").matches)
-          ) {
+          var dark =
+            theme != null
+              ? Boolean(darkThemes[theme])
+              : window.matchMedia("(prefers-color-scheme: dark)").matches;
+          if (theme) {
+            document.documentElement.setAttribute("data-theme", theme);
+          }
+          if (dark) {
             document.documentElement.classList.add("dark");
           }
         } catch (e) {

@@ -1,20 +1,21 @@
 import { Suspense, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
+  Check,
   ClipboardList,
   FolderKanban,
   ListTree,
   ListTodo,
   LogOut,
   Menu,
-  Moon,
+  Palette,
   Settings,
-  Sun,
   Target,
   UserRound,
 } from "lucide-react";
 import { NotificationBell } from "@/components/app/NotificationBell";
 import { Button } from "@/components/ui/button";
+import { api } from "@/api/client";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,7 +26,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Avatar, Separator } from "@/components/ui/avatar";
-import { useTheme } from "@/lib/theme";
+import { useTheme, THEMES } from "@/lib/theme";
 import { useAuth, useLogout } from "@/lib/auth";
 import { WorkspaceProvider, useWorkspace } from "@/lib/workspace";
 import { roleLabel } from "@/lib/utils";
@@ -189,10 +190,52 @@ function MobileNav({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
   );
 }
 
+function ThemeSwitcher() {
+  const { theme, setTheme } = useTheme();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label="Change theme" data-testid="theme-switcher">
+          <Palette />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuLabel>Theme</DropdownMenuLabel>
+        {THEMES.map((definition) => (
+          <DropdownMenuItem
+            key={definition.id}
+            onSelect={() => setTheme(definition.id)}
+            className="justify-between"
+            data-testid={`theme-option-${definition.id}`}
+          >
+            <span className="flex items-center gap-2">
+              {/* Preview swatch: background, primary, accent. */}
+              <span className="flex -space-x-0.5" aria-hidden>
+                {definition.swatch.map((color) => (
+                  <span
+                    key={color}
+                    className="h-3.5 w-3.5 rounded-full border border-border"
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+              </span>
+              {definition.label}
+            </span>
+            {theme === definition.id ? (
+              <Check className="h-3.5 w-3.5" aria-label="Active theme" />
+            ) : null}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function Topbar() {
   const { user } = useAuth();
   const logout = useLogout();
-  const { theme, toggle } = useTheme();
   const navigate = useNavigate();
   const [navOpen, setNavOpen] = useState(false);
 
@@ -216,19 +259,14 @@ function Topbar() {
       </div>
       <div className="flex items-center gap-1.5">
         <NotificationBell />
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={toggle}
-          aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-          data-testid="theme-toggle"
-        >
-          {theme === "dark" ? <Sun /> : <Moon />}
-        </Button>
+        <ThemeSwitcher />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" aria-label="Account menu" data-testid="user-menu">
-              <Avatar name={user?.display_name ?? "?"} />
+              <Avatar
+                name={user?.display_name ?? "?"}
+                src={user ? api.userAvatarUrl(user.id) : undefined}
+              />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">

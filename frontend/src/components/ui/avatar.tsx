@@ -5,11 +5,21 @@ export function Avatar({
   name,
   size = "sm",
   className,
+  src,
+  title,
 }: {
   name: string;
   size?: "xs" | "sm" | "md";
   className?: string;
+  /** Optional avatar image URL; falls back to initials on error or absence. */
+  src?: string;
+  /** Hover text; defaults to the display name (hover cards append bio). */
+  title?: string;
 }) {
+  const [failed, setFailed] = React.useState(false);
+  React.useEffect(() => {
+    setFailed(false);
+  }, [src]);
   const { initials, tone } = React.useMemo(() => {
     const parts = name.trim().split(/\s+/).slice(0, 2);
     const chars = parts.map((p) => p.charAt(0).toUpperCase()).join("") || "?";
@@ -26,15 +36,24 @@ export function Avatar({
 
   return (
     <span
-      title={name}
+      title={title ?? name}
       style={{ backgroundColor: tone }}
       className={cn(
-        "inline-flex shrink-0 select-none items-center justify-center rounded-full font-medium text-white",
+        "inline-flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full font-medium text-white",
         sizes[size],
         className,
       )}
     >
-      {initials}
+      {src && !failed ? (
+        <img
+          src={src}
+          alt=""
+          className="h-full w-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        initials
+      )}
     </span>
   );
 }

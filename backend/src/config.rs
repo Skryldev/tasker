@@ -96,7 +96,9 @@ impl Config {
         let idle_secs: u64 = env_parsed("TASKER_DB_IDLE_TIMEOUT_SECS", 300u64)?;
         let lifetime_secs: u64 = env_parsed("TASKER_DB_MAX_LIFETIME_SECS", 1800u64)?;
         let login_rate_limit_per_min: u32 = env_parsed("TASKER_RATE_LIMIT_LOGIN_PER_MIN", 10u32)?;
-        let body_limit_bytes: usize = env_parsed("TASKER_BODY_LIMIT_BYTES", 1_048_576usize)?;
+        // 4 MB: avatars travel as data URLs inside JSON (2 MB decoded image
+        // ≈ 2.7 MB base64); every other payload stays far below this.
+        let body_limit_bytes: usize = env_parsed("TASKER_BODY_LIMIT_BYTES", 4_194_304usize)?;
 
         let mfa_encryption_key = match std::env::var("TASKER_MFA_ENCRYPTION_KEY") {
             Ok(raw) => {

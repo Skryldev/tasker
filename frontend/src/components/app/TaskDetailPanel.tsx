@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { CalendarDays, History, MessageSquare, Pencil, ListTree, Trash2, X } from "lucide-react";
 import { api, type Task } from "@/api/client";
 import {
@@ -8,6 +8,7 @@ import {
   useDeleteComment,
   useDeleteTask,
   useUpdateComment,
+  useUserInfo,
 } from "@/api/hooks";
 import { Avatar, Separator } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,8 @@ import { WorkflowActions } from "./WorkflowActions";
 import { CommentBody, CommentComposer } from "./Mentions";
 import { DependenciesPanel } from "./DependenciesPanel";
 import { useToast } from "@/components/ui/toast";
-import { cn, timeAgo } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { Timestamp } from "@/components/app/Timestamp";
 import { formatJalaliDate } from "@/lib/doran";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -63,6 +65,29 @@ export function TaskDetailPanel({
   const updateComment = useUpdateComment(taskId ?? "");
   const deleteComment = useDeleteComment(taskId ?? "");
   const deleteTask = useDeleteTask();
+
+  // Hover-card identities (username/bio) for every avatar in the panel,
+  // resolved with one batched request.
+  const hoverIds = useMemo(() => {
+    if (!task) return [];
+    const ids = [
+      task.assignee?.id,
+      task.reporter?.id,
+      task.resolved_by?.id,
+      ...(comments.data?.items.map((c) => c.author.id) ?? []),
+      ...(activity.data?.items.map((a) => a.actor?.id) ?? []),
+    ];
+    return [...new Set(ids.filter((id): id is string => Boolean(id)))];
+  }, [task, comments.data, activity.data]);
+  const hoverInfo = useUserInfo(hoverIds);
+  const hoverTitle = (id: string | undefined, name: string): string | undefined => {
+    if (!id) return undefined;
+    const info = hoverInfo.data?.items.find((i) => i.id === id);
+    if (!info) return undefined;
+    return [name, info.username ? `@${info.username}` : null, info.bio ?? null]
+      .filter(Boolean)
+      .join("\n");
+  };
 
   if (!task) {
     return (
@@ -135,7 +160,11 @@ export function TaskDetailPanel({
           </span>
           {task.assignee ? (
             <span className="inline-flex items-center gap-1.5">
-              <Avatar name={task.assignee.display_name} size="xs" />
+              <Avatar
+                name={task.assignee.display_name}
+                size="xs"
+                title={hoverTitle(task.assignee.id, task.assignee.display_name)}
+              />
               {task.assignee.display_name}
             </span>
           ) : (
@@ -144,7 +173,11 @@ export function TaskDetailPanel({
           {task.reporter ? (
             <span className="inline-flex items-center gap-1.5">
               <span className="text-muted-foreground">Reporter:</span>
-              <Avatar name={task.reporter.display_name} size="xs" />
+              <Avatar
+                name={task.reporter.display_name}
+                size="xs"
+                title={hoverTitle(task.reporter.id, task.reporter.display_name)}
+              />
               {task.reporter.display_name}
             </span>
           ) : null}
@@ -163,7 +196,11 @@ export function TaskDetailPanel({
             {task.resolution === "accepted" ? (
               <>
                 Accepted{task.resolved_by ? ` by ${task.resolved_by.display_name}` : ""}
-                {task.resolved_at ? ` · ${timeAgo(task.resolved_at)}` : ""}
+                {task.resolved_at ? (
+                  <> · <Timestamp value={task.resolved_at} /></>
+                ) : (
+                  ""
+                )}
               </>
             ) : (
               <>
@@ -240,9 +277,13 @@ export function TaskDetailPanel({
               comments.data?.items.map((comment) => (
                 <article key={comment.id} className="rounded-md border p-3">
                   <header className="flex items-center gap-2 text-xs">
-                    <Avatar name={comment.author.display_name} size="xs" />
+                    <Avatar
+                      name={comment.author.display_name}
+                      size="xs"
+                      title={hoverTitle(comment.author.id, comment.author.display_name)}
+                    />
                     <span className="font-medium">{comment.author.display_name}</span>
-                    <span className="text-muted-foreground">{timeAgo(comment.created_at)}</span>
+                    <span className="text-muted-foreground"><Timestamp value={comment.created_at} /></span>
                     {comment.created_at !== comment.updated_at ? (
                       <span className="text-muted-foreground">(edited)</span>
                     ) : null}
@@ -318,7 +359,11 @@ export function TaskDetailPanel({
               {activity.data?.items.map((event) => (
                 <li key={event.id} className="flex items-start gap-2.5 text-xs">
                   {event.actor ? (
-                    <Avatar name={event.actor.display_name} size="xs" />
+                    <Avatar
+                      name={event.actor.display_name}
+                      size="xs"
+                      title={hoverTitle(event.actor.id, event.actor.display_name)}
+                    />
                   ) : (
                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[9px]">?</span>
                   )}
@@ -332,7 +377,7 @@ export function TaskDetailPanel({
                         {eventDetail(event.field, event.old_value, event.new_value)}
                       </div>
                     ) : null}
-                    <div className="text-2xs text-muted-foreground">{timeAgo(event.created_at)}</div>
+                    <div className="text-2xs text-muted-foreground"><Timestamp value={event.created_at} /></div>
                   </div>
                 </li>
               ))}

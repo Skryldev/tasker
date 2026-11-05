@@ -53,6 +53,31 @@ export function timeAgo(epochMs: number | null | undefined): string {
   }
 }
 
+/**
+ * Absolute rendering of an instant in a given IANA zone ("03/11/2026, 14:32").
+ * Used for the hover title on relative timestamps so the profile timezone has
+ * a concrete display effect. Falls back to the runtime default zone.
+ */
+export function formatInstant(epochMs: number | null | undefined, timeZone?: string | null): string {
+  if (!epochMs) return "—";
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: timeZone || undefined,
+    }).format(new Date(epochMs));
+  } catch {
+    // An invalid stored zone must never break rendering.
+    try {
+      return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(
+        new Date(epochMs),
+      );
+    } catch {
+      return "—";
+    }
+  }
+}
+
 /** Deterministic pastel-free avatar background from any string. */
 export function avatarTone(seed: string): string {
   let hash = 0;

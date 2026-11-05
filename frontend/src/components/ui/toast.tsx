@@ -22,13 +22,13 @@ const DURATION = {
 type ToastKind = keyof typeof DURATION;
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const { theme } = useTheme();
+  const { appearance } = useTheme();
   return (
     <>
       {children}
       <SonnerToaster
         position="bottom-right"
-        theme={theme === "dark" ? "dark" : "light"}
+        theme={appearance}
         richColors
         closeButton
         gap={8}

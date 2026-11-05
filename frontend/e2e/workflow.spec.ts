@@ -64,7 +64,7 @@ test.describe.serial("Tasker core workflow", () => {
     await page.goto(`/teams/${teamId}/settings?team=${teamId}`);
     await page.getByTestId("add-member").click();
     await page.getByTestId("member-email-input").fill(MEMBER.email);
-    await page.getByLabel("Role").click();
+    await page.getByLabel("Role", { exact: true }).click();
     await page.getByRole("option", { name: "Member" }).click();
     await page.getByLabel("Temporary password (new accounts only)").fill(MEMBER.password);
     await page.getByTestId("member-submit").click();
