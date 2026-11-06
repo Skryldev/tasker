@@ -107,8 +107,8 @@ function SidebarLink({
       aria-current={end || matchPrefix ? (prefixActive ? "page" : undefined) : undefined}
       className={({ isActive }) => {
         const active = matchPrefix !== undefined ? prefixActive : isActive;
-        return `flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-          active ? "bg-accent font-medium text-accent-foreground" : ""
+        return `flex h-9 items-center gap-2.5 rounded-md px-2 text-sm transition-colors duration-100 hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+          active ? "bg-primary/10 font-medium text-primary" : ""
         }`;
       }}
     >
@@ -125,33 +125,33 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
       <TeamSwitcher onNavigate={onNavigate} />
       <Separator className="my-2" />
       <nav className="flex flex-col gap-0.5" aria-label="Main">
-        <SidebarLink to="/" icon={<ListTodo />} label="My Tasks" end onNavigate={onNavigate} />
+        <SidebarLink to="/" icon={<ListTodo className="h-4 w-4" />} label="My Tasks" end onNavigate={onNavigate} />
         {teamId ? (
           <>
             <SidebarLink
               to={`/projects?team=${teamId}`}
-              icon={<FolderKanban />}
+              icon={<FolderKanban className="h-4 w-4" />}
               label="Projects"
               matchPrefix="/projects"
               onNavigate={onNavigate}
             />
             <SidebarLink
               to={`/teams/${teamId}/goals`}
-              icon={<Target />}
+              icon={<Target className="h-4 w-4" />}
               label="Goals"
               matchPrefix={`/teams/${teamId}/goals`}
               onNavigate={onNavigate}
             />
             <SidebarLink
               to={`/teams/${teamId}/workload`}
-              icon={<ListTree />}
+              icon={<ListTree className="h-4 w-4" />}
               label="Workload"
               matchPrefix={`/teams/${teamId}/workload`}
               onNavigate={onNavigate}
             />
             <SidebarLink
               to={`/teams/${teamId}/settings`}
-              icon={<Settings />}
+              icon={<Settings className="h-4 w-4" />}
               label="Team Settings"
               matchPrefix={`/teams/${teamId}/settings`}
               onNavigate={onNavigate}

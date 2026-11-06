@@ -44,6 +44,10 @@ export function Avatar({
         className,
       )}
     >
+      {/* Initials are a decorative fallback duplicating the name (title /
+          adjacent label). Rendered via CSS content rather than a text node so
+          they never enter textContent — they would otherwise break
+          Label-in-Name on ancestor widgets (axe 2.5.3). */}
       {src && !failed ? (
         <img
           src={src}
@@ -52,7 +56,11 @@ export function Avatar({
           onError={() => setFailed(true)}
         />
       ) : (
-        initials
+        <span
+          aria-hidden
+          data-initials={initials}
+          className="before:content-[attr(data-initials)]"
+        />
       )}
     </span>
   );

@@ -1,4 +1,4 @@
-import { StrictMode, lazy } from "react";
+import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import "@/index.css";
 import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -7,13 +7,16 @@ import { AppShell } from "@/components/app/AppShell";
 import { ThemeProvider } from "@/lib/theme";
 import { ToastProvider } from "@/components/ui/toast";
 import { AuthProvider, handleUnauthorizedError, useAuth } from "@/lib/auth";
-import { LoginPage } from "@/pages/LoginPage";
 import { MyTasksPage } from "@/pages/MyTasksPage";
 import type { ReactNode } from "react";
 
-// Route-level code splitting: the login page and the default landing page
-// load eagerly with the shell; every other page is fetched on first visit so
-// the initial bundle stays small (see vite.config manualChunks).
+// Route-level code splitting: only the shell and the default landing page
+// load eagerly. The login page is lazy too — its form libraries (react-hook
+// form + zod) are irrelevant to the authenticated app, which is the route
+// users live in (see vite.config manualChunks).
+const LoginPage = lazy(() =>
+  import("@/pages/LoginPage").then((m) => ({ default: m.LoginPage })),
+);
 const ProjectsPage = lazy(() =>
   import("@/pages/ProjectsPage").then((m) => ({ default: m.ProjectsPage })),
 );
@@ -42,7 +45,14 @@ const ProjectGuestsPage = lazy(() =>
 );
 
 const router = createBrowserRouter([
-  { path: "/login", element: <LoginPage /> },
+  {
+    path: "/login",
+    element: (
+      <Suspense fallback={<LoginFallback />}>
+        <LoginPage />
+      </Suspense>
+    ),
+  },
   {
     path: "/",
     element: (
@@ -85,9 +95,20 @@ const queryClient = new QueryClient({
   },
 });
 
+/** Login-shaped fallback while the lazy login chunk loads (rare: one hop). */
+function LoginFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <span
+        className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent"
+        aria-label="Loading"
+      />
+    </div>
+  );
+}
+
 /** Redirects unauthenticated visitors to the login screen. */
-function RequireAuth({ children }: { children: ReactNode }) {
-  const { user, isLoading } = useAuth();
+function RequireAuth({ children }: { children: ReactNode }) {  const { user, isLoading } = useAuth();
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center" aria-busy="true">

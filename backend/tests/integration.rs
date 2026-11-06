@@ -3185,7 +3185,7 @@ async fn rules_schema_migrations_and_constraints() {
             .s(event_id)
             .s(rule_id)
             .i(rule_version)
-            .s(format!("task-{id}")) // historical task id (no FK)
+            .s(Uuid::now_v7().to_string()) // historical task id (no FK, CHAR(36))
             .s(action_type)
             .i(1i64)
             .s(payload)
@@ -5488,7 +5488,6 @@ async fn goals_matrix() {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Phase 9: Advanced Profile + Advanced Team Settings
 // ---------------------------------------------------------------------------
@@ -5496,23 +5495,31 @@ async fn goals_matrix() {
 /// Minimal synthetic PNG as a data URL — the server only parses the header,
 /// so a crafted IHDR is enough to exercise format, size, and square checks.
 fn phase9_png_data_url(width: u32, height: u32) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
     png.extend_from_slice(&13u32.to_be_bytes());
     png.extend_from_slice(b"IHDR");
     png.extend_from_slice(&width.to_be_bytes());
     png.extend_from_slice(&height.to_be_bytes());
     png.extend_from_slice(&[8, 6, 0, 0, 0]);
-    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::from("data:image/png;base64,");
     for chunk in png.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
-        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let b0 = u32::from(chunk[0]);
+        let b1 = u32::from(chunk.get(1).copied().unwrap_or(0));
+        let b2 = u32::from(chunk.get(2).copied().unwrap_or(0));
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(TABLE[(n >> 18) as usize & 63] as char);
         out.push(TABLE[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { TABLE[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { TABLE[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -5531,7 +5538,7 @@ async fn profile_and_team_settings_matrix() {
 
         let admin = login_as(&app.app, &admin_email, "test-password-123").await;
         let member = login_as(&app.app, &member_email, "test-password-123").await;
-        let guest = login_as(&app.app, &guest_email, "test-password-123").await;
+        let _guest = login_as(&app.app, &guest_email, "test-password-123").await;
 
         // -- Profile update -------------------------------------------------
         let (code, profile) = send_json(
@@ -5568,7 +5575,11 @@ async fn profile_and_team_settings_matrix() {
             json!({"username": "Not Valid!"}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] bad username");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] bad username"
+        );
         let (code, _) = send_json(
             &app.app,
             "PATCH",
@@ -5577,7 +5588,11 @@ async fn profile_and_team_settings_matrix() {
             json!({"bio": "x".repeat(201)}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] long bio");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] long bio"
+        );
         let (code, _) = send_json(
             &app.app,
             "PATCH",
@@ -5586,7 +5601,11 @@ async fn profile_and_team_settings_matrix() {
             json!({"timezone": "Not/A zone!!"}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] bad timezone");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] bad timezone"
+        );
         let (code, _) = send_json(
             &app.app,
             "PATCH",
@@ -5595,7 +5614,11 @@ async fn profile_and_team_settings_matrix() {
             json!({"avatar": phase9_png_data_url(64, 48)}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] non-square avatar");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] non-square avatar"
+        );
 
         // Username uniqueness across the instance.
         let (code, _) = send_json(
@@ -5624,19 +5647,29 @@ async fn profile_and_team_settings_matrix() {
             .clone()
             .oneshot(
                 axum::http::Request::builder()
-                    .uri(&format!("/api/v1/users/{admin_id}/avatar"))
+                    .uri(format!("/api/v1/users/{admin_id}/avatar"))
                     .header(header::COOKIE, &member)
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK, "[{engine}] avatar served");
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "[{engine}] avatar served"
+        );
         assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
 
         // -- My Work Summary ------------------------------------------------
-        let (code, team) =
-            send_json(&app.app, "POST", "/api/v1/teams", Some(&admin), json!({"name":"P9T"})).await;
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name":"P9T"}),
+        )
+        .await;
         assert_eq!(code, StatusCode::CREATED);
         let team_id = team["id"].as_str().unwrap().to_string();
         let (code, _) = send_json(
@@ -5659,12 +5692,22 @@ async fn profile_and_team_settings_matrix() {
         assert_eq!(code, StatusCode::CREATED);
         let project_id = project["id"].as_str().unwrap().to_string();
         let member_id = {
-            let (code, members) =
-                get_json(&app.app, &format!("/api/v1/teams/{team_id}/members"), &admin).await;
+            let (code, members) = get_json(
+                &app.app,
+                &format!("/api/v1/teams/{team_id}/members"),
+                &admin,
+            )
+            .await;
             assert_eq!(code, StatusCode::OK);
-            members["items"].as_array().unwrap()
-                .iter().find(|m| m["role"] == "member").unwrap()["user"]["id"]
-                .as_str().unwrap().to_string()
+            members["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["role"] == "member")
+                .unwrap()["user"]["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
         };
 
         // Two open tasks (one overdue) + one task to drive to closed.
@@ -5690,7 +5733,7 @@ async fn profile_and_team_settings_matrix() {
         )
         .await;
         assert_eq!(code, StatusCode::OK);
-        let tasks = list["items"].as_array().unwrap().to_vec();
+        let tasks = list["items"].as_array().unwrap().clone();
         assert_eq!(tasks.len(), 3, "[{engine}] seeded tasks");
         let close_id = tasks.iter().find(|t| t["title"] == "P9 plain").unwrap()["id"]
             .as_str()
@@ -5698,7 +5741,13 @@ async fn profile_and_team_settings_matrix() {
             .to_string();
         // Drive one task through the full lifecycle to closed:
         // assignee resolves, reporter (the creator) submits, then accepts.
-        for (actor, stage) in [(&member, "todo"), (&member, "in_progress"), (&member, "resolved"), (&admin, "in_review"), (&admin, "closed")] {
+        for (actor, stage) in [
+            (&member, "todo"),
+            (&member, "in_progress"),
+            (&member, "resolved"),
+            (&admin, "in_review"),
+            (&admin, "closed"),
+        ] {
             let (code, _) = send_json(
                 &app.app,
                 "POST",
@@ -5723,21 +5772,23 @@ async fn profile_and_team_settings_matrix() {
 
         let (code, summary) = get_json(&app.app, "/api/v1/me/summary", &member).await;
         assert_eq!(code, StatusCode::OK, "[{engine}] summary");
-        assert_eq!(summary["by_status"]["backlog"], 2, "[{engine}] backlog count");
+        assert_eq!(
+            summary["by_status"]["backlog"], 2,
+            "[{engine}] backlog count"
+        );
         assert_eq!(summary["by_status"]["closed"], 1, "[{engine}] closed count");
         assert_eq!(summary["overdue"], 1, "[{engine}] overdue count");
-        assert_eq!(summary["unread_mentions_7d"], 1, "[{engine}] unread mentions");
+        assert_eq!(
+            summary["unread_mentions_7d"], 1,
+            "[{engine}] unread mentions"
+        );
 
         // The summary's link targets: overdue + mentioned filters.
         let (code, filtered) = get_json(&app.app, "/api/v1/me/tasks?overdue=true", &member).await;
         assert_eq!(code, StatusCode::OK);
         assert_eq!(filtered["total"], 1, "[{engine}] overdue filter");
-        let (code, filtered) = get_json(
-            &app.app,
-            "/api/v1/me/tasks?mentioned=unread",
-            &member,
-        )
-        .await;
+        let (code, filtered) =
+            get_json(&app.app, "/api/v1/me/tasks?mentioned=unread", &member).await;
         assert_eq!(code, StatusCode::OK);
         assert_eq!(filtered["total"], 1, "[{engine}] mentioned filter");
 
@@ -5799,11 +5850,21 @@ async fn profile_and_team_settings_matrix() {
         assert_eq!(sessions["items"][0]["current"], true);
 
         let member2 = login_as(&app.app, &member_email, "test-password-123").await;
-        let (code, sessions) = get_json(&app.app, "/api/v1/me/sessions", &member).await;
-        assert_eq!(sessions["items"].as_array().unwrap().len(), 2, "[{engine}] two sessions");
-        let other_id = sessions["items"].as_array().unwrap()
-            .iter().find(|s| s["current"] == false).unwrap()["id"]
-            .as_str().unwrap().to_string();
+        let (_code, sessions) = get_json(&app.app, "/api/v1/me/sessions", &member).await;
+        assert_eq!(
+            sessions["items"].as_array().unwrap().len(),
+            2,
+            "[{engine}] two sessions"
+        );
+        let other_id = sessions["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["current"] == false)
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let (code, _) = send_request(
             &app.app,
             "DELETE",
@@ -5813,13 +5874,23 @@ async fn profile_and_team_settings_matrix() {
         .await;
         assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] revoke other");
         let (code, _) = get_json(&app.app, "/api/v1/me", &member2).await;
-        assert_eq!(code, StatusCode::UNAUTHORIZED, "[{engine}] revoked session rejected");
+        assert_eq!(
+            code,
+            StatusCode::UNAUTHORIZED,
+            "[{engine}] revoked session rejected"
+        );
 
         // Revoking the current session is allowed and signs the caller out.
-        let (code, sessions) = get_json(&app.app, "/api/v1/me/sessions", &member).await;
-        let current_id = sessions["items"].as_array().unwrap()
-            .iter().find(|s| s["current"] == true).unwrap()["id"]
-            .as_str().unwrap().to_string();
+        let (_code, sessions) = get_json(&app.app, "/api/v1/me/sessions", &member).await;
+        let current_id = sessions["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["current"] == true)
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let (code, _) = send_request(
             &app.app,
             "DELETE",
@@ -5829,7 +5900,11 @@ async fn profile_and_team_settings_matrix() {
         .await;
         assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] revoke current");
         let (code, _) = get_json(&app.app, "/api/v1/me", &member).await;
-        assert_eq!(code, StatusCode::UNAUTHORIZED, "[{engine}] current session revoked");
+        assert_eq!(
+            code,
+            StatusCode::UNAUTHORIZED,
+            "[{engine}] current session revoked"
+        );
         // Re-login for the team settings part.
         let member = login_as(&app.app, &member_email, "test-password-123").await;
 
@@ -5843,7 +5918,8 @@ async fn profile_and_team_settings_matrix() {
         )
         .await;
         assert_eq!(code, StatusCode::OK, "[{engine}] team timezone+avatar");
-        let (code, team_now) = get_json(&app.app, &format!("/api/v1/teams/{team_id}"), &admin).await;
+        let (code, team_now) =
+            get_json(&app.app, &format!("/api/v1/teams/{team_id}"), &admin).await;
         assert_eq!(code, StatusCode::OK);
         assert_eq!(team_now["timezone"], "Asia/Tehran");
         let response = app
@@ -5851,22 +5927,37 @@ async fn profile_and_team_settings_matrix() {
             .clone()
             .oneshot(
                 axum::http::Request::builder()
-                    .uri(&format!("/api/v1/teams/{team_id}/avatar"))
+                    .uri(format!("/api/v1/teams/{team_id}/avatar"))
                     .header(header::COOKIE, &admin)
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK, "[{engine}] team avatar served");
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "[{engine}] team avatar served"
+        );
 
         // Members list carries the @mention handle for search.
-        let (code, members) =
-            get_json(&app.app, &format!("/api/v1/teams/{team_id}/members"), &admin).await;
+        let (code, member_rows) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/members"),
+            &admin,
+        )
+        .await;
         assert_eq!(code, StatusCode::OK);
-        let owner_entry = members["items"].as_array().unwrap()
-            .iter().find(|m| m["user"]["email"] == admin_email.as_str()).unwrap();
-        assert_eq!(owner_entry["username"], "ada_admin", "[{engine}] member username");
+        let owner_entry = member_rows["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["user"]["email"] == admin_email.as_str())
+            .unwrap();
+        assert_eq!(
+            owner_entry["username"], "ada_admin",
+            "[{engine}] member username"
+        );
 
         // Guests: grant a project viewer, then team-level view + revoke.
         let (code, _) = send_json(
@@ -5881,8 +5972,15 @@ async fn profile_and_team_settings_matrix() {
         let (code, guests) =
             get_json(&app.app, &format!("/api/v1/teams/{team_id}/guests"), &admin).await;
         assert_eq!(code, StatusCode::OK);
-        assert_eq!(guests["items"].as_array().unwrap().len(), 1, "[{engine}] team guests list");
-        let guest_id = guests["items"][0]["user"]["id"].as_str().unwrap().to_string();
+        assert_eq!(
+            guests["items"].as_array().unwrap().len(),
+            1,
+            "[{engine}] team guests list"
+        );
+        let guest_id = guests["items"][0]["user"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let (code, _) = send_request(
             &app.app,
             "DELETE",
@@ -5890,7 +5988,11 @@ async fn profile_and_team_settings_matrix() {
             Some(&member),
         )
         .await;
-        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] member revoke guest");
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] member revoke guest"
+        );
         let (code, _) = send_request(
             &app.app,
             "DELETE",
@@ -5898,10 +6000,18 @@ async fn profile_and_team_settings_matrix() {
             Some(&admin),
         )
         .await;
-        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] owner revoke guest");
-        let (code, guests) =
+        assert_eq!(
+            code,
+            StatusCode::NO_CONTENT,
+            "[{engine}] owner revoke guest"
+        );
+        let (_code, guests) =
             get_json(&app.app, &format!("/api/v1/teams/{team_id}/guests"), &admin).await;
-        assert_eq!(guests["items"].as_array().unwrap().len(), 0, "[{engine}] guests empty");
+        assert_eq!(
+            guests["items"].as_array().unwrap().len(),
+            0,
+            "[{engine}] guests empty"
+        );
 
         // Archive / unarchive.
         let (code, archived) = send_request(
@@ -5912,7 +6022,10 @@ async fn profile_and_team_settings_matrix() {
         )
         .await;
         assert_eq!(code, StatusCode::OK, "[{engine}] archive");
-        assert!(archived["archived_at"].is_i64(), "[{engine}] archived_at set");
+        assert!(
+            archived["archived_at"].is_i64(),
+            "[{engine}] archived_at set"
+        );
         let (code, _) = send_request(
             &app.app,
             "POST",
@@ -5921,8 +6034,12 @@ async fn profile_and_team_settings_matrix() {
         )
         .await;
         assert_eq!(code, StatusCode::OK, "[{engine}] unarchive");
-        let (code, restored) = get_json(&app.app, &format!("/api/v1/teams/{team_id}"), &admin).await;
-        assert!(restored["archived_at"].is_null(), "[{engine}] archived_at cleared");
+        let (_code, restored) =
+            get_json(&app.app, &format!("/api/v1/teams/{team_id}"), &admin).await;
+        assert!(
+            restored["archived_at"].is_null(),
+            "[{engine}] archived_at cleared"
+        );
 
         // Team delete: owner-only; name + password re-verification.
         let (code, _) = send_json(
@@ -5933,7 +6050,11 @@ async fn profile_and_team_settings_matrix() {
             json!({"confirm_name": "P9T", "current_password": "test-password-123"}),
         )
         .await;
-        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] member delete forbidden");
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] member delete forbidden"
+        );
         let (code, _) = send_json(
             &app.app,
             "DELETE",
@@ -5942,7 +6063,11 @@ async fn profile_and_team_settings_matrix() {
             json!({"confirm_name": "wrong", "current_password": "test-password-123"}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] wrong confirm name");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] wrong confirm name"
+        );
         let (code, _) = send_json(
             &app.app,
             "DELETE",
@@ -5951,7 +6076,11 @@ async fn profile_and_team_settings_matrix() {
             json!({"confirm_name": "P9T", "current_password": "nope-nope-nope"}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] wrong password");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] wrong password"
+        );
         let (code, _) = send_json(
             &app.app,
             "DELETE",

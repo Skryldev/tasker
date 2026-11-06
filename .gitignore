@@ -10,6 +10,7 @@ frontend/playwright-report/
 frontend/coverage/
 
 # Local dev data
+.zcode/
 .devtools/
 *.db
 *.db-wal

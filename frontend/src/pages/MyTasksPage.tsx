@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState } from "@/components/app/EmptyState";
+import { Skeleton } from "@/components/ui/badge";
 import { TaskDetailPanel } from "@/components/app/TaskDetailPanel";
 import { TaskTable } from "@/components/app/TaskTable";
 import { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES, STATUS_LABELS } from "@/lib/utils";
@@ -202,7 +203,17 @@ export function MyTasksPage() {
 
       {selectedTaskId ? (
         <aside className="hidden w-[380px] shrink-0 border-l lg:block">
-          <TaskDetailPanel task={detail.data} onClose={() => setSelectedTaskId(null)} />
+          {detail.isLoading ? (
+            <div className="flex h-full flex-col gap-3 p-4" aria-busy="true" data-testid="task-detail-loading">
+              <Skeleton className="h-6 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-4 w-1/2" />
+            </div>
+          ) : (
+            <TaskDetailPanel task={detail.data} onClose={() => setSelectedTaskId(null)} />
+          )}
         </aside>
       ) : null}
     </div>

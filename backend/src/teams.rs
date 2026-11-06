@@ -18,9 +18,18 @@ use crate::util;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/teams", get(list_teams).post(create_team))
-        .route("/teams/{team_id}", get(get_team).patch(update_team).delete(delete_team))
-        .route("/teams/{team_id}/archive", axum::routing::post(archive_team))
-        .route("/teams/{team_id}/unarchive", axum::routing::post(unarchive_team))
+        .route(
+            "/teams/{team_id}",
+            get(get_team).patch(update_team).delete(delete_team),
+        )
+        .route(
+            "/teams/{team_id}/archive",
+            axum::routing::post(archive_team),
+        )
+        .route(
+            "/teams/{team_id}/unarchive",
+            axum::routing::post(unarchive_team),
+        )
         .route("/teams/{team_id}/avatar", get(serve_team_avatar))
         .route(
             "/teams/{team_id}/members",
@@ -303,9 +312,7 @@ async fn update_team(
 
     let mut args = Args::new();
     args.s(&name).opt_s(description.clone()).i(util::now_ms());
-    let mut sql = String::from(
-        "UPDATE teams SET name = ?, description = ?, updated_at = ?",
-    );
+    let mut sql = String::from("UPDATE teams SET name = ?, description = ?, updated_at = ?");
     if let Some(tz) = &timezone {
         sql.push_str(", timezone = ?");
         args.s(tz.clone());
@@ -611,8 +618,7 @@ async fn set_team_archived(
 ) -> Result<Json<Team>, AppError> {
     let mut conn = state.db.begin().await?;
     require_membership(&mut conn, team_id, &user.id).await?;
-    authorization::require_capability(&mut conn, team_id, &user.id, Capability::UpdateTeam)
-        .await?;
+    authorization::require_capability(&mut conn, team_id, &user.id, Capability::UpdateTeam).await?;
     let existing = find_team(&mut conn, team_id).await?;
     let mut args = Args::new();
     args.opt_i(if archived { Some(util::now_ms()) } else { None })
@@ -660,8 +666,8 @@ pub struct DeleteTeamRequest {
 ///
 /// Deletion order (single transaction; every step is team-scoped):
 /// 1. detach the `domain_events.causing_execution_id` cycle edge,
-/// 2. rule_action_results, automation_outbox, rule_executions,
-/// 3. domain_events, rule_versions, rules,
+/// 2. `rule_action_results`, `automation_outbox`, `rule_executions`,
+/// 3. `domain_events`, `rule_versions`, `rules`,
 /// 4. the team row — engine-level CASCADEs remove members, projects, labels,
 ///    tasks (with comments, notifications, dependencies, templates), and the
 ///    goal links (goals reference teams with ON DELETE CASCADE).
@@ -832,10 +838,18 @@ async fn serve_team_avatar(
 ) -> Result<(StatusCode, HeaderMap, Vec<u8>), AppError> {
     let mut conn = state.db.conn();
     require_membership(&mut conn, &team_id, &user.id).await?;
+    // MEDIUMTEXT on MySQL decodes as Blob through sqlx Any; CONVERT yields
+    // a wire VARCHAR (Text kind). Same rationale as users::find_avatar.
+    let sql = match conn.driver() {
+        crate::db::Driver::MySql => {
+            "SELECT CONVERT(avatar USING utf8mb4) AS avatar FROM teams WHERE id = ?"
+        }
+        _ => "SELECT avatar FROM teams WHERE id = ?",
+    };
     let mut args = Args::new();
     args.s(&team_id);
     let row = conn
-        .fetch_optional("SELECT avatar FROM teams WHERE id = ?", args)
+        .fetch_optional(sql, args)
         .await?
         .ok_or(AppError::NotFound("team not found"))?;
     let raw: Option<String> = row.try_get("avatar")?;

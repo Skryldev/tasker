@@ -111,13 +111,26 @@ test.describe.serial("Profile", () => {
     await expect(sessionList).toBeVisible();
     await expect(sessionList).toContainText("This device");
 
-    // Revoke every OTHER session (older runs may have left extras); the
-    // current device's button is disabled by construction.
-    while ((await sessionList.getByTestId("revoke-session-other").count()) > 0) {
-      await sessionList.getByTestId("revoke-session-other").first().click();
-      await expect(sessionList.getByTestId("revoke-session-other")).toHaveCount(
-        (await sessionList.getByTestId("revoke-session-other").count()) - 1,
+    // Revoke every OTHER session. The exact count is not known up front: the
+    // seed scripts log the admin in many times, so the list starts with
+    // dozens of sessions. Synchronize each revocation on its DELETE response
+    // and on the list refetch that invalidation triggers — a count() read
+    // between click and refetch observes a stale render, which is what made
+    // the previous while-loop's toHaveCount target race.
+    const others = sessionList.getByTestId("revoke-session-other");
+    for (;;) {
+      const remaining = await others.count();
+      if (remaining === 0) break;
+      const revoked = page.waitForResponse(
+        (r) => r.request().method() === "DELETE" && r.url().includes("/me/sessions/"),
       );
+      const refetched = page.waitForResponse(
+        (r) => r.request().method() === "GET" && r.url().endsWith("/me/sessions"),
+      );
+      await others.first().click();
+      await revoked;
+      await refetched;
+      await expect(others).toHaveCount(remaining - 1);
     }
 
     // This tab stays signed in; the revoked device discovers the loss on its

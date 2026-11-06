@@ -7,7 +7,7 @@
 //! with the lists they link to.
 
 use axum::extract::{Path, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::routing::{delete, get};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -184,29 +184,45 @@ async fn update_me(
         // Materialize a full object: unspecified events keep the default.
         let mut resolved = NotificationPrefs::default();
         if let Some(map) = prefs.as_object() {
-            if let Some(v) = map.get("task_assigned").and_then(|v| v.as_bool()) {
+            if let Some(v) = map
+                .get("task_assigned")
+                .and_then(serde_json::Value::as_bool)
+            {
                 resolved.task_assigned = v;
             }
-            if let Some(v) = map.get("comment_mention").and_then(|v| v.as_bool()) {
+            if let Some(v) = map
+                .get("comment_mention")
+                .and_then(serde_json::Value::as_bool)
+            {
                 resolved.comment_mention = v;
             }
-            if let Some(v) = map.get("task_submitted").and_then(|v| v.as_bool()) {
+            if let Some(v) = map
+                .get("task_submitted")
+                .and_then(serde_json::Value::as_bool)
+            {
                 resolved.task_submitted = v;
             }
-            if let Some(v) = map.get("task_accepted").and_then(|v| v.as_bool()) {
+            if let Some(v) = map
+                .get("task_accepted")
+                .and_then(serde_json::Value::as_bool)
+            {
                 resolved.task_accepted = v;
             }
-            if let Some(v) = map.get("task_rejected").and_then(|v| v.as_bool()) {
+            if let Some(v) = map
+                .get("task_rejected")
+                .and_then(serde_json::Value::as_bool)
+            {
                 resolved.task_rejected = v;
             }
-            if let Some(v) = map.get("task_status_changed").and_then(|v| v.as_bool()) {
+            if let Some(v) = map
+                .get("task_status_changed")
+                .and_then(serde_json::Value::as_bool)
+            {
                 resolved.task_status_changed = v;
             }
         }
-        prefs_json = Some(
-            serde_json::to_string(&resolved)
-                .map_err(|e| AppError::internal(e.to_string()))?,
-        );
+        prefs_json =
+            Some(serde_json::to_string(&resolved).map_err(|e| AppError::internal(e.to_string()))?);
     }
 
     if !field_errors.is_empty() {
@@ -254,17 +270,11 @@ pub async fn profile_response(
 }
 
 /// Stored preferences for a user, with defaults for unset rows/fields.
-pub async fn load_prefs(
-    conn: &mut Conn<'_>,
-    user_id: &str,
-) -> Result<NotificationPrefs, AppError> {
+pub async fn load_prefs(conn: &mut Conn<'_>, user_id: &str) -> Result<NotificationPrefs, AppError> {
     let mut args = Args::new();
     args.s(user_id);
     let row = conn
-        .fetch_optional(
-            "SELECT notification_prefs FROM users WHERE id = ?",
-            args,
-        )
+        .fetch_optional("SELECT notification_prefs FROM users WHERE id = ?", args)
         .await?;
     let raw: Option<String> = row
         .and_then(|r| r.try_get::<Option<String>, _>("notification_prefs").ok())
@@ -277,14 +287,14 @@ pub async fn load_prefs(
 
 /// Standard base64 encoding (no new crate: only used for already-validated
 /// avatar payloads). Shared with team settings.
+#[must_use]
 pub fn encode_avatar_base64(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
-        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let b0 = u32::from(chunk[0]);
+        let b1 = u32::from(chunk.get(1).copied().unwrap_or(0));
+        let b2 = u32::from(chunk.get(2).copied().unwrap_or(0));
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(TABLE[(n >> 18) as usize & 63] as char);
         out.push(TABLE[(n >> 12) as usize & 63] as char);
@@ -342,7 +352,9 @@ async fn my_summary(
     args.s(&user.id).s(&user.id);
     let rows = conn
         .fetch_all(
-            &format!("SELECT status, COUNT(*) AS n FROM tasks WHERE {where_clause} GROUP BY status"),
+            &format!(
+                "SELECT status, COUNT(*) AS n FROM tasks WHERE {where_clause} GROUP BY status"
+            ),
             args,
         )
         .await?;
@@ -543,8 +555,8 @@ async fn serve_avatar(
     let Some(raw) = raw else {
         return Err(AppError::NotFound("avatar not found"));
     };
-    let validated = avatar::validate_data_url(&raw)
-        .map_err(|_| AppError::NotFound("avatar not found"))?;
+    let validated =
+        avatar::validate_data_url(&raw).map_err(|_| AppError::NotFound("avatar not found"))?;
     let mut headers = HeaderMap::new();
     headers.insert(
         header::CONTENT_TYPE,

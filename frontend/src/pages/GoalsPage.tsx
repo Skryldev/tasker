@@ -27,7 +27,7 @@ import { EmptyState, ErrorState } from "@/components/app/EmptyState";
 import { useToast } from "@/components/ui/toast";
 import { useWorkspace } from "@/lib/workspace";
 import { cn } from "@/lib/utils";
-import { formatJalaliDate } from "@/lib/doran";
+import { formatJalaliDate } from "@/lib/jalali";
 
 const GOAL_STATUS_LABELS: Record<GoalStatus, string> = {
   draft: "Draft",

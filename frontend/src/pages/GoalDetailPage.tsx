@@ -38,7 +38,7 @@ import { EmptyState, ErrorState } from "@/components/app/EmptyState";
 import { useToast } from "@/components/ui/toast";
 import { useWorkspace } from "@/lib/workspace";
 import { cn, timeAgo } from "@/lib/utils";
-import { formatJalaliDate } from "@/lib/doran";
+import { formatJalaliDate } from "@/lib/jalali";
 import { GoalFormDialog, GoalStatusBadge, ProgressBar } from "@/pages/GoalsPage";
 
 type KrMetricType = "increase" | "decrease" | "boolean";

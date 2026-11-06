@@ -18,8 +18,7 @@ pub struct User {
     pub created_at: i64,
 }
 
-const USER_COLUMNS: &str =
-    "id, email, display_name, username, bio, timezone, created_at";
+const USER_COLUMNS: &str = "id, email, display_name, username, bio, timezone, created_at";
 
 /// Reduced user shape embedded in task/comment responses. Hover-card data
 /// (username, bio) is fetched separately via the batch user-info endpoint so
@@ -132,7 +131,10 @@ pub async fn find_by_id(conn: &mut Conn<'_>, id: &str) -> Result<Option<User>, A
     let mut args = Args::new();
     args.s(id);
     let row = conn
-        .fetch_optional(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = ?"), args)
+        .fetch_optional(
+            &format!("SELECT {USER_COLUMNS} FROM users WHERE id = ?"),
+            args,
+        )
         .await?;
     row.map(|r| row_to_user(&r)).transpose()
 }
@@ -140,12 +142,28 @@ pub async fn find_by_id(conn: &mut Conn<'_>, id: &str) -> Result<Option<User>, A
 /// The stored avatar data URL for a user, if any. Never serialized into
 /// JSON responses; served as image bytes by `GET /users/{user_id}/avatar`.
 pub async fn find_avatar(conn: &mut Conn<'_>, id: &str) -> Result<Option<String>, AppError> {
+    // MySQL stores the data URL as MEDIUMTEXT, which the wire protocol
+    // reports as a BLOB-family type that sqlx Any cannot decode as String
+    // (the same trap migration 0008 fixed for the MFA payload columns).
+    // CONVERT yields a VARCHAR on the wire (Text kind), decodable as String.
+    let sql = match conn.driver() {
+        crate::db::Driver::MySql => {
+            "SELECT CONVERT(avatar USING utf8mb4) AS avatar FROM users WHERE id = ?"
+        }
+        _ => "SELECT avatar FROM users WHERE id = ?",
+    };
     let mut args = Args::new();
     args.s(id);
-    let row = conn
-        .fetch_optional("SELECT avatar FROM users WHERE id = ?", args)
-        .await?;
-    Ok(row.and_then(|r| r.try_get::<Option<String>, _>("avatar").ok().flatten()))
+    let row = conn.fetch_optional(sql, args).await?;
+    // NULL maps to None; a *type* error propagates so storage defects cannot
+    // masquerade as a missing avatar (404).
+    let raw = match row {
+        Some(r) => r
+            .try_get::<Option<String>, _>("avatar")
+            .map_err(AppError::from)?,
+        None => None,
+    };
+    Ok(raw)
 }
 
 pub struct NewUser<'a> {

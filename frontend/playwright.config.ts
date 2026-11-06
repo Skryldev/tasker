@@ -7,7 +7,12 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   timeout: 60_000,
-  expect: { timeout: 10_000 },
+  expect: {
+    timeout: 10_000,
+    // Phase 10 visual baselines: 1% pixel tolerance, animations disabled so
+    // pulse skeletons and transitions cannot flake the comparison.
+    toHaveScreenshot: { animations: "disabled", maxDiffPixelRatio: 0.01 },
+  },
   fullyParallel: false,
   workers: 1,
   retries: 0,

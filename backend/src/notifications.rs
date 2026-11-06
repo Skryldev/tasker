@@ -45,6 +45,9 @@ pub const GATEABLE_EVENTS: [&str; 6] = [
 /// `true` — the pre-Phase-9 behavior — so provisioning needs no backfill.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+// Six per-event toggles are the product shape (docs/security.md's "per-event
+// booleans"); packing them into a bitmask would obscure the JSON contract.
+#[allow(clippy::struct_excessive_bools)]
 pub struct NotificationPrefs {
     pub task_assigned: bool,
     pub comment_mention: bool,
@@ -139,9 +142,7 @@ async fn prefs_for(
         return Ok(map);
     }
     let placeholders = vec!["?"; user_ids.len()].join(", ");
-    let sql = format!(
-        "SELECT id, notification_prefs FROM users WHERE id IN ({placeholders})"
-    );
+    let sql = format!("SELECT id, notification_prefs FROM users WHERE id IN ({placeholders})");
     let mut args = Args::new();
     for id in user_ids {
         args.s(id.clone());

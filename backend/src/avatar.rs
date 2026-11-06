@@ -95,9 +95,9 @@ fn sniff(bytes: &[u8]) -> Option<&'static str> {
 fn decode_base64(input: &str) -> Option<Vec<u8>> {
     fn value(c: u8) -> Option<u32> {
         match c {
-            b'A'..=b'Z' => Some((c - b'A') as u32),
-            b'a'..=b'z' => Some((c - b'a') as u32 + 26),
-            b'0'..=b'9' => Some((c - b'0') as u32 + 52),
+            b'A'..=b'Z' => Some(u32::from(c - b'A')),
+            b'a'..=b'z' => Some(u32::from(c - b'a') + 26),
+            b'0'..=b'9' => Some(u32::from(c - b'0') + 52),
             b'+' => Some(62),
             b'/' => Some(63),
             _ => None,
@@ -126,7 +126,7 @@ fn decode_base64(input: &str) -> Option<Vec<u8>> {
             out.push(((acc >> bits) & 0xFF) as u8);
         }
     }
-    if padding > 2 || input.len() % 4 != 0 {
+    if padding > 2 || !input.len().is_multiple_of(4) {
         return None;
     }
     Some(out)
@@ -183,8 +183,8 @@ fn jpeg_dimensions(b: &[u8]) -> Option<(u32, u32)> {
             if i + 4 + 5 > b.len() {
                 return None;
             }
-            let height = u16::from_be_bytes(b[i + 5..i + 7].try_into().ok()?) as u32;
-            let width = u16::from_be_bytes(b[i + 7..i + 9].try_into().ok()?) as u32;
+            let height = u32::from(u16::from_be_bytes(b[i + 5..i + 7].try_into().ok()?));
+            let width = u32::from(u16::from_be_bytes(b[i + 7..i + 9].try_into().ok()?));
             return Some((width, height));
         }
         i += 2 + len;
@@ -200,11 +200,11 @@ fn webp_dimensions(b: &[u8]) -> Option<(u32, u32)> {
     match chunk {
         b"VP8 " => {
             // [3B frame tag][3B sync 0x9D 0x01 0x2A][2B width][2B height]
-            if b.len() < 30 || &b[23..26] != [0x9D, 0x01, 0x2A] {
+            if b.len() < 30 || b[23..26] != [0x9D, 0x01, 0x2A] {
                 return None;
             }
-            let width = u16::from_le_bytes(b[26..28].try_into().ok()?) as u32 & 0x3FFF;
-            let height = u16::from_le_bytes(b[28..30].try_into().ok()?) as u32 & 0x3FFF;
+            let width = u32::from(u16::from_le_bytes(b[26..28].try_into().ok()?)) & 0x3FFF;
+            let height = u32::from(u16::from_le_bytes(b[28..30].try_into().ok()?)) & 0x3FFF;
             Some((width + 1, height + 1))
         }
         b"VP8L" => {
@@ -279,7 +279,7 @@ mod tests {
         b.extend_from_slice(&5u32.to_le_bytes());
         b.push(0x2F); // signature byte
         // 14-bit width-1 then 14-bit height-1 packed LSB-first.
-        let n = (width - 1) as u32 | (((height - 1) as u32) << 14);
+        let n = u32::from(width - 1) | (u32::from(height - 1) << 14);
         b.extend_from_slice(&n.to_le_bytes());
         b
     }
@@ -308,9 +308,9 @@ mod tests {
         const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         let mut out = format!("data:{t};base64,");
         for chunk in bytes.chunks(3) {
-            let b0 = chunk[0] as u32;
-            let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
-            let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+            let b0 = u32::from(chunk[0]);
+            let b1 = u32::from(chunk.get(1).copied().unwrap_or(0));
+            let b2 = u32::from(chunk.get(2).copied().unwrap_or(0));
             let n = (b0 << 16) | (b1 << 8) | b2;
             out.push(TABLE[(n >> 18) as usize & 63] as char);
             out.push(TABLE[(n >> 12) as usize & 63] as char);
@@ -347,10 +347,12 @@ mod tests {
     fn rejects_non_square_images() {
         let raw = data_url("image/png", &png(256, 200));
         let err = validate_data_url(&raw).unwrap_err();
-        assert!(err.to_string().contains("square") || {
-            let msg = format!("{err:?}");
-            msg.contains("square")
-        });
+        assert!(
+            err.to_string().contains("square") || {
+                let msg = format!("{err:?}");
+                msg.contains("square")
+            }
+        );
     }
 
     #[test]

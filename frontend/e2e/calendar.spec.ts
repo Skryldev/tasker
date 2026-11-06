@@ -101,7 +101,13 @@ test.describe.serial("Phase 6 Persian calendar", () => {
 
   test("read-only date displays render the Persian calendar", async () => {
     // The task created above has due_date 2026-11-06 = ۱۴۰۵/۰۸/۱۵.
+    // Phase 10 §5.1: the list shows a relative due label; the absolute
+    // Jalali date is the hover title, and the detail panel renders it inline.
     await page.goto(`/projects/${projectId}`);
-    await expect(page.getByTestId("task-table")).toContainText("۱۴۰۵/۰۸/۱۵");
+    await expect(
+      page.getByTestId("task-table").getByTitle("Due ۱۴۰۵/۰۸/۱۵"),
+    ).toBeVisible();
+    await page.getByTestId("task-table").getByRole("row").nth(1).click();
+    await expect(page.getByTestId("task-detail")).toContainText("۱۴۰۵/۰۸/۱۵");
   });
 });

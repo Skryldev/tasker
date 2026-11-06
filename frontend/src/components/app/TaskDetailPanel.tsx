@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { CalendarDays, History, MessageSquare, Pencil, ListTree, Trash2, X } from "lucide-react";
 import { api, type Task } from "@/api/client";
 import {
@@ -15,14 +15,16 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { StatusBadge, PriorityBadge } from "./TaskBadges";
-import { TaskDialog } from "./TaskDialog";
+// Phase 10: the edit dialog pulls the Doran calendar stack; it is loaded on
+// first open so the eager task views do not carry it.
+const TaskDialog = lazy(() => import("./TaskDialog").then((m) => ({ default: m.TaskDialog })));
 import { WorkflowActions } from "./WorkflowActions";
 import { CommentBody, CommentComposer } from "./Mentions";
 import { DependenciesPanel } from "./DependenciesPanel";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { Timestamp } from "@/components/app/Timestamp";
-import { formatJalaliDate } from "@/lib/doran";
+import { formatJalaliDate } from "@/lib/jalali";
 import { useQueryClient } from "@tanstack/react-query";
 
 const EVENT_LABELS: Record<string, string> = {
@@ -122,9 +124,9 @@ export function TaskDetailPanel({
 
   return (
     <div className="flex h-full flex-col" data-testid="task-detail">
-      <div className="flex items-center justify-between gap-2 border-b p-4">
-        <p className="text-2xs uppercase tracking-wide text-muted-foreground">Task detail</p>
-        <div className="flex items-center gap-1">
+      <div className="flex items-start justify-between gap-2 border-b p-4">
+        <h2 className="min-w-0 text-lg font-semibold leading-snug">{task.title}</h2>
+        <div className="flex shrink-0 items-center gap-1">
           <Button variant="ghost" size="icon-sm" onClick={() => setEditOpen(true)} aria-label="Edit task" data-testid="edit-task">
             <Pencil />
           </Button>
@@ -144,19 +146,11 @@ export function TaskDetailPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin p-4">
-        <div className="mb-2">
-          <WorkflowActions task={task} />
-        </div>
-        <h2 className="text-base font-semibold leading-snug">{task.title}</h2>
-        {task.description ? (
-          <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{task.description}</p>
-        ) : null}
-
-        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
           <StatusBadge status={task.status} />
           <PriorityBadge priority={task.priority} />
-          <span className="inline-flex items-center gap-1">
-            <CalendarDays className="h-3.5 w-3.5" /> Due {formatJalaliDate(task.due_date)}
+          <span className="inline-flex items-center gap-1" title={`Due ${formatJalaliDate(task.due_date)}`}>
+            <CalendarDays className="h-3.5 w-3.5" /> {formatJalaliDate(task.due_date)}
           </span>
           {task.assignee ? (
             <span className="inline-flex items-center gap-1.5">
@@ -182,6 +176,10 @@ export function TaskDetailPanel({
             </span>
           ) : null}
         </div>
+
+        {task.description ? (
+          <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">{task.description}</p>
+        ) : null}
 
         {task.resolution ? (
           <div
@@ -267,7 +265,7 @@ export function TaskDetailPanel({
               pending={createComment.isPending}
             />
           </form>
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col">
             {comments.isLoading ? (
               <>
                 <Skeleton className="h-14 w-full" />
@@ -275,14 +273,14 @@ export function TaskDetailPanel({
               </>
             ) : (
               comments.data?.items.map((comment) => (
-                <article key={comment.id} className="rounded-md border p-3">
+                <article key={comment.id} className="border-b py-3 first:pt-0 last:border-0">
                   <header className="flex items-center gap-2 text-xs">
                     <Avatar
                       name={comment.author.display_name}
-                      size="xs"
+                      size="sm"
                       title={hoverTitle(comment.author.id, comment.author.display_name)}
                     />
-                    <span className="font-medium">{comment.author.display_name}</span>
+                    <span className="text-[13px] font-semibold">{comment.author.display_name}</span>
                     <span className="text-muted-foreground"><Timestamp value={comment.created_at} /></span>
                     {comment.created_at !== comment.updated_at ? (
                       <span className="text-muted-foreground">(edited)</span>
@@ -355,9 +353,10 @@ export function TaskDetailPanel({
           {activity.isLoading ? (
             <Skeleton className="h-20 w-full" />
           ) : (
-            <ol className="flex flex-col gap-2.5">
+            <ol className="flex flex-col gap-2.5 border-l pl-3">
               {activity.data?.items.map((event) => (
-                <li key={event.id} className="flex items-start gap-2.5 text-xs">
+                <li key={event.id} className="relative flex items-start gap-2.5 text-xs">
+                  <span className="absolute -left-[17px] top-2 h-1.5 w-1.5 rounded-full bg-border" aria-hidden />
                   {event.actor ? (
                     <Avatar
                       name={event.actor.display_name}
@@ -389,6 +388,11 @@ export function TaskDetailPanel({
         </section>
       </div>
 
+      {/* Workflow transitions stay visible without scrolling (§5.2). */}
+      <div className="shrink-0 border-t bg-card p-3">
+        <WorkflowActions task={task} />
+      </div>
+
       <ConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
@@ -400,15 +404,17 @@ export function TaskDetailPanel({
       />
 
       {editOpen ? (
-        <TaskDialogResolver
-          open={editOpen}
-          onOpenChange={setEditOpen}
-          taskId={task.id}
-          onSaved={async () => {
-            const fresh = await api.getTask(task.id);
-            void qc.setQueryData(["task", task.id], fresh);
-          }}
-        />
+        <Suspense fallback={null}>
+          <TaskDialogResolver
+            open={editOpen}
+            onOpenChange={setEditOpen}
+            taskId={task.id}
+            onSaved={async () => {
+              const fresh = await api.getTask(task.id);
+              void qc.setQueryData(["task", task.id], fresh);
+            }}
+          />
+        </Suspense>
       ) : null}
     </div>
   );

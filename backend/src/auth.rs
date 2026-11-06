@@ -287,7 +287,7 @@ impl From<User> for UserResponse {
             timezone: u.timezone,
             created_at: u.created_at,
             mfa_enabled: false,
-            notification_prefs: Default::default(),
+            notification_prefs: crate::notifications::NotificationPrefs::default(),
         }
     }
 }
@@ -424,7 +424,9 @@ async fn me(
         .await?
         .ok_or(AppError::Unauthenticated)?;
     let mfa_enabled = crate::mfa::is_enabled(&mut conn, &user.id).await?;
-    Ok(Json(UserResponse::for_user(&mut conn, full, mfa_enabled).await?))
+    Ok(Json(
+        UserResponse::for_user(&mut conn, full, mfa_enabled).await?,
+    ))
 }
 
 #[derive(Deserialize)]

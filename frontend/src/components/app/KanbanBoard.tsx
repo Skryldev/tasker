@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { PriorityBadge } from "./TaskBadges";
-import { cn, STATUS_LABELS, type TaskStatus } from "@/lib/utils";
+import { cn, PRIORITY_LABELS, STATUS_LABELS, type TaskStatus } from "@/lib/utils";
 
 function statusToClass(status: string): string {
   switch (status) {
@@ -62,20 +62,30 @@ const TaskCard = memo(function TaskCard({
       role="button"
       tabIndex={0}
       aria-roledescription="Draggable task"
-      aria-label={`Task: ${task.title}`}
+      // Label in Name (WCAG 2.5.3): the accessible name must contain the
+      // card's full visible text (title, priority label, unassigned marker)
+      // as a continuous string.
+      aria-label={
+        task.assignee
+          ? `${task.title} ${PRIORITY_LABELS[task.priority] ?? task.priority} priority`
+          : `${task.title} ${PRIORITY_LABELS[task.priority] ?? task.priority} priority unassigned`
+      }
       onKeyDown={(e) => {
         if (overlay) return;
         if (e.key === "Enter") onOpen?.(task);
       }}
       onClick={() => onOpen?.(task)}
       className={cn(
-        "cursor-grab rounded-lg border bg-card p-3 shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        overlay && "rotate-1 shadow-lg",
+        "cursor-grab rounded-lg border bg-card p-3 shadow-sm transition-[box-shadow,transform] duration-150 ease-out hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        overlay && "scale-[1.02] shadow-lg",
         isDragging && "opacity-40",
       )}
       data-testid={`kanban-card-${task.id}`}
     >
-      <p className="text-sm font-medium leading-snug">{task.title}</p>
+      <p className="line-clamp-2 text-sm font-medium leading-snug">{task.title}</p>
+      {/* Whitespace between the visible spans so textContent matches the
+          accessible name (Label-in-Name substring check). Renders as nothing. */}
+      {" "}
       <div className="mt-2 flex items-center justify-between gap-2">
         <PriorityBadge priority={task.priority} />
         {task.assignee ? (

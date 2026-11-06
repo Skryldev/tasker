@@ -29,16 +29,20 @@ jobs:
           workspaces: backend
       - name: cargo fmt --check
         run: |
-          if ! cargo fmt --check; then
-            cargo fmt --diff > /tmp/fmt-diff.txt || true
-            jq -n --arg title "fmt diff (run ${{ github.run_id }})" \
-                  --rawfile body /tmp/fmt-diff.txt \
-                  '{title: $title, body: $body}' > /tmp/fmt-payload.json
-            curl -sf -X POST \
-              -H "Authorization: Bearer ${{ github.token }}" \
-              -H 'Accept: application/vnd.github+json' \
-              https://api.github.com/repos/Skryldev/tasker/issues \
-              -d @/tmp/fmt-payload.json > /dev/null || true
+          # cargo fmt --check prints the rustfmt diff and exits nonzero;
+          # `cargo fmt --diff` is not a valid cargo-fmt invocation.
+          if ! cargo fmt --check > /tmp/fmt-diff.txt 2>&1; then
+            if [ -s /tmp/fmt-diff.txt ]; then
+              jq -n --arg title "fmt diff (run ${{ github.run_id }})" \
+                    --rawfile body /tmp/fmt-diff.txt \
+                    '{title: $title, body: $body}' > /tmp/fmt-payload.json
+              curl -sf -X POST \
+                -H "Authorization: Bearer ${{ github.token }}" \
+                -H 'Accept: application/vnd.github+json' \
+                https://api.github.com/repos/Skryldev/tasker/issues \
+                -d @/tmp/fmt-payload.json > /dev/null || true
+            fi
+            cat /tmp/fmt-diff.txt
             exit 1
           fi
       - run: cargo clippy --all-targets -- -D warnings
@@ -53,7 +57,11 @@ jobs:
             echo '### Test failures'
             grep -B2 -A10 'panicked at\|FAILED\|failures:' /tmp/test-out.txt | tail -120
           } >> "$GITHUB_STEP_SUMMARY" || true
-          tail -150 /tmp/test-out.txt > /tmp/fail-tail.txt || true
+          if [ -f /tmp/test-out.txt ]; then
+            tail -150 /tmp/test-out.txt > /tmp/fail-tail.txt
+          else
+            echo "(cargo test did not run: fmt or clippy failed earlier)" > /tmp/fail-tail.txt
+          fi
       - name: cargo test
         run: |
           set -o pipefail
@@ -65,7 +73,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          tail -150 /tmp/test-out.txt > /tmp/fail-tail.txt || true
+          if [ -f /tmp/test-out.txt ]; then
+            tail -150 /tmp/test-out.txt > /tmp/fail-tail.txt
+          else
+            echo "(cargo test did not run: fmt or clippy failed earlier)" > /tmp/fail-tail.txt
+          fi
           jq -n --arg title "CI test failure (backend, run $RUN_ID)" \
                 --rawfile body /tmp/fail-tail.txt \
                 '{title: $title, body: $body}' > /tmp/payload.json
@@ -158,7 +170,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          tail -150 /tmp/it-out.txt > /tmp/it-fail-tail.txt || true
+          if [ -f /tmp/it-out.txt ]; then
+            tail -150 /tmp/it-out.txt > /tmp/it-fail-tail.txt
+          else
+            echo "(integration test output unavailable)" > /tmp/it-fail-tail.txt
+          fi
           jq -n --arg title "CI test failure (integration, run $RUN_ID)" \
                 --rawfile body /tmp/it-fail-tail.txt \
                 '{title: $title, body: $body}' > /tmp/payload.json
