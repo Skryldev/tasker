@@ -22,8 +22,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [params, setParams] = useSearchParams();
   const requested = params.get("team") ?? undefined;
 
-  // Default to the first team once loaded; keep the URL shareable.
+  // Default to the first team once loaded; keep the URL shareable. Skipped
+  // on the create-team page: there is no active workspace there, and
+  // defaulting the param would leak the previous team into the new team's
+  // follow-up navigation.
   useEffect(() => {
+    if (window.location.pathname === "/teams/new") return;
     if (!requested && teams.data) {
       const first = teams.data.items[0];
       if (first) {

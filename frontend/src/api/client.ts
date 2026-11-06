@@ -36,6 +36,9 @@ export type MyWorkSummary = components["schemas"]["MyWorkSummary"];
 export type SessionInfo = components["schemas"]["SessionInfo"];
 export type UserInfo = components["schemas"]["UserInfo"];
 export type TeamGuest = components["schemas"]["TeamGuest"];
+export type CapacityResponse = components["schemas"]["CapacityResponse"];
+export type CapacityMember = components["schemas"]["CapacityMember"];
+export type TrashProject = components["schemas"]["TrashProject"];
 
 /** RFC 9457 problem details, as returned by every non-2xx response. */
 export interface Problem {
@@ -141,6 +144,7 @@ export const api = {
     timezone?: string | null;
     avatar?: string | null;
     notification_prefs?: Partial<NotificationPrefs>;
+    capacity_limit?: number;
   }): Promise<User> {
     return request("patch", "/me", { body }) as Promise<User>;
   },
@@ -278,6 +282,34 @@ export const api = {
   setProjectArchived(projectId: string, archived: boolean): Promise<Project> {
     const path = archived ? `/projects/${projectId}/archive` : `/projects/${projectId}/unarchive`;
     return request("post", path) as Promise<Project>;
+  },
+  deleteProject(projectId: string): Promise<void> {
+    return request("delete", `/projects/${projectId}`) as Promise<void>;
+  },
+  restoreProject(projectId: string): Promise<Project> {
+    return request("post", `/projects/${projectId}/restore`) as Promise<Project>;
+  },
+  purgeProject(
+    projectId: string,
+    confirmName: string,
+    currentPassword: string,
+  ): Promise<void> {
+    return request("delete", `/projects/${projectId}/purge`, {
+      body: { confirm_name: confirmName, current_password: currentPassword },
+    }) as Promise<void>;
+  },
+  projectTrash(teamId: string): Promise<{ items: TrashProject[] }> {
+    return request("get", `/teams/${teamId}/projects/trash`) as Promise<{
+      items: TrashProject[];
+    }>;
+  },
+  capacity(
+    teamId: string,
+    window: "week" | "month",
+  ): Promise<CapacityResponse> {
+    return request("get", `/teams/${teamId}/capacity`, {
+      query: { window },
+    }) as Promise<CapacityResponse>;
   },
 
   // tasks ---------------------------------------------------------------

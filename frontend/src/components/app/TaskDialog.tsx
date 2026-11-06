@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Task } from "@/api/client";
+import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -49,6 +50,7 @@ export function TaskDialog(props: TaskDialogProps) {
   const { open, onOpenChange, teamId, projectId, task, parentTaskId } = props;
   const { push } = useToast();
   const qc = useQueryClient();
+  const { user } = useAuth();
   const members = useMembers(teamId);
   const labels = useLabels(teamId);
   const { myRole } = useWorkspace();
@@ -270,7 +272,9 @@ export function TaskDialog(props: TaskDialogProps) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="creator">Me (creator)</SelectItem>
+                    <SelectItem value="creator" data-testid="reporter-you">
+                      {user ? `${user.display_name} (you)` : "Me (creator)"}
+                    </SelectItem>
                     {members.data?.items.map((m) => (
                       <SelectItem key={m.user.id} value={m.user.id}>
                         {m.user.display_name}

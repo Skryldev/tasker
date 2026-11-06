@@ -1,7 +1,7 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { KeyRound, Loader2, MonitorSmartphone } from "lucide-react";
+import { Check, KeyRound, Loader2, MonitorSmartphone } from "lucide-react";
 import {
   api,
   ApiError,
@@ -171,6 +171,7 @@ function WorkIdentitySection({ user }: { user: User }) {
   const [username, setUsername] = useState(user.username ?? "");
   const [bio, setBio] = useState(user.bio ?? "");
   const [timezone, setTimezone] = useState(user.timezone ?? "none");
+  const [capacity, setCapacity] = useState(String(user.capacity_limit ?? 10));
   const [localError, setLocalError] = useState<string | null>(null);
 
   const update = useUpdateProfile();
@@ -192,6 +193,7 @@ function WorkIdentitySection({ user }: { user: User }) {
         username: usernameTrimmed || null,
         bio: bio.trim() || null,
         timezone: timezone === "none" ? null : timezone,
+        capacity_limit: Number(capacity) || undefined,
       },
       {
         onSuccess: () => push("success", "Profile saved"),
@@ -360,6 +362,29 @@ function WorkIdentitySection({ user }: { user: User }) {
           ) : null}
         </div>
 
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="capacity-limit">Capacity limit</Label>
+          <Input
+            id="capacity-limit"
+            type="number"
+            min={1}
+            max={100}
+            value={capacity}
+            onChange={(e) => setCapacity(e.target.value)}
+            className="max-w-[7rem]"
+            data-testid="capacity-input"
+          />
+          <p className="text-2xs text-muted-foreground">
+            How many tasks you can comfortably carry (1–100). Shown as your
+            utilization target in the team Capacity view.
+          </p>
+          {fieldError(update.error, "capacity_limit") ? (
+            <p className="text-2xs text-destructive" role="alert">
+              {fieldError(update.error, "capacity_limit")}
+            </p>
+          ) : null}
+        </div>
+
         {localError ? (
           <p className="text-2xs text-destructive" role="alert">{localError}</p>
         ) : null}
@@ -385,32 +410,63 @@ function WorkIdentitySection({ user }: { user: User }) {
 function NotificationPrefsSection({ prefs }: { prefs: NotificationPrefs }) {
   const { push } = useToast();
   const update = useUpdateNotificationPrefs();
+  // Optimistic local state; the mutation is debounced (§6.4) so rapid
+  // toggling collapses into one request. On failure the override is dropped,
+  // which visually reverts the toggle to the server state.
+  const [overrides, setOverrides] = useState<Partial<Record<keyof NotificationPrefs, boolean>>>({});
+  const [savedFlash, setSavedFlash] = useState(false);
+  const timer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (timer.current) window.clearTimeout(timer.current);
+  }, []);
 
   const toggle = (key: keyof NotificationPrefs) => {
-    update.mutate(
-      { ...prefs, [key]: !prefs[key] },
-      {
-        onSuccess: (user) =>
-          push(
-            "success",
-            (user.notification_prefs ?? DEFAULT_PREFS)[key] ? "Notifications on" : "Notifications off",
-            PREF_EVENTS.find((e) => e.key === key)?.label,
-          ),
-        onError: (error) =>
-          push(
-            "error",
-            "Could not save the preference",
-            error instanceof ApiError ? error.message : undefined,
-          ),
-      },
-    );
+    const current = overrides[key] ?? prefs[key];
+    const next = !current;
+    setOverrides((o) => ({ ...o, [key]: next }));
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      update.mutate(
+        { ...prefs, ...overrides, [key]: next },
+        {
+          onSuccess: () => {
+            setOverrides({});
+            setSavedFlash(true);
+            window.setTimeout(() => setSavedFlash(false), 1500);
+          },
+          onError: (error) => {
+            setOverrides((o) => {
+              const reverted = { ...o };
+              delete reverted[key];
+              return reverted;
+            });
+            push(
+              "error",
+              "Could not save the preference",
+              error instanceof ApiError ? error.message : undefined,
+            );
+          },
+        },
+      );
+    }, 300);
   };
+
+  const resolved = (key: keyof NotificationPrefs) => overrides[key] ?? prefs[key];
 
   return (
     <section aria-label="Notification preferences">
       <h2 className="mb-1 text-sm font-semibold">Notification preferences</h2>
       <p className="mb-3 text-xs text-muted-foreground">
         In-app notifications only. All events are on by default.
+      </p>
+      <p
+        className="mb-2 flex items-center gap-1 text-2xs text-success transition-opacity duration-150"
+        data-testid="prefs-saved"
+        style={{ opacity: savedFlash ? 1 : 0 }}
+        aria-live="polite"
+      >
+        <Check className="h-3 w-3" aria-hidden /> Saved
       </p>
       <ul className="max-w-md overflow-hidden rounded-lg border" data-testid="notification-prefs">
         {PREF_EVENTS.map(({ key, label, hint }) => (
@@ -422,18 +478,18 @@ function NotificationPrefsSection({ prefs }: { prefs: NotificationPrefs }) {
             <button
               type="button"
               role="switch"
-              aria-checked={prefs[key]}
+              aria-checked={resolved(key)}
               aria-label={label}
               disabled={update.isPending}
               onClick={() => toggle(key)}
               data-testid={`pref-${key.replaceAll("_", "-")}`}
               className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-                prefs[key] ? "bg-primary" : "bg-input"
+                resolved(key) ? "bg-primary" : "bg-input"
               }`}
             >
               <span
                 className={`absolute top-0.5 h-4 w-4 rounded-full bg-background shadow transition-all ${
-                  prefs[key] ? "left-[18px]" : "left-0.5"
+                  resolved(key) ? "left-[18px]" : "left-0.5"
                 }`}
               />
             </button>

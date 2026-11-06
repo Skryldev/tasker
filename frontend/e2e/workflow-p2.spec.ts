@@ -38,8 +38,13 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
     await page.getByText("Create team…").click();
     await page.getByLabel("Name").fill("P2 Team");
     await page.getByTestId("create-team-submit").click();
-    await page.waitForURL(/\?team=/);
-    teamId = new URL(await page.url()).searchParams.get("team") ?? "";
+    // Resolve by name via the API: the URL's team param can be defaulted by
+    // the workspace and is not race-proof here.
+    await expect(page.getByTestId("team-switcher")).toContainText("P2 Team");
+    const created = await page.request.get("/api/v1/teams");
+    teamId = ((await created.json()).items as { id: string; name: string }[]).find(
+      (t) => t.name === "P2 Team",
+    )!.id;
 
     await page.goto(`/teams/${teamId}/settings?team=${teamId}`);
     await page.getByTestId("add-member").click();
@@ -135,8 +140,10 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
     await expect(page.getByTestId("submit-task")).toBeVisible();
     await page.getByTestId("submit-task").click();
     await expect(page.getByTestId("task-detail")).toContainText("In Review");
-    // Then the reporter accepts: the task closes.
+    // Then the reporter accepts via the confirmation dialog (Phase 10.5
+    // status control shows consequences before closing).
     await page.getByTestId("accept-task").click();
+    await page.getByTestId("confirm-accept").click();
     await expect(page.getByTestId("resolution-banner")).toContainText("Accepted");
   });
 
@@ -144,7 +151,7 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
     // Closed is terminal, so the rejection path uses a fresh task: the admin
     // creates it with the member as assignee (reporter = admin).
     const members = await (await page.request.get(`/api/v1/teams/${teamId}/members`)).json();
-    const memberId = members.items.find((m) => m.role === "member").user.id;
+    const memberId = members.items.find((m) => m.user.email === MEMBER.email).user.id;
     const created = await (
       await page.request.post(`/api/v1/projects/${projectId}/tasks`, {
         data: { title: "Reject flow task", assignee_id: memberId },

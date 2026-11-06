@@ -34,7 +34,10 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
-use crate::error::FieldError;
+use crate::db::{Args, Conn};
+use crate::error::{AppError, FieldError};
+use crate::util;
+use sqlx::Row;
 
 use super::RuleError;
 use super::limits;
@@ -385,6 +388,117 @@ fn single(key: &str, value: Value) -> Map<String, Value> {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Automation Execution Principal (Task 4)
+// ---------------------------------------------------------------------------
+
+/// The fixed, stable database identity for automation effects. Comments and
+/// notifications written by the Rules Engine are attributed to this user row.
+/// Deliberately chosen outside the `UUIDv7` generator's space so it can never
+/// collide with an application-generated id.
+pub const AUTOMATION_PRINCIPAL_ID: &str = "00000000-0000-0000-0000-000000000001";
+
+/// Reserved identity email. Rejected by `util::validate_email` for every
+/// registration/provisioning path, so no real account can ever hold it.
+pub const AUTOMATION_PRINCIPAL_EMAIL: &str = "automation@tasker.local";
+
+/// Deliberately invalid PHC string: `argon2::PasswordHash::new` fails on it,
+/// so `password::verify` is false for every input and no interactive session
+/// can ever be created for the principal.
+pub const AUTOMATION_PASSWORD_HASH: &str = "!tasker-automation-no-login";
+
+/// Provision the Automation Principal idempotently. Keyed on the fixed id —
+/// never on the email — so an existing foreign account is never adopted. If
+/// some other row already owns the reserved email (only possible if it
+/// predates the reservation guard), provisioning fails closed with a
+/// diagnosable `principal_email_conflict` error.
+pub async fn provision_principal(conn: &mut Conn<'_>) -> Result<String, AppError> {
+    let mut args = Args::new();
+    args.s(AUTOMATION_PRINCIPAL_ID);
+    let existing = conn
+        .fetch_optional("SELECT id, email FROM users WHERE id = ?", args)
+        .await?;
+    if let Some(row) = existing {
+        let email: String = row.try_get("email")?;
+        if email != AUTOMATION_PRINCIPAL_EMAIL {
+            return Err(AppError::internal(format!(
+                "automation principal identity corrupted: id {AUTOMATION_PRINCIPAL_ID} holds email {email}"
+            )));
+        }
+        return Ok(AUTOMATION_PRINCIPAL_ID.to_string());
+    }
+    let now = util::now_ms();
+    let mut args = Args::new();
+    args.s(AUTOMATION_PRINCIPAL_ID)
+        .s(AUTOMATION_PRINCIPAL_EMAIL)
+        .s("Tasker Automation")
+        .s(AUTOMATION_PASSWORD_HASH)
+        .b(true)
+        .i(now)
+        .i(now);
+    if let Err(err) = conn
+        .execute(
+            "INSERT INTO users (id, email, display_name, password_hash, is_active, \
+             created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            args,
+        )
+        .await
+    {
+        // A foreign row holding the reserved email surfaces here as a unique
+        // violation; classify it instead of adopting or failing opaquely.
+        let mut args = Args::new();
+        args.s(AUTOMATION_PRINCIPAL_EMAIL);
+        let foreign = conn
+            .fetch_optional("SELECT id FROM users WHERE email = ?", args)
+            .await?;
+        if foreign.is_some() {
+            return Err(AppError::Conflict(
+                "principal_email_conflict: the reserved automation identity email is held by another account; \
+                 remove or rename that account before enabling automation"
+                    .into(),
+            ));
+        }
+        return Err(err);
+    }
+    Ok(AUTOMATION_PRINCIPAL_ID.to_string())
+}
+
+/// Re-validate a stored action payload at execution time and check it matches
+/// the intent's declared action type. A payload that no longer parses, or
+/// whose parsed type disagrees with the outbox row, is corruption: fail loud.
+pub(crate) fn validate_stored_action(
+    action_type: &str,
+    payload: &str,
+) -> Result<ActionDef, AppError> {
+    let mut actions = ActionDef::list_from_json_str(&format!("[{payload}]"))
+        .map_err(|e| AppError::internal(format!("stored action payload failed validation: {e}")))?;
+    if actions.len() != 1 {
+        return Err(AppError::internal(
+            "stored action payload must decode to exactly one action",
+        ));
+    }
+    let action = actions.remove(0);
+    let parsed_type = match &action {
+        ActionDef::AddComment { .. } => "add_comment",
+        ActionDef::SendNotification { .. } => "send_notification",
+        ActionDef::SendMessage { .. } => "send_message",
+    };
+    if parsed_type != action_type {
+        return Err(AppError::internal(format!(
+            "stored action payload type `{parsed_type}` disagrees with the intent's `{action_type}`"
+        )));
+    }
+    Ok(action)
+}
+
+/// Classify an action per its execution semantics (Master Prompt C4):
+/// database-local effects execute here; `send_message` stays an
+/// external-delivery intent for the Task 5 dispatcher and is never performed
+/// by this module.
+pub(crate) fn is_internal(action: &ActionDef) -> bool {
+    !matches!(action, ActionDef::SendMessage { .. })
+}
 
 #[cfg(test)]
 mod tests {

@@ -84,14 +84,14 @@ describe("login → MFA verification flow", () => {
         email: "mfa@tasker.local",
         display_name: "Mfa",
         created_at: 0,
-        mfa_enabled: true,
+        mfa_enabled: true, capacity_limit: 10,
       });
       return Promise.resolve({
         id: "u1",
         email: "mfa@tasker.local",
         display_name: "Mfa",
         created_at: 0,
-        mfa_enabled: true,
+        mfa_enabled: true, capacity_limit: 10,
       });
     });
     renderPage(<LoginPage />);
@@ -138,7 +138,7 @@ describe("login → MFA verification flow", () => {
       email: "plain@tasker.local",
       display_name: "Plain",
       created_at: 0,
-      mfa_enabled: false,
+      mfa_enabled: false, capacity_limit: 10,
     });
     // The post-login /me refetch keeps resolving signed-out so the form stays
     // mounted in the test router; what matters is that no MFA step appeared.
@@ -165,7 +165,7 @@ describe("MfaSettings (account page)", () => {
       email: "u@tasker.local",
       display_name: "U",
       created_at: 0,
-      mfa_enabled: false,
+      mfa_enabled: false, capacity_limit: 10,
     });
     vi.mocked(api.mfaSetup).mockResolvedValueOnce({
       uri: "otpauth://totp/Tasker:u%40tasker.local?issuer=Tasker&secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",

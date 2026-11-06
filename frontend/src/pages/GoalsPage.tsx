@@ -26,6 +26,7 @@ import {
 import { EmptyState, ErrorState } from "@/components/app/EmptyState";
 import { useToast } from "@/components/ui/toast";
 import { useWorkspace } from "@/lib/workspace";
+import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { formatJalaliDate } from "@/lib/jalali";
 
@@ -243,6 +244,8 @@ export function GoalFormDialog({
     enabled: open && Boolean(teamId),
   });
 
+  const { user } = useAuth();
+  const callerName = user?.display_name;
   const [title, setTitle] = useState(goal?.title ?? "");
   const [description, setDescription] = useState(goal?.description ?? "");
   const [ownerId, setOwnerId] = useState(goal?.owner?.id ?? "caller");
@@ -357,7 +360,9 @@ export function GoalFormDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="caller">Me</SelectItem>
+                <SelectItem value="caller" data-testid="goal-owner-you">
+                  {callerName ? `${callerName} (you)` : "Me"}
+                </SelectItem>
                 {(members.data?.items ?? []).map((m) => (
                   <SelectItem key={m.user.id} value={m.user.id}>
                     {m.user.display_name}

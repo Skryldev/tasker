@@ -278,3 +278,71 @@ rows fail loudly at `CREATE TABLE`.
 - PostgreSQL 17 / MySQL 8.4: same test is env-gated
   (`TASKER_TEST_PG_URL` / `TASKER_TEST_MYSQL_URL`) and runs in CI; not
   executed locally (no Docker; no local PG/MySQL services).
+
+---
+
+## Event capture & transactional evaluation (Task 3)
+
+`rules::engine::capture_and_evaluate` runs **inside the originating task
+mutation's transaction**, after the mutation and its activity/notification
+writes, before the caller commits:
+
+1. **Event persistence** — one `domain_events` row per supported change,
+   with previous/new trigger-relevant state built from server-side
+   authoritative values (never raw request fields) and `origin` hardcoded to
+   `user` by the handlers — the client has no origin field to forge.
+2. **Origin policy** — `should_evaluate` (Task 1) gates evaluation:
+   user-origin events only. Automation-origin events are still recorded for
+   audit (with `causing_execution_id` once automation exists).
+3. **Selection + version loading** — one indexed query joins `rules` with
+   `rule_versions` on `current_version`, filtered by trigger + `enabled` +
+   team. Rule edits are compare-and-swap in their own transaction, so the
+   selected version is transactionally consistent by construction; no N+1.
+4. **Evaluation** — the stored condition is re-parsed (bounded by the Task 1
+   caps) and evaluated with the pure evaluator. A stored definition that
+   fails validation is a data-integrity violation: the error propagates and
+   the whole transaction rolls back — corrupted rules never silently skip.
+5. **Execution records** — one row per matching rule, `condition_result =
+   'matched'`, `status = 'planned'`, a bounded `planned_actions` summary
+   (`[{"index":0,"action_type":"add_comment"}, ...]`), and the exact
+   `rule_version` cited. `UNIQUE(rule_id, event_id)` + conflict-clause
+   `DO NOTHING`/`ON DUPLICATE KEY UPDATE id=id` (dialect-branched) makes
+   re-processing the same logical event a no-op; `rows_affected == 0`
+   short-circuits the intents.
+6. **Action intents** — one `automation_outbox` row per configured action in
+   declaration order, `payload` = the canonical Task 1 action JSON
+   (provider-neutral for `send_message`; no URLs exist in the model),
+   `idempotency_key` = SHA-256 of `event_id|rule_id|version|action_index`,
+   `status='pending'`, `attempts=0` — eligible for the Task 5 worker.
+
+### Wired mutation paths
+
+| Path | Event | Notes |
+|---|---|---|
+| `create_task_inner` (assignee set) | `task_assigned` (initial) | no event without an assignee |
+| `update_task` (PATCH) | `task_priority_changed` / `task_assigned` | from the server-side diff; unassignment and no-ops emit nothing |
+| `apply_status_transition` (via `run_transition`) | `task_status_changed` | prev/new from the guarded compare-and-update |
+
+**Intentionally excluded** (no supported trigger): comment creation,
+`delete_task`, team-member-removal unassignment (`teams.rs` — an
+unassignment is not an assignment), due-date/reporter/label/title changes.
+Rejected or unauthorized mutations never reach capture (it runs after
+validation/authorization, before commit).
+
+### Atomicity
+
+Any failure — event insert, selection, version parse, execution insert,
+intent insert — propagates through `?` and drops the transaction: the task
+mutation, event, executions, and intents commit together or not at all.
+Failure injection in `rules_capture_atomicity_on_failure` (raw-inserted
+corrupt condition / oversized action list) proves 500 + full rollback of all
+four artifact classes, with a healthy-rule control.
+
+### Concurrency
+
+Duplicate protection is constraint-driven (`UNIQUE(rule_id, event_id)`,
+`UNIQUE(idempotency_key)`), not lock-based. Concurrent transitions of the
+same task are serialized by the existing status compare-and-update
+(ADR-0011); the loser 409s and emits nothing (tested). Rule tables are
+team-scoped and indexed; per-event evaluation is bounded by the rule count
+of one team and the Task 1 complexity caps.

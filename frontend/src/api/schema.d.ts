@@ -1068,7 +1068,34 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Soft-delete a project (Owner/Admin)
+         * @description Hides the project and its tasks from all users; recoverable within the 30-day retention window via POST /projects/{project_id}/restore. Managers archive, they do not delete. See docs/adr-0013-project-delete.md.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    project_id: components["parameters"]["ProjectId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No content. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
         options?: never;
         head?: never;
         /** Update project (Owner/Admin/Manager; archived projects are read-only) */
@@ -3547,6 +3574,281 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore a soft-deleted project (Owner/Admin) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    project_id: components["parameters"]["ProjectId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The restored project. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Project"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{project_id}/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Permanently delete a soft-deleted project (Owner only)
+         * @description Irreversible. Requires the typed project name and the caller's current password. Cascades tasks, comments, notifications, dependencies, templates, guest grants, and goal links; activity history is preserved.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    project_id: components["parameters"]["ProjectId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PurgeProjectRequest"];
+                };
+            };
+            responses: {
+                /** @description No content. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/projects/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List soft-deleted projects of the team (Owner/Admin) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted projects, most recent first. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TrashProjectList"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/capacity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Forward-looking team capacity (Manager+) */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Rolling window for due-soon counters. */
+                    window?: "week" | "month";
+                };
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Per-member capacity and utilization. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CapacityResponse"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/from-template/{template_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a task from a template (team members)
+         * @description Applies the template's defaults (title, description, priority, labels, subtasks) with per-field overrides, then creates the task and its subtasks. All task validation and workflow constraints apply unchanged.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    template_id: components["parameters"]["TemplateId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["FromTemplateRequest"];
+                };
+            };
+            responses: {
+                /** @description The created task with subtasks. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Task"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/position": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Reorder a task within its status column
+         * @description Pure manual ordering (project + status scoped). Authorization mirrors the generic task update. Concurrent reorders resolve last-write-wins via server-side midpoint computation.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    task_id: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Place the task immediately above this sibling in the same column. Omit to move to the bottom.
+                         */
+                        before_task_id?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description No content. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3583,6 +3885,11 @@ export interface components {
             /** @description IANA timezone used to display dates (e.g. Europe/Berlin). */
             timezone?: string | null;
             notification_prefs?: components["schemas"]["NotificationPrefs"];
+            /**
+             * @description Forward-looking capacity unit used by the Capacity view.
+             * @default 10
+             */
+            capacity_limit: number;
         };
         MfaRequired: {
             /** @description Always true in this response shape. */
@@ -3682,6 +3989,8 @@ export interface components {
             my_role?: "owner" | "admin" | "manager" | "member" | null;
             /** @description True when the caller reaches this project through a guest grant (read-only). */
             is_guest?: boolean;
+            /** @description Soft-delete timestamp (epoch ms). Present only on soft-deleted projects (trash view); live payloads omit the field. */
+            deleted_at?: number | null;
         };
         TaskCreate: {
             title: string;
@@ -3760,6 +4069,7 @@ export interface components {
             resolved_at?: number | null;
             /** Format: date */
             due_date?: string | null;
+            /** @description Manual ordering position within (project, status). Midpoint-computed. */
             position: number;
             /** @description epoch ms; set when the reporter accepts the task (status closed) */
             completed_at?: number | null;
@@ -3768,6 +4078,8 @@ export interface components {
             updated_at: number;
             /** @description Present in task detail responses (one nesting level). */
             subtasks?: components["schemas"]["Task"][];
+            /** @description Template provenance; absent for directly created tasks. */
+            from_template_id?: string | null;
         };
         PaginatedTasks: {
             items: components["schemas"]["Task"][];
@@ -3879,6 +4191,8 @@ export interface components {
             created_by?: components["schemas"]["UserBrief"] | null;
             created_at: number;
             updated_at: number;
+            /** @description Subtask titles applied when creating a task from this template. */
+            default_subtasks?: string[];
         };
         TemplateUpsert: {
             name: string;
@@ -4006,6 +4320,8 @@ export interface components {
             body: string;
             created_at: number;
             updated_at: number;
+            /** @description Parent comment id for replies (depth 2). Absent for top-level comments. */
+            parent_comment_id?: string | null;
         };
         Activity: {
             /** Format: uuid */
@@ -4046,6 +4362,8 @@ export interface components {
             /** @description null clears the avatar. */
             avatar?: string | null;
             notification_prefs?: components["schemas"]["NotificationPrefs"];
+            /** @description Clamped server-side; absent leaves the stored value untouched. */
+            capacity_limit?: number;
         };
         MyWorkSummary: {
             by_status: {
@@ -4102,6 +4420,75 @@ export interface components {
             confirm_name: string;
             current_password: string;
         };
+        PurgeProjectRequest: {
+            /** @description The exact project name. */
+            confirm_name: string;
+            current_password: string;
+        };
+        TrashProject: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            description?: string | null;
+            status: string;
+            deleted_at: number;
+            task_count: number;
+            /** @description deleted_at + 30 days; after this only purge remains. */
+            retention_expires_at: number;
+        };
+        TrashProjectList: {
+            items: components["schemas"]["TrashProject"][];
+        };
+        CapacityMember: {
+            /** Format: uuid */
+            user_id: string;
+            display_name: string;
+            avatar_url: string;
+            open_tasks: number;
+            overdue_tasks: number;
+            /** @description Open tasks due within the next 7 days; null unless window=week. */
+            due_this_week?: number | null;
+            /** @description Open tasks due within the next 30 days; null unless window=month. */
+            due_this_month?: number | null;
+            /** @description Open tasks due within the requested window. */
+            due_in_window?: number;
+            capacity_limit: number;
+            /** @description open_tasks / capacity_limit, clamped to 0-2. */
+            utilization: number;
+            /** @enum {string} */
+            status: "underutilized" | "balanced" | "overloaded";
+        };
+        CapacityResponse: {
+            /** @enum {integer} */
+            window_days: 7 | 30;
+            summary: {
+                total_open_tasks: number;
+                total_capacity: number;
+                utilization: number;
+            };
+            items: components["schemas"]["CapacityMember"][];
+        };
+        CreateCommentRequest: {
+            /** @description Parent comment id for a threaded reply; replying to a reply is a 422 (depth 2). */
+            parent_comment_id?: string;
+        };
+        UpsertTemplateRequest: {
+            default_subtasks?: string[];
+        };
+        /** @description Overrides applied on top of the template's defaults. Absent fields keep the template default. */
+        FromTemplateRequest: {
+            title?: string;
+            default_description?: string;
+            /** @enum {string} */
+            priority?: "low" | "medium" | "high" | "urgent";
+            /** Format: uuid */
+            assignee_id?: string;
+            /** Format: date */
+            due_date?: string;
+            subtasks?: string[];
+        };
+        /** @description The created task (Task shape) with from_template_id provenance. */
+        FromTemplateTask: components["schemas"]["Task"];
     };
     responses: {
         /** @description Authentication required. */

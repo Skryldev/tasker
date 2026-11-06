@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, FolderKanban, Plus } from "lucide-react";
+import { Archive, ArchiveRestore, FolderKanban, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { api, ApiError, type Project } from "@/api/client";
 import { useProjects } from "@/api/hooks";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input, Label, Textarea } from "@/components/ui/input";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/app/EmptyState";
 import { useWorkspace } from "@/lib/workspace";
@@ -23,7 +30,9 @@ import { timeAgo } from "@/lib/utils";
 export function ProjectsPage() {
   const { teamId } = useWorkspace();
   const [includeArchived, setIncludeArchived] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(
+    () => new URLSearchParams(window.location.search).get("new") === "project",
+  );
   const projects = useProjects(teamId, includeArchived);
 
   if (!teamId) {
@@ -125,17 +134,93 @@ function ProjectCard({ project }: { project: Project }) {
           <span>Updated {timeAgo(project.updated_at)}</span>
         </div>
       </Link>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-        aria-label={archived ? "Restore project" : "Archive project"}
-        title={archived ? "Restore project" : "Archive project"}
-        onClick={() => setArchived.mutate()}
-      >
-        {archived ? <ArchiveRestore /> : <Archive />}
-      </Button>
+      <div className="absolute right-2 top-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+        <ProjectCardMenu
+          project={project}
+          archived={archived}
+          onToggleArchive={() => setArchived.mutate()}
+        />
+      </div>
     </li>
+  );
+}
+
+/** Card overflow menu: archive (reversible) and delete (soft, undoable). */
+function ProjectCardMenu({
+  project,
+  archived,
+  onToggleArchive,
+}: {
+  project: Project;
+  archived: boolean;
+  onToggleArchive: () => void;
+}) {
+  const { push } = useToast();
+  const qc = useQueryClient();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  const remove = useMutation({
+    mutationFn: () => api.deleteProject(project.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["projects"] });
+      push("success", "Project deleted", "Undo is available for a few seconds.", {
+        action: {
+          label: "Undo",
+          onClick: () => {
+            api
+              .restoreProject(project.id)
+              .then(() => {
+                void qc.invalidateQueries({ queryKey: ["projects"] });
+                push("success", "Project restored");
+              })
+              .catch((error) =>
+                push("error", "Could not restore", error instanceof Error ? error.message : undefined),
+              );
+          },
+        },
+        duration: 5000,
+      });
+    },
+    onError: (error) =>
+      push("error", "Could not delete project", error instanceof Error ? error.message : undefined),
+  });
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Actions for ${project.name}`}
+            data-testid={`project-menu-${project.id}`}
+          >
+            <MoreHorizontal />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem onSelect={onToggleArchive}>
+            {archived ? <ArchiveRestore /> : <Archive />}
+            {archived ? "Restore project" : "Archive project"}
+          </DropdownMenuItem>
+          <DropdownMenuItem destructive onSelect={() => setDeleteOpen(true)} data-testid="delete-project">
+            <Trash2 /> Delete project
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete this project?"
+        description={`"${project.name}" and its tasks will be hidden from everyone. You can restore it within 30 days from the team's trash, or undo right now.`}
+        confirmLabel="Delete project"
+        pending={remove.isPending}
+        onConfirm={() => {
+          setDeleteOpen(false);
+          remove.mutate();
+        }}
+      />
+    </>
   );
 }
 

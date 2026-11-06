@@ -1,28 +1,57 @@
 import { lazy, Suspense, useMemo, useState } from "react";
-import { CalendarDays, History, MessageSquare, Pencil, ListTree, Trash2, X } from "lucide-react";
+import {
+  CalendarDays,
+  Check,
+  ChevronDown,
+  History,
+  Link2,
+  MessageSquare,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  ListTree,
+  Trash2,
+  X,
+} from "lucide-react";
 import { api, type Task } from "@/api/client";
+import { cn, PRIORITY_LABELS, PRIORITIES, type Priority } from "@/lib/utils";
 import {
   useActivity,
   useComments,
   useCreateComment,
   useDeleteComment,
   useDeleteTask,
+  useLabels,
+  useMembers,
   useUpdateComment,
+  useUpdateTask,
   useUserInfo,
 } from "@/api/hooks";
 import { Avatar, Separator } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { StatusBadge, PriorityBadge } from "./TaskBadges";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { StatusBadge } from "./TaskBadges";
 // Phase 10: the edit dialog pulls the Doran calendar stack; it is loaded on
 // first open so the eager task views do not carry it.
 const TaskDialog = lazy(() => import("./TaskDialog").then((m) => ({ default: m.TaskDialog })));
-import { WorkflowActions } from "./WorkflowActions";
+import { StatusControl } from "./StatusControl";
 import { CommentBody, CommentComposer } from "./Mentions";
 import { DependenciesPanel } from "./DependenciesPanel";
+// Lazy: the Doran picker stack (~56 kB raw) must stay out of the eager
+// bundle (Phase 10 gate). It loads on the first due-date inline edit.
+const DateField = lazy(() =>
+  import("@/components/ui/date-field").then((m) => ({ default: m.DateField })),
+);
 import { useToast } from "@/components/ui/toast";
-import { cn } from "@/lib/utils";
+
 import { Timestamp } from "@/components/app/Timestamp";
 import { formatJalaliDate } from "@/lib/jalali";
 import { useQueryClient } from "@tanstack/react-query";
@@ -67,6 +96,7 @@ export function TaskDetailPanel({
   const updateComment = useUpdateComment(taskId ?? "");
   const deleteComment = useDeleteComment(taskId ?? "");
   const deleteTask = useDeleteTask();
+  const updateTask = useUpdateTask();
 
   // Hover-card identities (username/bio) for every avatar in the panel,
   // resolved with one batched request.
@@ -122,64 +152,79 @@ export function TaskDetailPanel({
     });
   };
 
+  const copyLink = () => {
+    const url = `${window.location.origin}/tasks/${task.id}`;
+    void navigator.clipboard
+      ?.writeText(url)
+      .then(() => push("success", "Link copied"))
+      .catch(() => push("error", "Could not copy the link"));
+  };
+
   return (
     <div className="flex h-full flex-col" data-testid="task-detail">
-      <div className="flex items-start justify-between gap-2 border-b p-4">
-        <h2 className="min-w-0 text-lg font-semibold leading-snug">{task.title}</h2>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="icon-sm" onClick={() => setEditOpen(true)} aria-label="Edit task" data-testid="edit-task">
-            <Pencil />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => setDeleteOpen(true)}
-            aria-label="Delete task"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-          >
-            <Trash2 />
-          </Button>
-          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close detail panel">
-            <X />
-          </Button>
+      {/* Sticky header: identity, title, overflow actions. */}
+      <header className="shrink-0 border-b p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="font-mono text-2xs text-muted-foreground">
+              Task · {task.id.slice(0, 8)}
+            </p>
+            <h2 className="mt-0.5 line-clamp-3 text-lg font-semibold leading-snug">
+              {task.title}
+            </h2>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon-sm" aria-label="Task actions" data-testid="task-actions">
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem onSelect={() => setEditOpen(true)} data-testid="edit-task">
+                <Pencil /> Edit fields…
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={copyLink} data-testid="copy-link">
+                <Link2 /> Copy link
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                destructive
+                onSelect={() => setDeleteOpen(true)}
+                data-testid="delete-task"
+              >
+                <Trash2 /> Delete task
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-      </div>
+      </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin p-4">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
-          <StatusBadge status={task.status} />
-          <PriorityBadge priority={task.priority} />
-          <span className="inline-flex items-center gap-1" title={`Due ${formatJalaliDate(task.due_date)}`}>
-            <CalendarDays className="h-3.5 w-3.5" /> {formatJalaliDate(task.due_date)}
-          </span>
-          {task.assignee ? (
-            <span className="inline-flex items-center gap-1.5">
-              <Avatar
-                name={task.assignee.display_name}
-                size="xs"
-                title={hoverTitle(task.assignee.id, task.assignee.display_name)}
-              />
-              {task.assignee.display_name}
-            </span>
-          ) : (
-            <span>Unassigned</span>
-          )}
-          {task.reporter ? (
-            <span className="inline-flex items-center gap-1.5">
-              <span className="text-muted-foreground">Reporter:</span>
-              <Avatar
-                name={task.reporter.display_name}
-                size="xs"
-                title={hoverTitle(task.reporter.id, task.reporter.display_name)}
-              />
-              {task.reporter.display_name}
-            </span>
-          ) : null}
-        </div>
+        <MetadataBand task={task} onChange={(body, label) => updateTask.mutate(
+          { taskId: task.id, body },
+          {
+            onSuccess: (updated) => {
+              void qc.setQueryData(["task", updated.id], updated);
+              push("success", label);
+            },
+            onError: (error) =>
+              push("error", "Could not update task", error instanceof Error ? error.message : undefined),
+          },
+        )} />
 
-        {task.description ? (
-          <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">{task.description}</p>
-        ) : null}
+        <DescriptionBlock
+          value={task.description ?? ""}
+          onCommit={(description) => updateTask.mutate(
+            { taskId: task.id, body: { description } },
+            {
+              onSuccess: (updated) => {
+                void qc.setQueryData(["task", updated.id], updated);
+              },
+              onError: (error) =>
+                push("error", "Could not update task", error instanceof Error ? error.message : undefined),
+            },
+          )}
+        />
 
         {task.resolution ? (
           <div
@@ -209,20 +254,6 @@ export function TaskDetailPanel({
           </div>
         ) : null}
 
-        {task.labels.length > 0 ? (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {task.labels.map((l) => (
-              <span
-                key={l.id}
-                className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs"
-              >
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: l.color }} />
-                {l.name}
-              </span>
-            ))}
-          </div>
-        ) : null}
-
         {task.subtasks && task.subtasks.length > 0 ? (
           <section className="mt-5" aria-label="Subtasks">
             <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
@@ -235,7 +266,7 @@ export function TaskDetailPanel({
                   <span className={cn("truncate", sub.status === "closed" && "text-muted-foreground line-through")}>
                     {sub.title}
                   </span>
-                  <PriorityBadge priority={sub.priority} className="ml-auto" />
+                  <PriorityBadgeInline priority={sub.priority} className="ml-auto" />
                 </li>
               ))}
             </ul>
@@ -273,7 +304,7 @@ export function TaskDetailPanel({
               </>
             ) : (
               comments.data?.items.map((comment) => (
-                <article key={comment.id} className="border-b py-3 first:pt-0 last:border-0">
+                <article key={comment.id} className="group border-b py-3 first:pt-0 last:border-0">
                   <header className="flex items-center gap-2 text-xs">
                     <Avatar
                       name={comment.author.display_name}
@@ -285,7 +316,7 @@ export function TaskDetailPanel({
                     {comment.created_at !== comment.updated_at ? (
                       <span className="text-muted-foreground">(edited)</span>
                     ) : null}
-                    <span className="ml-auto flex gap-1">
+                    <span className="ml-auto flex gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
                       <button
                         type="button"
                         className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -324,6 +355,12 @@ export function TaskDetailPanel({
                       <textarea
                         value={editDraft}
                         onChange={(e) => setEditDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                            e.preventDefault();
+                            void e.currentTarget.form?.requestSubmit();
+                          }
+                        }}
                         rows={2}
                         aria-label="Edit comment"
                         className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -346,52 +383,13 @@ export function TaskDetailPanel({
 
         <Separator className="my-5" />
 
-        <section aria-label="Activity history">
-          <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
-            <History className="h-3.5 w-3.5" /> Activity
-          </h3>
-          {activity.isLoading ? (
-            <Skeleton className="h-20 w-full" />
-          ) : (
-            <ol className="flex flex-col gap-2.5 border-l pl-3">
-              {activity.data?.items.map((event) => (
-                <li key={event.id} className="relative flex items-start gap-2.5 text-xs">
-                  <span className="absolute -left-[17px] top-2 h-1.5 w-1.5 rounded-full bg-border" aria-hidden />
-                  {event.actor ? (
-                    <Avatar
-                      name={event.actor.display_name}
-                      size="xs"
-                      title={hoverTitle(event.actor.id, event.actor.display_name)}
-                    />
-                  ) : (
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[9px]">?</span>
-                  )}
-                  <div>
-                    <span className="font-medium">{event.actor?.display_name ?? "Someone"}</span>{" "}
-                    <span className="text-muted-foreground">
-                      {EVENT_LABELS[event.event] ?? event.event}
-                    </span>
-                    {event.field ? (
-                      <div className="text-2xs text-muted-foreground">
-                        {eventDetail(event.field, event.old_value, event.new_value)}
-                      </div>
-                    ) : null}
-                    <div className="text-2xs text-muted-foreground"><Timestamp value={event.created_at} /></div>
-                  </div>
-                </li>
-              ))}
-              {activity.data?.items.length === 0 ? (
-                <li className="text-xs text-muted-foreground">No activity yet.</li>
-              ) : null}
-            </ol>
-          )}
-        </section>
+        <ActivitySection activity={activity.data?.items ?? []} isLoading={activity.isLoading} hoverTitle={hoverTitle} />
       </div>
 
-      {/* Workflow transitions stay visible without scrolling (§5.2). */}
-      <div className="shrink-0 border-t bg-card p-3">
-        <WorkflowActions task={task} />
-      </div>
+      {/* Sticky footer: the status control is always within reach. */}
+      <footer className="shrink-0 border-t bg-card p-3" data-testid="task-detail-footer">
+        <StatusControl task={task} />
+      </footer>
 
       <ConfirmDialog
         open={deleteOpen}
@@ -446,5 +444,424 @@ function TaskDialogResolver({
       projectId={task.project_id}
       task={task}
     />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Metadata band: reporter / assignee / priority / due / labels, each a chip
+// with click-to-edit (dropdowns inline; no modal for simple fields).
+// ---------------------------------------------------------------------------
+
+function MetadataBand({
+  task,
+  onChange,
+}: {
+  task: Task;
+  onChange: (body: Record<string, unknown>, label: string) => void;
+}) {
+  const members = useMembers(task.team_id);
+  const labels = useLabels(task.team_id);
+  const [dueEditing, setDueEditing] = useState(false);
+  const [labelsOpen, setLabelsOpen] = useState(false);
+
+  const chipClass =
+    "inline-flex max-w-[14rem] items-center gap-1.5 rounded-full border px-2 py-1 text-2xs transition-colors duration-100 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+  const selectedLabelIds = new Set(task.labels.map((l) => l.id));
+  const toggleLabel = (id: string) => {
+    const next = task.labels.some((l) => l.id === id)
+      ? task.labels.filter((l) => l.id !== id).map((l) => l.id)
+      : [...task.labels.map((l) => l.id), id];
+    onChange({ label_ids: next }, "Labels updated");
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" data-testid="task-metadata">
+      {/* Reporter */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button type="button" className={chipClass} data-testid="chip-reporter">
+            {task.reporter ? (
+              <>
+                <Avatar name={task.reporter.display_name} size="xs" />
+                <span className="truncate">{task.reporter.display_name}</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">No reporter</span>
+            )}
+            <ChevronDown className="h-3 w-3 text-muted-foreground" aria-hidden />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-56">
+          {(members.data?.items ?? []).map((m) => (
+            <DropdownMenuItem
+              key={m.user.id}
+              onSelect={() => onChange({ reporter_id: m.user.id }, "Reporter updated")}
+              className="justify-between"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <Avatar name={m.user.display_name} size="xs" />
+                <span className="truncate">{m.user.display_name}</span>
+              </span>
+              {task.reporter?.id === m.user.id ? <Check className="h-3.5 w-3.5" /> : null}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* Assignee */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button type="button" className={chipClass} data-testid="chip-assignee">
+            {task.assignee ? (
+              <>
+                <Avatar name={task.assignee.display_name} size="xs" />
+                <span className="truncate">{task.assignee.display_name}</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">
+                <Plus className="mr-0.5 inline h-3 w-3" aria-hidden /> Assign
+              </span>
+            )}
+            <ChevronDown className="h-3 w-3 text-muted-foreground" aria-hidden />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-56">
+          <DropdownMenuItem
+            onSelect={() => onChange({ assignee_id: "" }, "Assignee cleared")}
+            data-testid="assignee-none"
+          >
+            <span className="text-muted-foreground">Unassigned</span>
+          </DropdownMenuItem>
+          {(members.data?.items ?? []).map((m) => (
+            <DropdownMenuItem
+              key={m.user.id}
+              onSelect={() => onChange({ assignee_id: m.user.id }, "Assignee updated")}
+              className="justify-between"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <Avatar name={m.user.display_name} size="xs" />
+                <span className="truncate">{m.user.display_name}</span>
+              </span>
+              {task.assignee?.id === m.user.id ? <Check className="h-3.5 w-3.5" /> : null}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* Priority */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button type="button" className={chipClass} data-testid="chip-priority">
+            <PriorityBars priority={task.priority} />
+            {PRIORITY_LABELS[task.priority as Priority] ?? task.priority}
+            <ChevronDown className="h-3 w-3 text-muted-foreground" aria-hidden />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          {PRIORITIES.map((p) => (
+            <DropdownMenuItem
+              key={p}
+              onSelect={() => onChange({ priority: p }, "Priority updated")}
+              className="justify-between"
+              data-testid={`priority-${p}`}
+            >
+              {PRIORITY_LABELS[p]}
+              {task.priority === p ? <Check className="h-3.5 w-3.5" /> : null}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* Due date: chip swaps to an inline Doran picker. */}
+      {dueEditing ? (
+        <span className="inline-flex items-center gap-1">
+          <Suspense fallback={<Skeleton className="h-8 w-36" />}>
+            <DateField
+              id="chip-due-edit"
+              value={task.due_date}
+              onChange={(value) => {
+                onChange({ due_date: value || null }, value ? "Due date updated" : "Due date cleared");
+                setDueEditing(false);
+              }}
+              ariaLabel="Edit due date"
+            />
+          </Suspense>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Cancel due date edit"
+            onClick={() => setDueEditing(false)}
+          >
+            <X />
+          </Button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          className={chipClass}
+          onClick={() => setDueEditing(true)}
+          title={task.due_date ? `Due ${formatJalaliDate(task.due_date)}` : "Set a due date"}
+          data-testid="chip-due"
+        >
+          <CalendarDays className="h-3 w-3 text-muted-foreground" aria-hidden />
+          {task.due_date ? formatJalaliDate(task.due_date) : <span className="text-muted-foreground">Due date</span>}
+        </button>
+      )}
+
+      {/* Labels: toggle membership from the team label set. */}
+      <DropdownMenu open={labelsOpen} onOpenChange={setLabelsOpen}>
+        <DropdownMenuTrigger asChild>
+          <button type="button" className={chipClass} data-testid="chip-labels">
+            {task.labels.length > 0 ? (
+              <>
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: task.labels[0]?.color }} aria-hidden />
+                <span className="truncate">
+                  {task.labels[0]?.name}
+                  {task.labels.length > 1 ? ` +${task.labels.length - 1}` : ""}
+                </span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">
+                <Plus className="mr-0.5 inline h-3 w-3" aria-hidden /> Label
+              </span>
+            )}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-52">
+          {(labels.data?.items ?? []).length === 0 ? (
+            <DropdownMenuItem disabled className="text-2xs">
+              No labels in this team yet
+            </DropdownMenuItem>
+          ) : null}
+          {(labels.data?.items ?? []).map((l) => (
+            <DropdownMenuItem key={l.id} onSelect={() => toggleLabel(l.id)} className="justify-between">
+              <span className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: l.color }} aria-hidden />
+                {l.name}
+              </span>
+              {selectedLabelIds.has(l.id) ? <Check className="h-3.5 w-3.5" /> : null}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+function PriorityBars({ priority }: { priority: string }) {
+  const level: Record<string, number> = { low: 1, medium: 2, high: 3, urgent: 3 };
+  const color: Record<string, string> = {
+    low: "text-priority-low",
+    medium: "text-priority-medium",
+    high: "text-priority-high",
+    urgent: "text-priority-urgent",
+  };
+  const filled = level[priority] ?? 1;
+  const tone = color[priority] ?? "text-muted-foreground";
+  return (
+    <span className="flex items-end gap-px" aria-hidden>
+      {[3, 5, 7].map((h, i) => (
+        <span
+          key={h}
+          style={{ height: `${h}px` }}
+          className={cn("w-0.5 rounded-sm", i < filled ? tone : "bg-border")}
+        />
+      ))}
+    </span>
+  );
+}
+
+function PriorityBadgeInline({ priority, className }: { priority: string; className?: string }) {
+  return (
+    <span className={cn("inline-flex items-center gap-1 text-2xs text-muted-foreground", className)}>
+      <PriorityBars priority={priority} />
+      {PRIORITY_LABELS[priority as Priority] ?? priority}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Description: click to edit inline; Cmd/Ctrl+Enter saves, Escape cancels.
+// ---------------------------------------------------------------------------
+
+function DescriptionBlock({
+  value,
+  onCommit,
+}: {
+  value: string;
+  onCommit: (description: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  const start = () => {
+    setDraft(value);
+    setEditing(true);
+  };
+  const commit = () => {
+    setEditing(false);
+    if (draft !== value) onCommit(draft);
+  };
+
+  if (editing) {
+    return (
+      <div className="mt-3" data-testid="description-editor">
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              commit();
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setEditing(false);
+            }
+          }}
+          onBlur={commit}
+          rows={5}
+          autoFocus
+          aria-label="Edit description"
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
+        <p className="mt-1 text-2xs text-muted-foreground">
+          Cmd/Ctrl+Enter to save · Escape to cancel
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="mt-3 rounded-md transition-colors duration-100 hover:bg-accent/40"
+      data-testid="task-description"
+    >
+      {value ? (
+        <button
+          type="button"
+          onClick={start}
+          className="w-full whitespace-pre-wrap px-2 py-1.5 text-left text-sm leading-relaxed text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="Edit description"
+        >
+          {value}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={start}
+          className="w-full px-2 py-1.5 text-left text-sm text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="description-empty"
+        >
+          Add a description…
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Activity: compact left-rule timeline, grouped by day, collapsed >10 events.
+// ---------------------------------------------------------------------------
+
+const ACTIVITY_COLLAPSE_AT = 10;
+
+function ActivitySection({
+  activity,
+  isLoading,
+  hoverTitle,
+}: {
+  activity: {
+    id: string;
+    created_at: number;
+    event: string;
+    field?: string | null;
+    old_value?: string | null;
+    new_value?: string | null;
+    actor?: { id: string; display_name: string } | null;
+  }[];
+  isLoading: boolean;
+  hoverTitle: (id: string | undefined, name: string) => string | undefined;
+}) {
+  const [showAll, setShowAll] = useState(false);
+
+  const groups = useMemo(() => {
+    const byDay = new Map<string, typeof activity>();
+    for (const event of activity) {
+      const day = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(
+        new Date(event.created_at),
+      );
+      const list = byDay.get(day) ?? [];
+      list.push(event);
+      byDay.set(day, list);
+    }
+    return [...byDay.entries()];
+  }, [activity]);
+
+  const collapsed = !showAll && activity.length > ACTIVITY_COLLAPSE_AT;
+
+  return (
+    <section aria-label="Activity history">
+      <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
+        <History className="h-3.5 w-3.5" /> Activity
+      </h3>
+      {isLoading ? (
+        <Skeleton className="h-20 w-full" />
+      ) : activity.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No activity yet.</p>
+      ) : (
+        <>
+          {(collapsed
+            ? groups.map(([day, events]) => [day, events.slice(0, ACTIVITY_COLLAPSE_AT)] as const)
+            : groups
+          ).map(([day, events]) => (
+            <div key={day} className="mb-3">
+              <p className="mb-1.5 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
+                {day}
+              </p>
+              <ol className="flex flex-col gap-2.5 border-l pl-3">
+                {events.map((event) => (
+                  <li key={event.id} className="relative flex items-start gap-2.5 text-xs">
+                    <span className="absolute -left-[17px] top-2 h-1.5 w-1.5 rounded-full bg-border" aria-hidden />
+                    {event.actor ? (
+                      <Avatar
+                        name={event.actor.display_name}
+                        size="xs"
+                        title={hoverTitle(event.actor.id, event.actor.display_name)}
+                      />
+                    ) : (
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[9px]">?</span>
+                    )}
+                    <div>
+                      <span className="font-medium">{event.actor?.display_name ?? "Someone"}</span>{" "}
+                      <span className="text-muted-foreground">
+                        {EVENT_LABELS[event.event] ?? event.event}
+                      </span>
+                      {event.field ? (
+                        <div className="text-2xs text-muted-foreground">
+                          {eventDetail(event.field, event.old_value, event.new_value)}
+                        </div>
+                      ) : null}
+                      <div className="text-2xs text-muted-foreground"><Timestamp value={event.created_at} /></div>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))}
+          {collapsed ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowAll(true)}
+              data-testid="activity-show-all"
+            >
+              Show all {activity.length} events
+            </Button>
+          ) : null}
+        </>
+      )}
+    </section>
   );
 }

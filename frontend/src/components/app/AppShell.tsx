@@ -1,9 +1,10 @@
-import { Suspense, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Check,
   ClipboardList,
   FolderKanban,
+  Gauge,
   ListTree,
   ListTodo,
   LogOut,
@@ -27,6 +28,7 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Avatar, Separator } from "@/components/ui/avatar";
 import { useTheme, THEMES } from "@/lib/theme";
+import { ShortcutsManager } from "@/components/app/shortcuts";
 import { useAuth, useLogout } from "@/lib/auth";
 import { WorkspaceProvider, useWorkspace } from "@/lib/workspace";
 import { roleLabel } from "@/lib/utils";
@@ -150,6 +152,13 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
               onNavigate={onNavigate}
             />
             <SidebarLink
+              to={`/teams/${teamId}/capacity`}
+              icon={<Gauge className="h-4 w-4" />}
+              label="Capacity"
+              matchPrefix={`/teams/${teamId}/capacity`}
+              onNavigate={onNavigate}
+            />
+            <SidebarLink
               to={`/teams/${teamId}/settings`}
               icon={<Settings className="h-4 w-4" />}
               label="Team Settings"
@@ -193,20 +202,41 @@ function MobileNav({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
 function ThemeSwitcher() {
   const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
+  // Hover preview: temporarily apply the hovered theme's tokens on <html>
+  // without touching provider state or localStorage. Closing the menu (or
+  // leaving an item) restores the committed theme.
+  const [preview, setPreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    document.documentElement.setAttribute(
+      "data-theme",
+      preview ?? theme,
+    );
+  }, [preview, theme]);
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) setPreview(null);
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" aria-label="Change theme" data-testid="theme-switcher">
           <Palette />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuLabel>Theme</DropdownMenuLabel>
+        <DropdownMenuLabel>Theme — hover to preview</DropdownMenuLabel>
         {THEMES.map((definition) => (
           <DropdownMenuItem
             key={definition.id}
             onSelect={() => setTheme(definition.id)}
+            onMouseEnter={() => setPreview(definition.id)}
+            onMouseLeave={() => setPreview(null)}
+            onFocus={() => setPreview(definition.id)}
+            onBlur={() => setPreview(null)}
             className="justify-between"
             data-testid={`theme-option-${definition.id}`}
           >
@@ -259,6 +289,7 @@ function Topbar() {
       </div>
       <div className="flex items-center gap-1.5">
         <NotificationBell />
+        <ShortcutsManager />
         <ThemeSwitcher />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

@@ -55,8 +55,10 @@ test.describe.serial("Tasker core workflow", () => {
     await page.getByLabel("Name").fill("E2E Team");
     await page.getByTestId("create-team-submit").click();
     await expect(page.getByTestId("team-switcher")).toContainText("E2E Team");
-    const url = new URL(page.url());
-    teamId = url.searchParams.get("team") ?? "";
+    const created = await page.request.get("/api/v1/teams");
+    teamId = ((await created.json()).items as { id: string; name: string }[]).find(
+      (t) => t.name === "E2E Team",
+    )!.id;
     expect(teamId).not.toBe("");
   });
 

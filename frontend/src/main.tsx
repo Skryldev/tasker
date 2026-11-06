@@ -36,6 +36,9 @@ const TaskPage = lazy(() => import("@/pages/TaskPage").then((m) => ({ default: m
 const WorkloadPage = lazy(() =>
   import("@/pages/WorkloadPage").then((m) => ({ default: m.WorkloadPage })),
 );
+const CapacityPage = lazy(() =>
+  import("@/pages/CapacityPage").then((m) => ({ default: m.CapacityPage })),
+);
 const GoalsPage = lazy(() => import("@/pages/GoalsPage").then((m) => ({ default: m.GoalsPage })));
 const GoalDetailPage = lazy(() =>
   import("@/pages/GoalDetailPage").then((m) => ({ default: m.GoalDetailPage })),
@@ -66,6 +69,7 @@ const router = createBrowserRouter([
       { path: "projects/:projectId", element: <ProjectPage /> },
       { path: "teams/new", element: <CreateTeamPage /> },
       { path: "teams/:teamId/workload", element: <WorkloadPage /> },
+      { path: "teams/:teamId/capacity", element: <CapacityPage /> },
       { path: "teams/:teamId/goals", element: <GoalsPage /> },
       { path: "goals/:goalId", element: <GoalDetailPage /> },
       { path: "teams/:teamId/settings", element: <TeamSettingsPage /> },

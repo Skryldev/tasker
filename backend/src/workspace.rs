@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -32,6 +32,7 @@ pub fn routes() -> Router<AppState> {
         )
         // Workload
         .route("/teams/{team_id}/workload", get(workload))
+        .route("/teams/{team_id}/capacity", get(capacity))
         // Templates
         .route(
             "/projects/{project_id}/templates",
@@ -42,6 +43,10 @@ pub fn routes() -> Router<AppState> {
             get(get_template)
                 .patch(update_template)
                 .delete(delete_template),
+        )
+        .route(
+            "/tasks/from-template/{template_id}",
+            post(create_task_from_template),
         )
         // Shared-with-me
         .route("/me/projects", get(my_projects))
@@ -584,6 +589,10 @@ pub struct TaskTemplate {
     pub default_description: Option<String>,
     pub default_priority: String,
     pub label_ids: Vec<String>,
+    /// Subtask titles applied when a task is created from this template
+    /// (Phase 11). Stored as a JSON array of strings.
+    #[serde(default)]
+    pub default_subtasks: Vec<String>,
     pub created_by: Option<UserBrief>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -602,6 +611,10 @@ fn row_to_template(row: &sqlx::any::AnyRow) -> Result<TaskTemplate, AppError> {
         default_title: row.try_get("default_title")?,
         default_description: row.try_get("default_description")?,
         default_priority: row.try_get("default_priority")?,
+        default_subtasks: row
+            .try_get::<Option<String>, _>("default_subtasks")?
+            .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+            .unwrap_or_default(),
         label_ids: Vec::new(),
         created_by: creator_email.map(|email| {
             let creator_id: Option<String> = row.try_get("created_by").unwrap_or(None);
@@ -635,6 +648,29 @@ async fn load_template_labels(
         .collect())
 }
 
+/// Validate a template's default subtask titles: at most 20, each 1-200
+/// characters after trimming; empty titles dropped.
+fn validate_subtasks(raw: &[String]) -> Result<Vec<String>, AppError> {
+    let mut out: Vec<String> = Vec::new();
+    for title in raw {
+        let title = title.trim();
+        if title.is_empty() {
+            continue;
+        }
+        if title.chars().count() > 200 {
+            return Err(AppError::validation(
+                "default_subtasks",
+                "subtask titles must be at most 200 characters",
+            ));
+        }
+        out.push(title.to_string());
+        if out.len() >= 20 {
+            break;
+        }
+    }
+    Ok(out)
+}
+
 async fn find_template(conn: &mut Conn<'_>, template_id: &str) -> Result<TaskTemplate, AppError> {
     let mut args = Args::new();
     args.s(template_id);
@@ -663,6 +699,9 @@ pub struct UpsertTemplateRequest {
     pub default_priority: Option<String>,
     #[serde(default)]
     pub label_ids: Vec<String>,
+    /// Subtask titles (Phase 11); bounded to 20, each 1-200 chars.
+    #[serde(default)]
+    pub default_subtasks: Vec<String>,
 }
 
 fn validate_template(
@@ -725,7 +764,10 @@ async fn team_of(conn: &mut Conn<'_>, project_id: &str) -> Result<String, AppErr
     let mut args = Args::new();
     args.s(project_id);
     let row = conn
-        .fetch_optional("SELECT team_id FROM projects WHERE id = ?", args)
+        .fetch_optional(
+            "SELECT team_id FROM projects WHERE id = ? AND deleted_at IS NULL",
+            args,
+        )
         .await?
         .ok_or(AppError::NotFound("project not found"))?;
     Ok(row.try_get("team_id")?)
@@ -927,4 +969,251 @@ async fn my_projects(
     let mut conn = state.db.conn();
     let projects = crate::projects::list_shared_projects(&mut conn, &user.id).await?;
     Ok(Json(json!({ "items": projects })))
+}
+
+// ---------------------------------------------------------------------------
+// Capacity (Phase 10.5): forward-looking load per member.
+//
+// Distinct from Workload (a snapshot of the current distribution): capacity
+// answers "how much more can each member take on in the coming window" by
+// comparing open load against the member's configurable capacity limit.
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct CapacityQuery {
+    /// Rolling window for the due-soon counters: `week` (7 days, default)
+    /// or `month` (30 days).
+    #[serde(default)]
+    pub window: Option<String>,
+}
+
+fn capacity_window_days(window: Option<&str>) -> Result<i64, AppError> {
+    match window.unwrap_or("week") {
+        "week" => Ok(7),
+        "month" => Ok(30),
+        other => Err(AppError::validation(
+            "window",
+            format!("unknown window `{other}`; expected week or month"),
+        )),
+    }
+}
+
+async fn capacity(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(team_id): Path<String>,
+    Query(query): Query<CapacityQuery>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let window_days = capacity_window_days(query.window.as_deref())?;
+
+    // Team-level capacity data is a management view: Manager and above.
+    let mut conn = state.db.conn();
+    crate::authorization::require_capability(
+        &mut conn,
+        &team_id,
+        &user.id,
+        crate::authorization::Capability::ManageProjects,
+    )
+    .await?;
+
+    // One pass over open tasks joined to the team roster; every counter is a
+    // conditional SUM so the whole response is two queries (roster + tasks).
+    let today = today_iso();
+    // Window end as an ISO date string: due_date is TEXT ISO, so string
+    // comparison is calendar-correct on every engine (portable-SQL rule -
+    // no engine-specific date() functions).
+    let window_end = crate::util::parse_iso_date(&today)
+        .expect("today_iso is a valid ISO date")
+        .checked_add(time::Duration::days(window_days))
+        .expect("window end stays in range")
+        .to_string();
+    let mut args = Args::new();
+    args.s(&today)
+        .s(&today)
+        .s(&window_end)
+        .s(&team_id)
+        .s(&team_id);
+    let rows = conn
+        .fetch_all(
+            "SELECT u.id AS user_id, u.display_name, u.capacity_limit, \
+                    COUNT(t.id) AS open_tasks, \
+                    COALESCE(SUM(CASE WHEN t.due_date IS NOT NULL AND t.due_date < ? THEN 1 ELSE 0 END), 0) AS overdue_tasks, \
+                    COALESCE(SUM(CASE WHEN t.due_date IS NOT NULL AND t.due_date >= ? AND t.due_date < ? THEN 1 ELSE 0 END), 0) AS due_soon \
+             FROM team_members tm \
+             JOIN users u ON u.id = tm.user_id \
+             LEFT JOIN tasks t ON t.assignee_id = u.id AND t.team_id = ? \
+                  AND t.status != 'closed' AND t.parent_task_id IS NULL \
+                  AND NOT EXISTS (SELECT 1 FROM projects dp
+                                  WHERE dp.id = t.project_id AND dp.deleted_at IS NOT NULL) \
+             WHERE tm.team_id = ? \
+             GROUP BY u.id, u.display_name, u.capacity_limit \
+             ORDER BY u.display_name",
+            args,
+        )
+        .await?;
+
+    let mut items = Vec::with_capacity(rows.len());
+    let mut total_open: i64 = 0;
+    let mut total_capacity: i64 = 0;
+    for row in rows {
+        let user_id: String = row.try_get("user_id")?;
+        let display_name: String = row.try_get("display_name")?;
+        let capacity_limit: i64 = row
+            .try_get::<i64, _>("capacity_limit")
+            .unwrap_or(crate::users::CAPACITY_DEFAULT)
+            .clamp(crate::users::CAPACITY_MIN, crate::users::CAPACITY_MAX);
+        let open_tasks: i64 = row.try_get("open_tasks")?;
+        let overdue_tasks: i64 = row.try_get("overdue_tasks")?;
+        let due_soon: i64 = row.try_get("due_soon")?;
+        let utilization = (open_tasks as f64 / capacity_limit.max(1) as f64).clamp(0.0, 2.0);
+        let status = if utilization > 1.0 {
+            "overloaded"
+        } else if utilization >= 0.6 {
+            "balanced"
+        } else {
+            "underutilized"
+        };
+        total_open += open_tasks;
+        total_capacity += capacity_limit;
+        items.push(serde_json::json!({
+            "user_id": user_id,
+            "display_name": display_name,
+            "avatar_url": format!("/api/v1/users/{user_id}/avatar"),
+            "open_tasks": open_tasks,
+            "overdue_tasks": overdue_tasks,
+            // `due_this_week` / `due_this_month` per the contract, resolved by
+            // the requested window (rolling 7 or 30 days from today).
+            "due_this_week": serde_json::Value::from(if window_days == 7 { Some(due_soon) } else { None }),
+            "due_this_month": serde_json::Value::from(if window_days == 30 { Some(due_soon) } else { None }),
+            "due_in_window": due_soon,
+            "capacity_limit": capacity_limit,
+            "utilization": (utilization * 100.0).round() / 100.0,
+            "status": status,
+        }));
+    }
+    Ok(Json(serde_json::json!({
+        "window_days": window_days,
+        "summary": {
+            "total_open_tasks": total_open,
+            "total_capacity": total_capacity,
+            "utilization": if total_capacity > 0 {
+                {
+                    let ratio = (total_open as f64 / total_capacity as f64).clamp(0.0, 2.0);
+                    (ratio * 100.0).round() / 100.0
+                }
+            } else {
+                0.0
+            },
+        },
+        "items": items,
+    })))
+}
+
+// ---------------------------------------------------------------------------
+// Create-from-template (Phase 11): builds a task (plus its subtasks) from a
+// template's defaults, with per-field overrides. All existing task
+// validation, workflow constraints, and authorization run unchanged via
+// `create_task_inner` — the template cannot bypass any rule.
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct FromTemplateRequest {
+    /// Overrides the template's default title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Overrides the template's default description.
+    #[serde(default)]
+    pub default_description: Option<String>,
+    /// Overrides the template's default priority.
+    #[serde(default)]
+    pub priority: Option<String>,
+    #[serde(default)]
+    pub assignee_id: Option<String>,
+    #[serde(default)]
+    pub due_date: Option<String>,
+    /// Overrides the template's default subtask titles.
+    #[serde(default)]
+    pub subtasks: Option<Vec<String>>,
+}
+
+async fn create_task_from_template(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(template_id): Path<String>,
+    Json(overrides): Json<FromTemplateRequest>,
+) -> Result<(StatusCode, Json<crate::tasks::Task>), AppError> {
+    let mut conn = state.db.conn();
+    let (template, actor) = template_project_access(&mut conn, &template_id, &user.id).await?;
+    actor.require_team_member()?;
+    if actor.is_guest() {
+        return Err(deny_guest());
+    }
+
+    // Template defaults with per-field overrides. Every field still passes
+    // through create_task_inner's validation and authorization.
+    let body = crate::tasks::CreateTaskRequest {
+        title: overrides
+            .title
+            .unwrap_or_else(|| template.default_title.clone()),
+        description: overrides
+            .default_description
+            .or_else(|| template.default_description.clone()),
+        status: None,
+        priority: Some(
+            overrides
+                .priority
+                .unwrap_or_else(|| template.default_priority.clone()),
+        ),
+        assignee_id: overrides.assignee_id.clone(),
+        reporter_id: None,
+        due_date: overrides.due_date.clone(),
+        parent_task_id: None,
+        label_ids: template.label_ids.clone(),
+    };
+
+    let task = crate::tasks::create_task_inner(
+        state.clone(),
+        user.clone(),
+        template.project_id.clone(),
+        body,
+        None,
+    )
+    .await?;
+
+    // Provenance + subtasks after the main task exists.
+    let subtask_titles = overrides
+        .subtasks
+        .clone()
+        .unwrap_or_else(|| template.default_subtasks.clone());
+    {
+        let mut conn = state.db.begin().await?;
+        let mut args = Args::new();
+        args.s(&template.id).s(&task.id);
+        conn.execute("UPDATE tasks SET from_template_id = ? WHERE id = ?", args)
+            .await?;
+        conn.commit().await?;
+    }
+    for title in &subtask_titles {
+        crate::tasks::create_task_inner(
+            state.clone(),
+            user.clone(),
+            template.project_id.clone(),
+            crate::tasks::CreateTaskRequest {
+                title: title.clone(),
+                description: None,
+                status: None,
+                priority: Some(template.default_priority.clone()),
+                assignee_id: overrides.assignee_id.clone(),
+                reporter_id: None,
+                due_date: None,
+                parent_task_id: Some(task.id.clone()),
+                label_ids: Vec::new(),
+            },
+            Some(task.id.clone()),
+        )
+        .await?;
+    }
+
+    let fresh = crate::tasks::read_task(&state, &user, &task.id).await?;
+    Ok((StatusCode::CREATED, Json(fresh)))
 }

@@ -238,6 +238,14 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
         "0010_profile_team_settings",
         include_str!("../migrations/postgres/0010_profile_team_settings.sql"),
     ),
+    (
+        "0011_project_soft_delete_capacity",
+        include_str!("../migrations/postgres/0011_project_soft_delete_capacity.sql"),
+    ),
+    (
+        "0012_comment_threads_templates",
+        include_str!("../migrations/postgres/0012_comment_threads_templates.sql"),
+    ),
 ];
 const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -280,6 +288,14 @@ const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
         "0010_profile_team_settings",
         include_str!("../migrations/mysql/0010_profile_team_settings.sql"),
     ),
+    (
+        "0011_project_soft_delete_capacity",
+        include_str!("../migrations/mysql/0011_project_soft_delete_capacity.sql"),
+    ),
+    (
+        "0012_comment_threads_templates",
+        include_str!("../migrations/mysql/0012_comment_threads_templates.sql"),
+    ),
 ];
 const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -317,6 +333,14 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
         "0010_profile_team_settings",
         include_str!("../migrations/sqlite/0010_profile_team_settings.sql"),
+    ),
+    (
+        "0011_project_soft_delete_capacity",
+        include_str!("../migrations/sqlite/0011_project_soft_delete_capacity.sql"),
+    ),
+    (
+        "0012_comment_threads_templates",
+        include_str!("../migrations/sqlite/0012_comment_threads_templates.sql"),
     ),
 ];
 
@@ -873,7 +897,7 @@ mod tests {
         .await
         .unwrap();
         let migrations = migrations_for(Driver::Sqlite);
-        assert_eq!(migrations.len(), 9, "expected migrations 0001..0010");
+        assert_eq!(migrations.len(), 11, "expected migrations 0001..0012");
         // Build the PRE-0005 schema: 0001..0004 only.
         for (version, sql) in &migrations[..4] {
             for statement in split_statements(sql) {

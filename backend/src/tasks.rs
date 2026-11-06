@@ -150,6 +150,10 @@ pub struct Task {
     pub updated_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subtasks: Option<Vec<Task>>,
+    /// Template provenance (Phase 11); `None` when created directly. The
+    /// display name is resolved client-side from the project's templates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_template_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -174,11 +178,12 @@ pub struct TaskCore {
     pub completed_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
+    pub from_template_id: Option<String>,
 }
 
 const TASK_COLUMNS: &str = "id, team_id, project_id, parent_task_id, title, description, status, \
      priority, assignee_id, reporter_id, created_by, resolution, resolution_note, resolved_by, \
-     resolved_at, due_date, position, completed_at, created_at, updated_at";
+     resolved_at, due_date, position, completed_at, created_at, updated_at, from_template_id";
 
 fn row_to_task_core(row: &sqlx::any::AnyRow) -> Result<TaskCore, AppError> {
     Ok(TaskCore {
@@ -205,6 +210,7 @@ fn row_to_task_core(row: &sqlx::any::AnyRow) -> Result<TaskCore, AppError> {
         completed_at: row.try_get("completed_at")?,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
+        from_template_id: row.try_get("from_template_id")?,
     })
 }
 
@@ -240,6 +246,7 @@ fn core_to_task(
         resolved_at: core.resolved_at,
         due_date: core.due_date,
         position: core.position,
+        from_template_id: core.from_template_id,
         completed_at: core.completed_at,
         labels,
         created_at: core.created_at,
@@ -571,7 +578,7 @@ async fn create_subtask(
     .map(|task| (StatusCode::CREATED, Json(task)))
 }
 
-async fn create_task_inner(
+pub(crate) async fn create_task_inner(
     state: AppState,
     user: AuthedUser,
     project_id: String,
@@ -713,6 +720,33 @@ async fn create_task_inner(
         });
     }
     crate::notifications::record_batch(&mut conn, &batch).await?;
+    // Rules Engine (Phase 8A): creating a task with an assignee is the
+    // initial-assignment trigger; a task created without an assignee emits
+    // no event (Task 1 trigger matrix). Runs inside this transaction.
+    if let Some(assignee) = &assignee_id {
+        crate::rules::engine::capture_and_evaluate(
+            &mut conn,
+            crate::rules::engine::TaskState {
+                team_id: &project.team_id,
+                task_id: &id,
+                status: input.status,
+                priority: input.priority,
+                assignee_id: Some(assignee),
+                reporter_id: reporter_id.as_deref(),
+            },
+            crate::rules::engine::EventInput {
+                event_type: crate::rules::TriggerType::TaskAssigned,
+                actor_id: Some(user.id.clone()),
+                previous: crate::rules::EventState::default(),
+                new: crate::rules::EventState {
+                    assignee_id: Some(assignee.clone()),
+                    ..crate::rules::EventState::default()
+                },
+            },
+            crate::rules::EventOrigin::User,
+        )
+        .await?;
+    }
     conn.commit().await?;
 
     let core = TaskCore {
@@ -736,6 +770,7 @@ async fn create_task_inner(
         completed_at,
         created_at: now,
         updated_at: now,
+        from_template_id: None,
     };
     task_from_core(&state, core).await
 }
@@ -743,6 +778,37 @@ async fn create_task_inner(
 // ---------------------------------------------------------------------------
 // Read (detail + board + lists)
 // ---------------------------------------------------------------------------
+
+/// Read a task as the given user (shared with the from-template endpoint).
+pub(crate) async fn read_task(
+    state: &AppState,
+    user: &AuthedUser,
+    task_id: &str,
+) -> Result<Task, AppError> {
+    let mut conn = state.db.conn();
+    let (core, _) = require_task_access(&mut conn, task_id, &user.id).await?;
+    let mut task = embed_extras(&mut conn, vec![core])
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| AppError::internal("task disappeared"))?;
+    let mut args = Args::new();
+    args.s(task_id);
+    let subtask_rows = conn
+        .fetch_all(
+            &format!(
+                "SELECT {TASK_COLUMNS} FROM tasks WHERE parent_task_id = ? ORDER BY position, created_at, id"
+            ),
+            args,
+        )
+        .await?;
+    let subtask_cores = subtask_rows
+        .iter()
+        .map(row_to_task_core)
+        .collect::<Result<Vec<_>, AppError>>()?;
+    task.subtasks = Some(embed_extras(&mut conn, subtask_cores).await?);
+    Ok(task)
+}
 
 async fn get_task(
     State(state): State<AppState>,
@@ -1664,6 +1730,74 @@ async fn update_task(
         }
     }
     crate::notifications::record_batch(&mut conn, &batch).await?;
+    // Rules Engine (Phase 8A): one event per supported field change. The
+    // authoritative new state is the server-validated input; unassignment
+    // and no-op updates emit nothing (Task 1 trigger matrix). Runs inside
+    // this transaction.
+    for (field, old_value, new_value) in &changes {
+        match *field {
+            "priority" => {
+                let previous = old_value
+                    .as_deref()
+                    .map(validate_priority)
+                    .transpose()?
+                    .unwrap_or(input.priority);
+                crate::rules::engine::capture_and_evaluate(
+                    &mut conn,
+                    crate::rules::engine::TaskState {
+                        team_id: &task.team_id,
+                        task_id: &task.id,
+                        status: input.status,
+                        priority: input.priority,
+                        assignee_id: assignee_id.as_deref(),
+                        reporter_id: reporter_id.as_deref(),
+                    },
+                    crate::rules::engine::EventInput {
+                        event_type: crate::rules::TriggerType::TaskPriorityChanged,
+                        actor_id: Some(user.id.clone()),
+                        previous: crate::rules::EventState {
+                            priority: Some(previous),
+                            ..crate::rules::EventState::default()
+                        },
+                        new: crate::rules::EventState {
+                            priority: Some(input.priority),
+                            ..crate::rules::EventState::default()
+                        },
+                    },
+                    crate::rules::EventOrigin::User,
+                )
+                .await?;
+            }
+            "assignee_id" if new_value.is_some() => {
+                crate::rules::engine::capture_and_evaluate(
+                    &mut conn,
+                    crate::rules::engine::TaskState {
+                        team_id: &task.team_id,
+                        task_id: &task.id,
+                        status: input.status,
+                        priority: input.priority,
+                        assignee_id: assignee_id.as_deref(),
+                        reporter_id: reporter_id.as_deref(),
+                    },
+                    crate::rules::engine::EventInput {
+                        event_type: crate::rules::TriggerType::TaskAssigned,
+                        actor_id: Some(user.id.clone()),
+                        previous: crate::rules::EventState {
+                            assignee_id: old_value.clone(),
+                            ..crate::rules::EventState::default()
+                        },
+                        new: crate::rules::EventState {
+                            assignee_id: new_value.clone(),
+                            ..crate::rules::EventState::default()
+                        },
+                    },
+                    crate::rules::EventOrigin::User,
+                )
+                .await?;
+            }
+            _ => {}
+        }
+    }
     conn.commit().await?;
 
     let core = TaskCore {
@@ -1687,6 +1821,7 @@ async fn update_task(
         completed_at: task.completed_at,
         created_at: task.created_at,
         updated_at: now,
+        from_template_id: task.from_template_id,
     };
     task_from_core(&state, core).await.map(Json)
 }
@@ -1759,6 +1894,34 @@ async fn run_transition(
     )
     .await?;
     crate::notifications::record_batch(&mut conn, &batch).await?;
+    // Rules Engine (Phase 8A): the committed status change as one
+    // `task_status_changed` event, previous/new taken from the guarded
+    // compare-and-update. Runs inside this transaction.
+    crate::rules::engine::capture_and_evaluate(
+        &mut conn,
+        crate::rules::engine::TaskState {
+            team_id: &task.team_id,
+            task_id: &task.id,
+            status: next_status,
+            priority: &task.priority,
+            assignee_id: task.assignee_id.as_deref(),
+            reporter_id: task.reporter_id.as_deref(),
+        },
+        crate::rules::engine::EventInput {
+            event_type: crate::rules::TriggerType::TaskStatusChanged,
+            actor_id: Some(user.id.clone()),
+            previous: crate::rules::EventState {
+                status: Some(validate_status(&task.status)?),
+                ..crate::rules::EventState::default()
+            },
+            new: crate::rules::EventState {
+                status: Some(next_status),
+                ..crate::rules::EventState::default()
+            },
+        },
+        crate::rules::EventOrigin::User,
+    )
+    .await?;
     conn.commit().await?;
 
     let mut core = task.clone();
@@ -1831,6 +1994,109 @@ async fn delete_task(
 }
 
 // ---------------------------------------------------------------------------
+// Manual ordering (Phase 11)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct PositionRequest {
+    /// Place the task immediately BEFORE (above) this sibling in the same
+    /// status column. Omit to move to the bottom.
+    #[serde(default)]
+    pub before_task_id: Option<String>,
+}
+
+/// Reorder a task within its (project, status) column. Pure ordering — the
+/// workflow state, assignee, and reporter are untouched. Authorization
+/// mirrors the generic task update (creator/assignee or Manager+). Conflicts
+/// resolve last-write-wins: positions are computed server-side as midpoints,
+/// and concurrent moves both apply.
+async fn set_task_position(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(task_id): Path<String>,
+    Json(body): Json<PositionRequest>,
+) -> Result<StatusCode, AppError> {
+    let mut conn = state.db.begin().await?;
+    let (task, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
+    let can_update_any = actor.can(Capability::UpdateAnyTask);
+    let is_own = task.created_by == user.id || task.assignee_id.as_deref() == Some(&user.id);
+    if !can_update_any && !is_own {
+        return Err(AppError::Forbidden(
+            "you can only reorder tasks you created or are assigned to",
+        ));
+    }
+    let project = crate::projects::find_project(&mut conn, &task.project_id).await?;
+    if project.status == "archived" {
+        return Err(AppError::Conflict("archived projects are read-only".into()));
+    }
+
+    let new_position = match body.before_task_id.as_deref().filter(|s| !s.is_empty()) {
+        Some(before_id) => {
+            let mut args = Args::new();
+            args.s(before_id).s(&task.project_id).s(&task.status);
+            let row = conn
+                .fetch_optional(
+                    "SELECT position, created_at, id FROM tasks                      WHERE id = ? AND project_id = ? AND status = ?",
+                    args,
+                )
+                .await?
+                .ok_or_else(|| {
+                    AppError::validation(
+                        "before_task_id",
+                        "the reference task must be in the same status column",
+                    )
+                })?;
+            let before_pos: f64 = row.try_get("position")?;
+            if before_id == task_id {
+                return Err(AppError::validation(
+                    "before_task_id",
+                    "a task cannot be placed before itself",
+                ));
+            }
+            // Position of the sibling above the reference (or 0 when the
+            // reference is the first row): midpoint insertion.
+            let mut upper_args = Args::new();
+            upper_args
+                .s(&task.project_id)
+                .s(&task.status)
+                .f(before_pos)
+                .s(before_id);
+            let upper = conn
+                .fetch_optional(
+                    "SELECT position FROM tasks                      WHERE project_id = ? AND status = ? AND position < ? AND id != ?                      ORDER BY position DESC, created_at DESC, id DESC LIMIT 1",
+                    upper_args,
+                )
+                .await?
+                .map_or(0.0, |r| r.try_get::<f64, _>("position").unwrap_or(0.0));
+            (upper + before_pos) / 2.0
+        }
+        None => {
+            let mut args = Args::new();
+            args.s(&task.project_id).s(&task.status).s(&task_id);
+            let row = conn
+                .fetch_optional(
+                    "SELECT COALESCE(MAX(position), 0) AS max_pos FROM tasks                      WHERE project_id = ? AND status = ? AND id != ?",
+                    args,
+                )
+                .await?;
+            row.map_or(1024.0, |r| {
+                r.try_get::<f64, _>("max_pos").unwrap_or(0.0) + 1024.0
+            })
+        }
+    };
+
+    let mut args = Args::new();
+    args.f(new_position).i(util::now_ms()).s(&task_id);
+    conn.execute(
+        "UPDATE tasks SET position = ?, updated_at = ? WHERE id = ?",
+        args,
+    )
+    .await?;
+    conn.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
 // My Tasks
 // ---------------------------------------------------------------------------
 
@@ -1890,7 +2156,7 @@ async fn my_tasks(
     let mut where_clause = String::from(
         "t.assignee_id = ? AND t.parent_task_id IS NULL \
          AND EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id = t.team_id AND tm.user_id = ?) \
-         AND EXISTS (SELECT 1 FROM projects p WHERE p.id = t.project_id AND p.status = 'active')",
+         AND EXISTS (SELECT 1 FROM projects p WHERE p.id = t.project_id AND p.status = 'active' AND p.deleted_at IS NULL)",
     );
     let mut values: Vec<FilterValue> = vec![
         FilterValue::S(user.id.clone()),
@@ -1998,6 +2264,7 @@ async fn my_tasks(
                 completed_at: row.try_get("completed_at")?,
                 created_at: row.try_get("created_at")?,
                 updated_at: row.try_get("updated_at")?,
+                from_template_id: row.try_get("from_template_id")?,
             };
             let team_name: String = row.try_get("team_name")?;
             let project_name: String = row.try_get("project_name")?;

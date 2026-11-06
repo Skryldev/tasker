@@ -30,6 +30,7 @@ pub mod events {
     pub const TASK_REJECTION_REASON: &str = "task_rejection_reason";
     pub const TASK_DELETED: &str = "task_deleted";
     pub const COMMENT_ADDED: &str = "comment_added";
+    pub const COMMENT_REPLIED: &str = "comment_replied";
     pub const COMMENT_EDITED: &str = "comment_edited";
     pub const COMMENT_DELETED: &str = "comment_deleted";
 }

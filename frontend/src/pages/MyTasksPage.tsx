@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { CalendarClock, AtSign, ListTodo, Search, X } from "lucide-react";
@@ -15,7 +15,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState } from "@/components/app/EmptyState";
 import { Skeleton } from "@/components/ui/badge";
-import { TaskDetailPanel } from "@/components/app/TaskDetailPanel";
+// Lazy: the detail panel (with the status control and inline editors) is
+// loaded on first selection; the skeleton below covers the hop.
+const TaskDetailPanel = lazy(() =>
+  import("@/components/app/TaskDetailPanel").then((m) => ({ default: m.TaskDetailPanel })),
+);
 import { TaskTable } from "@/components/app/TaskTable";
 import { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES, STATUS_LABELS } from "@/lib/utils";
 
@@ -25,6 +29,13 @@ export function MyTasksPage() {
   const [page, setPage] = useState(1);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
+  const searchRef = useRef<HTMLInputElement>(null);
+  // "/" focuses search (see shortcuts.tsx).
+  useEffect(() => {
+    const focus = () => searchRef.current?.focus();
+    window.addEventListener("tasker:focus-search", focus);
+    return () => window.removeEventListener("tasker:focus-search", focus);
+  }, []);
   // Status filter syncs with the URL so My Work Summary tiles can deep-link
   // into a filtered list (e.g. /?status=in_progress).
   const urlStatus = searchParams.get("status");
@@ -108,6 +119,7 @@ export function MyTasksPage() {
             <div className="relative">
               <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
+                ref={searchRef}
                 value={search}
                 onChange={(e) => {
                   setSearch(e.target.value);
@@ -116,6 +128,7 @@ export function MyTasksPage() {
                 placeholder="Search…"
                 className="w-48 pl-7"
                 aria-label="Search my tasks"
+                data-testid="task-search"
               />
             </div>
             <Select
@@ -202,7 +215,7 @@ export function MyTasksPage() {
       </div>
 
       {selectedTaskId ? (
-        <aside className="hidden w-[380px] shrink-0 border-l lg:block">
+        <aside className="hidden w-[480px] shrink-0 border-l lg:block">
           {detail.isLoading ? (
             <div className="flex h-full flex-col gap-3 p-4" aria-busy="true" data-testid="task-detail-loading">
               <Skeleton className="h-6 w-3/4" />
@@ -212,7 +225,17 @@ export function MyTasksPage() {
               <Skeleton className="h-4 w-1/2" />
             </div>
           ) : (
-            <TaskDetailPanel task={detail.data} onClose={() => setSelectedTaskId(null)} />
+            <Suspense
+              fallback={
+                <div className="flex h-full flex-col gap-3 p-4" aria-busy="true">
+                  <Skeleton className="h-6 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                  <Skeleton className="h-20 w-full" />
+                </div>
+              }
+            >
+              <TaskDetailPanel task={detail.data} onClose={() => setSelectedTaskId(null)} />
+            </Suspense>
           )}
         </aside>
       ) : null}

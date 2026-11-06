@@ -1252,6 +1252,35 @@
             "$ref": "#/components/responses/Problem422"
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Soft-delete a project (Owner/Admin)",
+        "description": "Hides the project and its tasks from all users; recoverable within the 30-day retention window via POST /projects/{project_id}/restore. Managers archive, they do not delete. See docs/adr-0013-project-delete.md.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          }
+        }
       }
     },
     "/projects/{project_id}/archive": {
@@ -3751,6 +3780,259 @@
           }
         }
       }
+    },
+    "/projects/{project_id}/restore": {
+      "post": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Restore a soft-deleted project (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The restored project.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/purge": {
+      "delete": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Permanently delete a soft-deleted project (Owner only)",
+        "description": "Irreversible. Requires the typed project name and the caller's current password. Cascades tasks, comments, notifications, dependencies, templates, guest grants, and goal links; activity history is preserved.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProjectId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurgeProjectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No content."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/projects/trash": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "List soft-deleted projects of the team (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted projects, most recent first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrashProjectList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/capacity": {
+      "get": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Forward-looking team capacity (Manager+)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "description": "Rolling window for due-soon counters.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "week",
+                "month"
+              ],
+              "default": "week"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-member capacity and utilization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapacityResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/tasks/from-template/{template_id}": {
+      "post": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Create a task from a template (team members)",
+        "description": "Applies the template's defaults (title, description, priority, labels, subtasks) with per-field overrides, then creates the task and its subtasks. All task validation and workflow constraints apply unchanged.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TemplateId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FromTemplateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created task with subtasks.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/tasks/{task_id}/position": {
+      "patch": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Reorder a task within its status column",
+        "description": "Pure manual ordering (project + status scoped). Authorization mirrors the generic task update. Concurrent reorders resolve last-write-wins via server-side midpoint computation.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TaskId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "before_task_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Place the task immediately above this sibling in the same column. Omit to move to the bottom."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No content."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4086,6 +4368,13 @@
           },
           "notification_prefs": {
             "$ref": "#/components/schemas/NotificationPrefs"
+          },
+          "capacity_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10,
+            "description": "Forward-looking capacity unit used by the Capacity view."
           }
         }
       },
@@ -4419,6 +4708,13 @@
           "is_guest": {
             "type": "boolean",
             "description": "True when the caller reaches this project through a guest grant (read-only)."
+          },
+          "deleted_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Soft-delete timestamp (epoch ms). Present only on soft-deleted projects (trash view); live payloads omit the field."
           }
         }
       },
@@ -4686,7 +4982,8 @@
             "format": "date"
           },
           "position": {
-            "type": "number"
+            "type": "number",
+            "description": "Manual ordering position within (project, status). Midpoint-computed."
           },
           "completed_at": {
             "type": [
@@ -4713,6 +5010,13 @@
             "items": {
               "$ref": "#/components/schemas/Task"
             }
+          },
+          "from_template_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Template provenance; absent for directly created tasks."
           }
         }
       },
@@ -5124,6 +5428,14 @@
           },
           "updated_at": {
             "type": "integer"
+          },
+          "default_subtasks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "description": "Subtask titles applied when creating a task from this template."
           }
         }
       },
@@ -5666,6 +5978,13 @@
           },
           "updated_at": {
             "type": "integer"
+          },
+          "parent_comment_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Parent comment id for replies (depth 2). Absent for top-level comments."
           }
         }
       },
@@ -5833,6 +6152,12 @@
           },
           "notification_prefs": {
             "$ref": "#/components/schemas/NotificationPrefs"
+          },
+          "capacity_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Clamped server-side; absent leaves the stored value untouched."
           }
         }
       },
@@ -6038,6 +6363,249 @@
             "type": "string"
           }
         }
+      },
+      "PurgeProjectRequest": {
+        "type": "object",
+        "required": [
+          "confirm_name",
+          "current_password"
+        ],
+        "properties": {
+          "confirm_name": {
+            "type": "string",
+            "description": "The exact project name."
+          },
+          "current_password": {
+            "type": "string"
+          }
+        }
+      },
+      "TrashProject": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "deleted_at",
+          "task_count",
+          "retention_expires_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "deleted_at": {
+            "type": "integer"
+          },
+          "task_count": {
+            "type": "integer"
+          },
+          "retention_expires_at": {
+            "type": "integer",
+            "description": "deleted_at + 30 days; after this only purge remains."
+          }
+        }
+      },
+      "TrashProjectList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrashProject"
+            }
+          }
+        }
+      },
+      "CapacityMember": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "display_name",
+          "avatar_url",
+          "open_tasks",
+          "overdue_tasks",
+          "capacity_limit",
+          "utilization",
+          "status"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "avatar_url": {
+            "type": "string"
+          },
+          "open_tasks": {
+            "type": "integer"
+          },
+          "overdue_tasks": {
+            "type": "integer"
+          },
+          "due_this_week": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Open tasks due within the next 7 days; null unless window=week."
+          },
+          "due_this_month": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Open tasks due within the next 30 days; null unless window=month."
+          },
+          "due_in_window": {
+            "type": "integer",
+            "description": "Open tasks due within the requested window."
+          },
+          "capacity_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "utilization": {
+            "type": "number",
+            "description": "open_tasks / capacity_limit, clamped to 0-2."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "underutilized",
+              "balanced",
+              "overloaded"
+            ]
+          }
+        }
+      },
+      "CapacityResponse": {
+        "type": "object",
+        "required": [
+          "window_days",
+          "summary",
+          "items"
+        ],
+        "properties": {
+          "window_days": {
+            "type": "integer",
+            "enum": [
+              7,
+              30
+            ]
+          },
+          "summary": {
+            "type": "object",
+            "required": [
+              "total_open_tasks",
+              "total_capacity",
+              "utilization"
+            ],
+            "properties": {
+              "total_open_tasks": {
+                "type": "integer"
+              },
+              "total_capacity": {
+                "type": "integer"
+              },
+              "utilization": {
+                "type": "number"
+              }
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CapacityMember"
+            }
+          }
+        }
+      },
+      "CreateCommentRequest": {
+        "type": "object",
+        "properties": {
+          "parent_comment_id": {
+            "type": "string",
+            "description": "Parent comment id for a threaded reply; replying to a reply is a 422 (depth 2)."
+          }
+        }
+      },
+      "UpsertTemplateRequest": {
+        "type": "object",
+        "properties": {
+          "default_subtasks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20
+          }
+        }
+      },
+      "FromTemplateRequest": {
+        "type": "object",
+        "description": "Overrides applied on top of the template's defaults. Absent fields keep the template default.",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "default_description": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "urgent"
+            ]
+          },
+          "assignee_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "due_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "subtasks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20
+          }
+        }
+      },
+      "FromTemplateTask": {
+        "type": "object",
+        "description": "The created task (Task shape) with from_template_id provenance.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Task"
+          }
+        ]
       }
     }
   }

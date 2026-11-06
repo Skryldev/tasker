@@ -42,13 +42,17 @@ pub struct Comment {
     /// True when the comment is explicitly visible to project guests.
     /// Internal by default; only team members can set or change it.
     pub guest_visible: bool,
+    /// Parent comment id for replies (Phase 11). `None` for top-level.
+    /// Depth is capped at 2: a reply may never target another reply.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_comment_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
 
 // `guest_visible` is normalized to an integer in SQL: PG returns a real
 // BOOLEAN while MySQL/SQLite return 0/1 integers through the portable layer.
-const COMMENT_COLUMNS: &str = "c.id, c.task_id, c.author_id, c.body,      CASE WHEN c.guest_visible THEN 1 ELSE 0 END AS guest_visible,      c.created_at, c.updated_at, u.email AS author_email, u.display_name AS author_name";
+const COMMENT_COLUMNS: &str = "c.id, c.task_id, c.author_id, c.body,      CASE WHEN c.guest_visible THEN 1 ELSE 0 END AS guest_visible,      c.parent_comment_id,      c.created_at, c.updated_at, u.email AS author_email, u.display_name AS author_name";
 
 fn row_to_comment(row: &sqlx::any::AnyRow) -> Result<Comment, AppError> {
     Ok(Comment {
@@ -61,6 +65,7 @@ fn row_to_comment(row: &sqlx::any::AnyRow) -> Result<Comment, AppError> {
         },
         body: row.try_get("body")?,
         guest_visible: row.try_get::<i64, _>("guest_visible")? != 0,
+        parent_comment_id: row.try_get("parent_comment_id")?,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
     })
@@ -243,6 +248,11 @@ pub struct CreateCommentRequest {
     /// callers without team membership; guests cannot create comments.
     #[serde(default)]
     pub guest_visible: bool,
+    /// Parent comment id for a threaded reply (Phase 11). The parent must be
+    /// a top-level comment on the same task — replying to a reply is a 422
+    /// (depth capped at 2).
+    #[serde(default)]
+    pub parent_comment_id: Option<String>,
 }
 
 async fn create_comment(
@@ -261,6 +271,26 @@ async fn create_comment(
     }
     // Internal by default; only team members may publish a guest-visible note.
     let guest_visible = payload.guest_visible && !actor.is_guest();
+    // Threading (Phase 11): resolve the parent, enforce same-task + depth 2.
+    let parent_id: Option<String> = match payload.parent_comment_id.as_deref() {
+        None | Some("") => None,
+        Some(raw) => {
+            let parent = find_comment(&mut conn, raw).await?;
+            if parent.task_id != task_id {
+                return Err(AppError::validation(
+                    "parent_comment_id",
+                    "the parent comment belongs to a different task",
+                ));
+            }
+            if parent.parent_comment_id.is_some() {
+                return Err(AppError::validation(
+                    "parent_comment_id",
+                    "replies to replies are not supported (thread depth is 2)",
+                ));
+            }
+            Some(parent.id)
+        }
+    };
 
     let id = util::new_id();
     let now = util::now_ms();
@@ -270,21 +300,26 @@ async fn create_comment(
         .s(&user.id)
         .s(&body)
         .b(guest_visible)
+        .opt_s(parent_id.clone())
         .i(now)
         .i(now);
     conn.execute(
-        "INSERT INTO comments (id, task_id, author_id, body, guest_visible, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO comments (id, task_id, author_id, body, guest_visible, parent_comment_id, created_at, updated_at)          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         args,
     )
     .await?;
+    let reply_event = parent_id.is_some();
     activity::record(
         &mut conn,
         &task.team_id,
         Some(&task.project_id),
         Some(&task_id),
         Some(&user.id),
-        events::COMMENT_ADDED,
+        if reply_event {
+            events::COMMENT_REPLIED
+        } else {
+            events::COMMENT_ADDED
+        },
         None,
         None,
         Some(&util::truncate(&body, 120)),
@@ -292,6 +327,21 @@ async fn create_comment(
     .await?;
 
     let mut batch: Vec<crate::notifications::NewNotification> = Vec::new();
+    if let Some(parent) = parent_id.as_ref() {
+        // A reply notifies the parent's author (self-replies are suppressed
+        // by record_batch like any other self-notification).
+        let parent_comment = find_comment(&mut conn, parent).await?;
+        batch.push(crate::notifications::NewNotification {
+            event: crate::notifications::events::COMMENT_MENTION,
+            recipient_id: parent_comment.author.id.clone(),
+            task_id: task_id.clone(),
+            actor_id: user.id.clone(),
+            summary: format!(
+                "{} replied to your comment on \"{}\"",
+                user.display_name, task.title
+            ),
+        });
+    }
     for (mentioned_id, _email) in resolve_mentions(&mut conn, &task.team_id, &body).await? {
         batch.push(crate::notifications::NewNotification {
             event: crate::notifications::events::COMMENT_MENTION,
@@ -316,6 +366,7 @@ async fn create_comment(
             },
             body,
             guest_visible,
+            parent_comment_id: parent_id,
             created_at: now,
             updated_at: now,
         }),
@@ -419,6 +470,65 @@ async fn delete_comment(
         .await?;
     conn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Automation (Phase 8A, Task 4): rule-generated comments
+// ---------------------------------------------------------------------------
+
+/// Persist a rule-generated comment with the Automation Principal as author.
+/// Narrow internal path — reachable only from `rules::outbox`, which has
+/// already validated the task/team scope; this function keeps the same body
+/// validation, activity recording, and mention notifications as the
+/// interactive path. Automation comments are internal (never guest-visible).
+pub(crate) async fn create_automation_comment(
+    conn: &mut Conn<'_>,
+    team_id: &str,
+    project_id: &str,
+    task_id: &str,
+    author_id: &str,
+    body: &str,
+) -> Result<String, AppError> {
+    let body = validate_body(body)?;
+    let id = util::new_id();
+    let now = util::now_ms();
+    let mut args = Args::new();
+    args.s(&id)
+        .s(task_id)
+        .s(author_id)
+        .s(&body)
+        .b(false)
+        .i(now)
+        .i(now);
+    conn.execute(
+        "INSERT INTO comments (id, task_id, author_id, body, guest_visible, created_at, updated_at)          VALUES (?, ?, ?, ?, ?, ?, ?)",
+        args,
+    )
+    .await?;
+    activity::record(
+        conn,
+        team_id,
+        Some(project_id),
+        Some(task_id),
+        Some(author_id),
+        events::COMMENT_ADDED,
+        None,
+        None,
+        Some(&util::truncate(&body, 120)),
+    )
+    .await?;
+    let mut batch: Vec<crate::notifications::NewNotification> = Vec::new();
+    for (mentioned_id, _email) in resolve_mentions(conn, team_id, &body).await? {
+        batch.push(crate::notifications::NewNotification {
+            event: crate::notifications::events::COMMENT_MENTION,
+            recipient_id: mentioned_id,
+            task_id: task_id.to_string(),
+            actor_id: author_id.to_string(),
+            summary: "Automation mentioned you on a task".to_string(),
+        });
+    }
+    crate::notifications::record_batch(conn, &batch).await?;
+    Ok(id)
 }
 
 #[cfg(test)]

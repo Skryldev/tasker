@@ -3810,6 +3810,2147 @@ async fn rules_schema_migrations_and_constraints() {
     }
 }
 
+/// Seed a rule + an immutable version row directly (the management API is
+/// Task 6). Returns the rule id.
+#[allow(clippy::too_many_arguments)]
+async fn seed_rule(
+    db: &Database,
+    team_id: &str,
+    trigger: &str,
+    condition_json: &str,
+    actions_json: &str,
+    enabled: bool,
+    version: i64,
+    creator: &str,
+) -> String {
+    let rule_id = Uuid::now_v7().to_string();
+    let now = tasker::util::now_ms();
+    let mut conn = db.conn();
+    let mut args = tasker::db::Args::new();
+    args.s(&rule_id)
+        .s(team_id)
+        .s(format!("rule-{rule_id}"))
+        .opt_s(None::<String>)
+        .s(trigger)
+        .b(enabled)
+        .i(version)
+        .s(condition_json)
+        .s(actions_json)
+        .s(creator)
+        .i(now)
+        .i(now)
+        .opt_i(None::<i64>);
+    conn.execute(
+        "INSERT INTO rules (id, team_id, name, description, trigger_type, enabled, \
+         current_version, condition_json, actions_json, created_by, created_at, \
+         updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        args,
+    )
+    .await
+    .unwrap_or_else(|e| panic!("seed_rule insert failed: {e}"));
+    let mut args = tasker::db::Args::new();
+    args.s(&rule_id)
+        .i(version)
+        .s(trigger)
+        .s(condition_json)
+        .s(actions_json)
+        .s(creator)
+        .i(now);
+    conn.execute(
+        "INSERT INTO rule_versions (rule_id, version, trigger_type, condition_json, \
+         actions_json, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        args,
+    )
+    .await
+    .unwrap_or_else(|e| panic!("seed_rule version insert failed: {e}"));
+    rule_id
+}
+
+/// Scalar COUNT; `bind` is bound as the first (optional) parameter.
+async fn count_rows(db: &Database, sql: &str, bind: Option<&str>) -> i64 {
+    let mut conn = db.conn();
+    let mut args = tasker::db::Args::new();
+    args.opt_s(bind);
+    let row = conn
+        .fetch_optional(sql, args)
+        .await
+        .unwrap_or_else(|e| panic!("count query failed: {e}"));
+    row.map_or(0, |r| r.try_get::<i64, _>(0).unwrap_or(0))
+}
+
+async fn user_id_by_email(db: &Database, email: &str) -> String {
+    let mut conn = db.conn();
+    let mut args = tasker::db::Args::new();
+    args.s(email);
+    let row = conn
+        .fetch_optional("SELECT id FROM users WHERE email = ?", args)
+        .await
+        .unwrap()
+        .expect("user row");
+    row.try_get("id").unwrap()
+}
+
+#[tokio::test]
+async fn rules_capture_evaluates_matching_rules_transactionally() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+        let suffix = Uuid::now_v7().simple();
+
+        // ---- Team / project / task fixtures via the real API ----
+        let admin_email = format!("rules-admin-{suffix}@test.local");
+        let member_email = format!("rules-member-{suffix}@test.local");
+        let outsider_email = format!("rules-outsider-{suffix}@test.local");
+        let admin_id = seed_user(&db, &admin_email, "Rules Admin").await;
+        seed_user(&db, &member_email, "Rules Member").await;
+        seed_user(&db, &outsider_email, "Rules Outsider").await;
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let outsider = login_as(&app.app, &outsider_email, "test-password-123").await;
+
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name": "RT"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] team");
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role": "member", "temp_password": "member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] add member");
+        let (code, other_team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name": "RT2"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let other_team_id = other_team["id"].as_str().unwrap().to_string();
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name": "RP"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] project");
+        let project_id = project["id"].as_str().unwrap().to_string();
+        let (code, task) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "Rules target"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::CREATED,
+            "[{engine}] task (no assignee: no event)"
+        );
+        let task_id = task["id"].as_str().unwrap().to_string();
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM domain_events WHERE task_id = ?",
+                Some(&task_id),
+            )
+            .await,
+            0,
+            "[{engine}] creation without assignee emits nothing"
+        );
+
+        // ---- Rules ----
+        let all_statuses = serde_json::json!(
+            {"field":"task.status","op":"IN","values":["backlog","todo","in_progress","resolved","in_review","closed"]}
+        )
+        .to_string();
+        // v1 of the status rule: always matches, adds a comment.
+        let status_rule = seed_rule(
+            &db,
+            &team_id,
+            "task_status_changed",
+            &all_statuses,
+            r#"[{"body":"automation triage"}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+        // Disabled rule: never selected.
+        seed_rule(
+            &db,
+            &team_id,
+            "task_status_changed",
+            &all_statuses,
+            r#"[{"body":"disabled"}]"#,
+            false,
+            1,
+            &admin_id,
+        )
+        .await;
+        // Same trigger in ANOTHER team: must never fire for this task.
+        seed_rule(
+            &db,
+            &other_team_id,
+            "task_status_changed",
+            &all_statuses,
+            r#"[{"body":"cross-team"}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+        // Assignment rule: fires when a user is assigned; persists a
+        // provider-neutral send_message intent.
+        seed_rule(
+            &db,
+            &team_id,
+            "task_assigned",
+            r#"{"field":"task.assignee_id","op":"NEQ","value":null}"#,
+            r#"[{"message":{"connection_ref":"conn-1","destination_ref":"dest-1","format":"plain_text","body":"assigned to you"}}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+        // Priority rule whose condition is always false in this context.
+        let unrelated_actor = Uuid::now_v7().to_string();
+        seed_rule(
+            &db,
+            &team_id,
+            "task_priority_changed",
+            &serde_json::json!({"field":"event.actor_id","op":"EQ","value":unrelated_actor})
+                .to_string(),
+            r#"[{"body":"never"}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+
+        // -- 1. Assignment (PATCH): task_assigned event + send_message intent --
+        let member_id = user_id_by_email(&db, &member_email).await;
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{task_id}"),
+            Some(&admin),
+            json!({"assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] assign");
+        let mut conn = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(&task_id);
+        let ev = conn
+            .fetch_optional(
+                "SELECT id FROM domain_events WHERE task_id = ? AND event_type = 'task_assigned'",
+                args,
+            )
+            .await
+            .unwrap()
+            .expect("assignment event");
+        let assign_event_id: String = ev.try_get("id").unwrap();
+        let mut args = tasker::db::Args::new();
+        args.s(&assign_event_id);
+        let intents = conn
+            .fetch_all(
+                "SELECT action_type, payload FROM automation_outbox WHERE event_id = ?",
+                args,
+            )
+            .await
+            .unwrap();
+        assert_eq!(intents.len(), 1, "[{engine}] assignment intent");
+        assert_eq!(
+            intents[0].try_get::<String, _>("action_type").unwrap(),
+            "send_message"
+        );
+        let payload = intents[0].try_get::<String, _>("payload").unwrap();
+        assert!(
+            payload.contains("connection_ref"),
+            "[{engine}] provider-neutral intent"
+        );
+        assert!(
+            !payload.contains("http"),
+            "[{engine}] no URLs in messaging intents"
+        );
+
+        // -- 2. Status transition: event + matching execution + intent ------
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/transition"),
+            Some(&member),
+            json!({"to": "todo"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] transition");
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM domain_events WHERE task_id = ?                  AND event_type = 'task_status_changed'",
+                Some(&task_id),
+            )
+            .await,
+            1,
+            "[{engine}] exactly one status event"
+        );
+        let mut conn = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(&task_id);
+        let ev = conn
+            .fetch_optional(
+                "SELECT id, event_type, origin, previous_state, new_state, actor_id \
+                 FROM domain_events WHERE task_id = ? ORDER BY occurred_at DESC",
+                args,
+            )
+            .await
+            .unwrap()
+            .expect("event row");
+        assert_eq!(
+            ev.try_get::<String, _>("event_type").unwrap(),
+            "task_status_changed"
+        );
+        assert_eq!(ev.try_get::<String, _>("origin").unwrap(), "user");
+        assert_eq!(
+            ev.try_get::<Option<String>, _>("previous_state")
+                .unwrap()
+                .unwrap(),
+            r#"{"status":"backlog"}"#
+        );
+        assert_eq!(
+            ev.try_get::<Option<String>, _>("new_state")
+                .unwrap()
+                .unwrap(),
+            r#"{"status":"todo"}"#
+        );
+        assert_eq!(
+            ev.try_get::<Option<String>, _>("actor_id")
+                .unwrap()
+                .unwrap(),
+            member_id
+        );
+        let event_id: String = ev.try_get("id").unwrap();
+
+        let mut args = tasker::db::Args::new();
+        args.s(&event_id);
+        let executions = conn
+            .fetch_all(
+                "SELECT id, rule_id, rule_version, condition_result, status, planned_actions \
+                 FROM rule_executions WHERE event_id = ?",
+                args,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            executions.len(),
+            1,
+            "[{engine}] only the enabled same-team rule fires"
+        );
+        assert_eq!(
+            executions[0]
+                .try_get::<String, _>("condition_result")
+                .unwrap(),
+            "matched"
+        );
+        assert_eq!(
+            executions[0].try_get::<String, _>("status").unwrap(),
+            "planned"
+        );
+        assert_eq!(executions[0].try_get::<i64, _>("rule_version").unwrap(), 1);
+        assert_eq!(
+            executions[0]
+                .try_get::<Option<String>, _>("planned_actions")
+                .unwrap()
+                .unwrap(),
+            r#"[{"action_type":"add_comment","index":0}]"#
+        );
+        let execution_id: String = executions[0].try_get("id").unwrap();
+
+        let mut args = tasker::db::Args::new();
+        args.s(&event_id);
+        let intents = conn
+            .fetch_all(
+                "SELECT action_type, payload, status, attempts, idempotency_key, execution_id \
+                 FROM automation_outbox WHERE event_id = ?",
+                args,
+            )
+            .await
+            .unwrap();
+        assert_eq!(intents.len(), 1, "[{engine}] one intent for the one action");
+        assert_eq!(
+            intents[0].try_get::<String, _>("action_type").unwrap(),
+            "add_comment"
+        );
+        assert_eq!(
+            intents[0].try_get::<String, _>("payload").unwrap(),
+            r#"{"body":"automation triage"}"#
+        );
+        assert_eq!(
+            intents[0].try_get::<String, _>("status").unwrap(),
+            "pending"
+        );
+        assert_eq!(intents[0].try_get::<i64, _>("attempts").unwrap(), 0);
+        assert_eq!(
+            intents[0]
+                .try_get::<String, _>("idempotency_key")
+                .unwrap()
+                .len(),
+            64
+        );
+        assert_eq!(
+            intents[0].try_get::<String, _>("execution_id").unwrap(),
+            execution_id,
+            "[{engine}] intent references its execution"
+        );
+
+        // -- 3. False condition: event persisted, no execution/intent ------
+        let exec_before = count_rows(&db, "SELECT COUNT(*) FROM rule_executions", None).await;
+        let outbox_before = count_rows(&db, "SELECT COUNT(*) FROM automation_outbox", None).await;
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{task_id}"),
+            Some(&admin),
+            json!({"priority": "urgent"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] priority change");
+        assert_eq!(
+            count_rows(&db, "SELECT COUNT(*) FROM rule_executions", None).await,
+            exec_before,
+            "[{engine}] false condition creates no execution"
+        );
+        assert_eq!(
+            count_rows(&db, "SELECT COUNT(*) FROM automation_outbox", None).await,
+            outbox_before,
+            "[{engine}] false condition creates no intent"
+        );
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM domain_events WHERE task_id = ? AND event_type = 'task_priority_changed'",
+                Some(&task_id),
+            )
+            .await,
+            1,
+            "[{engine}] priority event still captured"
+        );
+
+        // -- 4. Unassignment and no-op updates emit nothing -----------------
+        let events_before = count_rows(
+            &db,
+            "SELECT COUNT(*) FROM domain_events WHERE task_id = ?",
+            Some(&task_id),
+        )
+        .await;
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{task_id}"),
+            Some(&admin),
+            json!({"assignee_id": ""}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] unassign");
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{task_id}"),
+            Some(&admin),
+            json!({"priority": "urgent"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] no-op priority");
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM domain_events WHERE task_id = ?",
+                Some(&task_id),
+            )
+            .await,
+            events_before,
+            "[{engine}] unassignment and no-op emit nothing"
+        );
+
+        // -- 5. Rejected mutation: no event ----------------------------------
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{task_id}"),
+            Some(&outsider),
+            json!({"title": "hijack"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] outsider rejected");
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM domain_events WHERE task_id = ?",
+                Some(&task_id),
+            )
+            .await,
+            events_before,
+            "[{engine}] rejected mutation emits no event"
+        );
+
+        // -- 6. Version pinning: v2 with a false condition stops matching ----
+        {
+            let mut vconn = db.conn();
+            let now = tasker::util::now_ms();
+            let mut args = tasker::db::Args::new();
+            args.s(&status_rule)
+                .i(2i64)
+                .s("task_status_changed")
+                .s(
+                    serde_json::json!({"field":"event.actor_id","op":"EQ","value":unrelated_actor})
+                        .to_string(),
+                )
+                .s(r#"[{"body":"v2 never"}]"#)
+                .s(&admin_id)
+                .i(now);
+            vconn
+                .execute(
+                    "INSERT INTO rule_versions (rule_id, version, trigger_type, condition_json, \
+                     actions_json, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    args,
+                )
+                .await
+                .unwrap();
+            let mut args = tasker::db::Args::new();
+            args.i(2i64).s(&status_rule);
+            vconn
+                .execute("UPDATE rules SET current_version = ? WHERE id = ?", args)
+                .await
+                .unwrap();
+        }
+        // Re-assign (fires task_assigned again) so the assignee can move the
+        // task; the v2 condition is false, so no execution is added.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{task_id}"),
+            Some(&admin),
+            json!({"assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] re-assign");
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/transition"),
+            Some(&member),
+            json!({"to": "in_progress"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] transition under v2");
+        let mut args = tasker::db::Args::new();
+        args.s(&status_rule);
+        let execs = conn
+            .fetch_all(
+                "SELECT DISTINCT rule_version FROM rule_executions WHERE rule_id = ?",
+                args,
+            )
+            .await
+            .unwrap();
+        assert_eq!(execs.len(), 1, "[{engine}] one version referenced");
+        assert_eq!(
+            execs[0].try_get::<i64, _>(0).unwrap(),
+            1,
+            "[{engine}] executions cite v1; v2 (false) added none"
+        );
+
+        // -- 7. Automation-origin events are captured but not evaluated ------
+        {
+            let mut tconn = db.begin().await.unwrap();
+            tasker::rules::engine::capture_and_evaluate(
+                &mut tconn,
+                tasker::rules::engine::TaskState {
+                    team_id: &team_id,
+                    task_id: &task_id,
+                    status: "in_progress",
+                    priority: "urgent",
+                    assignee_id: None,
+                    reporter_id: None,
+                },
+                tasker::rules::engine::EventInput {
+                    event_type: tasker::rules::TriggerType::TaskStatusChanged,
+                    actor_id: None,
+                    previous: tasker::rules::EventState {
+                        status: Some("todo"),
+                        ..tasker::rules::EventState::default()
+                    },
+                    new: tasker::rules::EventState {
+                        status: Some("in_progress"),
+                        ..tasker::rules::EventState::default()
+                    },
+                },
+                tasker::rules::EventOrigin::Automation,
+            )
+            .await
+            .expect("automation capture");
+            tconn.commit().await.unwrap();
+        }
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM domain_events WHERE task_id = ? AND origin = 'automation'",
+                Some(&task_id),
+            )
+            .await,
+            1,
+            "[{engine}] automation event recorded"
+        );
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM rule_executions re JOIN domain_events de ON de.id = re.event_id \
+                 WHERE de.task_id = ? AND de.origin = 'automation'",
+                Some(&task_id),
+            )
+            .await,
+            0,
+            "[{engine}] automation-origin events never evaluate (Task 1 policy)"
+        );
+
+        // -- 8. Concurrent transitions: one winner, exactly one event --------
+        let events_before = count_rows(
+            &db,
+            "SELECT COUNT(*) FROM domain_events WHERE task_id = ?",
+            Some(&task_id),
+        )
+        .await;
+        let transition_uri = format!("/api/v1/tasks/{task_id}/transition");
+        let (r1, r2) = tokio::join!(
+            send_json(
+                &app.app,
+                "POST",
+                &transition_uri,
+                Some(&member),
+                json!({"to": "resolved"}),
+            ),
+            send_json(
+                &app.app,
+                "POST",
+                &transition_uri,
+                Some(&member),
+                json!({"to": "resolved"}),
+            ),
+        );
+        let codes = [r1.0, r2.0];
+        assert!(
+            (codes[0] == StatusCode::OK) ^ (codes[1] == StatusCode::OK),
+            "[{engine}] exactly one concurrent transition wins: {codes:?}"
+        );
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM domain_events WHERE task_id = ?",
+                Some(&task_id),
+            )
+            .await,
+            events_before + 1,
+            "[{engine}] the winner emits exactly one event"
+        );
+
+        // -- 9. Creation with an initial assignee emits the event (create hook)
+        let (code, task2) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "Assigned at creation", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] task2");
+        let created_assigned_id = task2["id"].as_str().unwrap().to_string();
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM domain_events WHERE task_id = ? AND event_type = 'task_assigned'",
+                Some(&created_assigned_id),
+            )
+            .await,
+            1,
+            "[{engine}] initial assignment emits exactly one event"
+        );
+    }
+}
+
+/// Deterministic persistence-failure injection (Task 3 B1/B2): a TEST-DATABASE
+/// trigger aborts the INSERT of `rule_executions` (B1) or `automation_outbox`
+/// (B2) for one specific task id. The trigger lives only for the duration of
+/// the test on the spawned test database and is dropped afterwards; the
+/// helper-table membership condition keeps it inert for every other row.
+/// Technique per dialect (single-statement, no multi-statement execution):
+/// - SQLite: `BEFORE INSERT ... WHEN (SELECT COUNT(*) ...) > 0 RAISE(ABORT)`
+/// - PostgreSQL: plpgsql function + trigger, `RAISE EXCEPTION`
+/// - MySQL: `SIGNAL SQLSTATE '45000'` inside the trigger body
+/// Task 4: Automation Principal identity, provisioning, and isolation.
+#[tokio::test]
+async fn rules_automation_principal_security() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+
+        // -- Idempotent provisioning; fixed identity ------------------------
+        let mut conn = db.conn();
+        let id1 = tasker::rules::actions::provision_principal(&mut conn)
+            .await
+            .expect("first provisioning");
+        let id2 = tasker::rules::actions::provision_principal(&mut conn)
+            .await
+            .expect("second provisioning");
+        assert_eq!(id1, tasker::rules::actions::AUTOMATION_PRINCIPAL_ID);
+        assert_eq!(id1, id2, "[{engine}] stable identity");
+        let mut args = tasker::db::Args::new();
+        args.s(&id1);
+        let row = conn
+            .fetch_optional(
+                "SELECT email, display_name, password_hash FROM users WHERE id = ?",
+                args,
+            )
+            .await
+            .unwrap()
+            .expect("principal row");
+        assert_eq!(
+            row.try_get::<String, _>("email").unwrap(),
+            "automation@tasker.local"
+        );
+        assert_eq!(
+            row.try_get::<String, _>("display_name").unwrap(),
+            "Tasker Automation"
+        );
+        // The stored hash is not a PHC string: no password verifies against it.
+        let hash = row.try_get::<String, _>("password_hash").unwrap();
+        assert!(
+            !tasker::security::password::verify("test-password-123", &hash),
+            "[{engine}] principal must not accept its documented password"
+        );
+        assert!(
+            !tasker::security::password::verify("", &hash),
+            "[{engine}] principal must not accept an empty password"
+        );
+
+        // -- Interactive login is impossible --------------------------------
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/auth/login",
+            None,
+            json!({"email": "automation@tasker.local", "password": "test-password-123"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNAUTHORIZED,
+            "[{engine}] principal login rejected"
+        );
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/auth/login",
+            None,
+            json!({"email": "automation@tasker.local", "password": "!tasker-automation-no-login"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNAUTHORIZED,
+            "[{engine}] hash string is not a password"
+        );
+
+        // -- The reserved email cannot enter through provisioning paths -----
+        assert!(
+            tasker::util::validate_email("automation@tasker.local").is_err(),
+            "[{engine}] reserved email rejected by the centralized validator"
+        );
+        assert!(tasker::util::validate_email("other@test.local").is_ok());
+
+        // -- No implicit team membership or capability ----------------------
+        let p_suffix = Uuid::now_v7().simple();
+        let admin_email = format!("p-admin-{p_suffix}@test.local");
+        let _admin_id = seed_user(&db, &admin_email, "P Admin").await;
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name": "PA"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let membership = tasker::authorization::get_membership(&mut conn, &team_id, &id1)
+            .await
+            .expect("membership query");
+        assert!(
+            membership.is_none(),
+            "[{engine}] principal has no team membership"
+        );
+        // Supplying the principal's UUID through ordinary authorization can
+        // never grant anything: it holds no membership row.
+        assert!(
+            !tasker::authorization::get_membership(&mut conn, &team_id, &id1)
+                .await
+                .unwrap()
+                .map(|m| m.role.can(tasker::authorization::Capability::CreateTask))
+                .unwrap_or(false),
+            "[{engine}] no capability via principal identity"
+        );
+
+        // -- Email-conflict fail-closed (isolated SQLite leg only: the
+        //    shared CI PG/MySQL databases must not be poisoned) --------------
+        if engine == "sqlite" {
+            let conflict_app = spawn_app(&format!(
+                "sqlite:{}/{}",
+                std::env::temp_dir().display(),
+                Uuid::now_v7()
+            ))
+            .await;
+            {
+                let mut c = conflict_app.db.conn();
+                let now = tasker::util::now_ms();
+                let mut args = tasker::db::Args::new();
+                args.s(Uuid::now_v7().to_string())
+                    .s("automation@tasker.local")
+                    .s("Foreign Squatter")
+                    .s("$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+                    .b(true)
+                    .i(now)
+                    .i(now);
+                c.execute(
+                    "INSERT INTO users (id, email, display_name, password_hash, is_active, \
+                     created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    args,
+                )
+                .await
+                .unwrap();
+            }
+            let mut c = conflict_app.db.conn();
+            let err = tasker::rules::actions::provision_principal(&mut c)
+                .await
+                .expect_err("foreign email holder must fail provisioning closed");
+            assert!(
+                format!("{err}").contains("principal_email_conflict"),
+                "[{engine}] diagnosable conflict category: {err}"
+            );
+        }
+    }
+}
+
+/// Task 4: internal action execution through the outbox primitive.
+#[tokio::test]
+async fn rules_internal_actions_end_to_end() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+        let suffix = Uuid::now_v7().simple();
+
+        // ---- Fixtures ----
+        let admin_email = format!("rules-act-{suffix}@test.local");
+        let member_email = format!("rules-act-m-{suffix}@test.local");
+        let outsider_email = format!("rules-act-o-{suffix}@test.local");
+        let admin_id = seed_user(&db, &admin_email, "Act Admin").await;
+        seed_user(&db, &member_email, "Act Member").await;
+        let outsider_id = seed_user(&db, &outsider_email, "Act Outsider").await;
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name": "ACT"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role": "member", "temp_password": "member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name": "ACTP"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+        let member_id = user_id_by_email(&db, &member_email).await;
+        let (code, task) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "Action target", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let task_id = task["id"].as_str().unwrap().to_string();
+
+        // Rule with all three action kinds (declaration order is preserved).
+        // The outsider's real id is seeded directly: the DSL validates every
+        // explicit recipient as a UUID at parse time.
+        let notify_actions = serde_json::json!([
+            {"body":"automation triage"},
+            {"recipients":{"selectors":["assignee","reporter"],"users":[outsider_id]}},
+            {"message":{"connection_ref":"conn-1","destination_ref":"dest-1","format":"plain_text","body":"notify the channel"}}
+        ])
+        .to_string();
+        seed_rule(
+            &db,
+            &team_id,
+            "task_status_changed",
+            r#"{"field":"task.status","op":"IN","values":["backlog","todo","in_progress","resolved","in_review","closed"]}"#,
+            &notify_actions,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/transition"),
+            Some(&member),
+            json!({"to": "todo"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        // Collect the three intents in declaration order.
+        let mut conn = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(&task_id);
+        let intents = conn
+            .fetch_all(
+                "SELECT o.id, o.action_type FROM automation_outbox o \
+                 JOIN rule_executions e ON e.id = o.execution_id \
+                 WHERE e.task_id = ? ORDER BY o.created_at, o.id",
+                args,
+            )
+            .await
+            .unwrap();
+        assert_eq!(intents.len(), 3, "[{engine}] three intents, one per action");
+        let by_type = |t: &str| {
+            intents
+                .iter()
+                .find(|r| r.try_get::<String, _>("action_type").unwrap() == t)
+                .map(|r| r.try_get::<String, _>("id").unwrap())
+                .unwrap_or_else(|| panic!("no {t} intent"))
+        };
+        let comment_intent = by_type("add_comment");
+        let notify_intent = by_type("send_notification");
+        let message_intent = by_type("send_message");
+
+        // -- send_message: external delivery never happens here -------------
+        {
+            let mut tx = db.begin().await.unwrap();
+            let outcome = tasker::rules::outbox::execute_internal_action(&mut tx, &message_intent)
+                .await
+                .expect("external classification");
+            tx.commit().await.unwrap();
+            assert_eq!(
+                outcome,
+                tasker::rules::outbox::ExecutionOutcome::ExternalPending,
+                "[{engine}] send_message is deferred, not executed"
+            );
+            let mut args = tasker::db::Args::new();
+            args.s(&message_intent);
+            let row = conn
+                .fetch_optional("SELECT status FROM automation_outbox WHERE id = ?", args)
+                .await
+                .unwrap()
+                .expect("intent row");
+            assert_eq!(
+                row.try_get::<String, _>("status").unwrap(),
+                "pending",
+                "[{engine}] external intent stays pending for Task 5"
+            );
+            assert_eq!(
+                count_rows(
+                    &db,
+                    "SELECT COUNT(*) FROM rule_action_results WHERE outbox_id = ?",
+                    Some(&message_intent),
+                )
+                .await,
+                0,
+                "[{engine}] no delivery-success result recorded"
+            );
+        }
+
+        // -- add_comment: exactly one comment authored by the principal -----
+        {
+            let mut tx = db.begin().await.unwrap();
+            let outcome = tasker::rules::outbox::execute_internal_action(&mut tx, &comment_intent)
+                .await
+                .expect("comment execution");
+            tx.commit().await.unwrap();
+            assert_eq!(outcome, tasker::rules::outbox::ExecutionOutcome::Completed);
+        }
+        let mut args = tasker::db::Args::new();
+        args.s(&task_id);
+        let comments = conn
+            .fetch_all(
+                "SELECT c.body, c.author_id, c.guest_visible FROM comments c WHERE c.task_id = ?",
+                args,
+            )
+            .await
+            .unwrap();
+        assert_eq!(comments.len(), 1, "[{engine}] exactly one comment");
+        assert_eq!(
+            comments[0].try_get::<String, _>("body").unwrap(),
+            "automation triage"
+        );
+        assert_eq!(
+            comments[0].try_get::<String, _>("author_id").unwrap(),
+            tasker::rules::actions::AUTOMATION_PRINCIPAL_ID,
+            "[{engine}] author is the Automation Principal"
+        );
+        assert_eq!(
+            comments[0].try_get::<i64, _>("guest_visible").unwrap(),
+            0,
+            "[{engine}] automation comments are internal"
+        );
+        let mut args = tasker::db::Args::new();
+        args.s(&comment_intent);
+        let result = conn
+            .fetch_optional(
+                "SELECT outcome, author_id, body_hash, detail FROM rule_action_results \
+                 WHERE outbox_id = ?",
+                args,
+            )
+            .await
+            .unwrap()
+            .expect("ledger row");
+        assert_eq!(result.try_get::<String, _>("outcome").unwrap(), "completed");
+        assert_eq!(
+            result
+                .try_get::<Option<String>, _>("author_id")
+                .unwrap()
+                .unwrap(),
+            tasker::rules::actions::AUTOMATION_PRINCIPAL_ID
+        );
+        assert!(
+            result
+                .try_get::<Option<String>, _>("body_hash")
+                .unwrap()
+                .is_some()
+        );
+        let detail = result
+            .try_get::<Option<String>, _>("detail")
+            .unwrap()
+            .unwrap();
+        assert!(
+            detail.contains("comment_id"),
+            "[{engine}] result cites the comment"
+        );
+        let mut args = tasker::db::Args::new();
+        args.s(&comment_intent);
+        let row = conn
+            .fetch_optional(
+                "SELECT status, completed_at FROM automation_outbox WHERE id = ?",
+                args,
+            )
+            .await
+            .unwrap()
+            .expect("intent");
+        assert_eq!(row.try_get::<String, _>("status").unwrap(), "delivered");
+        assert!(
+            row.try_get::<Option<i64>, _>("completed_at")
+                .unwrap()
+                .is_some()
+        );
+
+        // -- Duplicate execution: no duplicate effect ------------------------
+        {
+            let mut tx = db.begin().await.unwrap();
+            let outcome = tasker::rules::outbox::execute_internal_action(&mut tx, &comment_intent)
+                .await
+                .expect("duplicate is a clean no-op");
+            tx.commit().await.unwrap();
+            assert_eq!(
+                outcome,
+                tasker::rules::outbox::ExecutionOutcome::AlreadyExecuted
+            );
+        }
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM comments WHERE task_id = ?",
+                Some(&task_id)
+            )
+            .await,
+            1,
+            "[{engine}] no duplicate comment"
+        );
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM rule_action_results WHERE outbox_id = ?",
+                Some(&comment_intent),
+            )
+            .await,
+            1,
+            "[{engine}] one durable result"
+        );
+
+        // -- send_notification: selectors + revalidated explicit recipients --
+        {
+            let mut tx = db.begin().await.unwrap();
+            let outcome = tasker::rules::outbox::execute_internal_action(&mut tx, &notify_intent)
+                .await
+                .expect("notification execution");
+            tx.commit().await.unwrap();
+            assert_eq!(outcome, tasker::rules::outbox::ExecutionOutcome::Completed);
+        }
+        let mut args = tasker::db::Args::new();
+        args.s(&task_id);
+        let notifications = conn
+            .fetch_all(
+                "SELECT n.recipient_id, n.event, n.actor_id FROM notifications n                  WHERE n.task_id = ? AND n.event = 'automation_triggered'",
+                args,
+            )
+            .await
+            .unwrap();
+        let recipients: Vec<String> = notifications
+            .iter()
+            .map(|r| r.try_get::<String, _>("recipient_id").unwrap())
+            .collect();
+        assert!(
+            recipients.contains(&member_id),
+            "[{engine}] assignee notified"
+        );
+        assert!(
+            recipients.contains(&admin_id),
+            "[{engine}] reporter notified"
+        );
+        assert!(
+            !recipients.contains(&outsider_id),
+            "[{engine}] departed/non-member explicit recipient skipped"
+        );
+        assert!(
+            notifications
+                .iter()
+                .all(|r| r.try_get::<String, _>("event").unwrap() == "automation_triggered"),
+            "[{engine}] in-app automation event only"
+        );
+        // Duplicate execution: no duplicate notifications.
+        {
+            let mut tx = db.begin().await.unwrap();
+            let outcome = tasker::rules::outbox::execute_internal_action(&mut tx, &notify_intent)
+                .await
+                .expect("duplicate notification is a clean no-op");
+            tx.commit().await.unwrap();
+            assert_eq!(
+                outcome,
+                tasker::rules::outbox::ExecutionOutcome::AlreadyExecuted
+            );
+        }
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM notifications WHERE task_id = ? AND event = 'automation_triggered'",
+                Some(&task_id),
+            ).await,
+            2,
+            "[{engine}] no duplicate notifications"
+        );
+
+        // -- Scope corruption: cross-team task reference fails loudly --------
+        let (code, other_team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name": "ACT-OTHER"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let other_team_id = other_team["id"].as_str().unwrap().to_string();
+        let (code, other_project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{other_team_id}/projects"),
+            Some(&admin),
+            json!({"name": "ACT-OTHERP"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, foreign_task) = send_json(
+            &app.app,
+            "POST",
+            &format!(
+                "/api/v1/projects/{}/tasks",
+                other_project["id"].as_str().unwrap()
+            ),
+            Some(&admin),
+            json!({"title": "Foreign task"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        // A second status rule so a fresh add_comment intent exists to corrupt.
+        seed_rule(
+            &db,
+            &team_id,
+            "task_priority_changed",
+            r#"{"field":"task.priority","op":"IN","values":["low","medium","high","urgent"]}"#,
+            r#"[{"body":"scope probe"}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{task_id}"),
+            Some(&admin),
+            json!({"priority": "high"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let mut conn2 = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s("add_comment");
+        let scope_intent: String = conn2
+            .fetch_optional(
+                "SELECT o.id FROM automation_outbox o WHERE o.action_type = ? \
+                 AND o.status = 'pending' ORDER BY o.created_at DESC",
+                args,
+            )
+            .await
+            .unwrap()
+            .expect("scope-probe intent")
+            .try_get("id")
+            .unwrap();
+        {
+            let mut c = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(&foreign_task["id"].as_str().unwrap().to_string())
+                .s(&scope_intent);
+            c.execute(
+                "UPDATE automation_outbox SET task_id = ? WHERE id = ?",
+                args,
+            )
+            .await
+            .unwrap();
+        }
+        {
+            let mut tx = db.begin().await.unwrap();
+            let err = tasker::rules::outbox::execute_internal_action(&mut tx, &scope_intent)
+                .await
+                .expect_err("[{engine}] cross-scope reference must fail");
+            tx.rollback().await;
+            assert!(
+                format!("{err}").contains("corrupted") || format!("{err}").contains("team"),
+                "[{engine}] diagnosable scope failure: {err}"
+            );
+        }
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM rule_action_results WHERE outbox_id = ?",
+                Some(&scope_intent),
+            )
+            .await,
+            0,
+            "[{engine}] no ledger entry for a corrupted intent"
+        );
+
+        // -- Deleted task: durable skip, no effect ---------------------------
+        seed_rule(
+            &db,
+            &team_id,
+            "task_assigned",
+            r#"{"field":"task.assignee_id","op":"NEQ","value":null}"#,
+            r#"[{"body":"for a task that will vanish"}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+        let (code, vanishing) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "Vanishing", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let vanishing_id = vanishing["id"].as_str().unwrap().to_string();
+        // Unassign-then-reassign produces a fresh task_assigned event + intent.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{vanishing_id}"),
+            Some(&admin),
+            json!({"assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let mut conn2 = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(&vanishing_id);
+        let vanish_intent: String = conn2
+            .fetch_optional(
+                "SELECT o.id FROM automation_outbox o \
+                 JOIN rule_executions e ON e.id = o.execution_id \
+                 WHERE e.task_id = ? AND o.action_type = 'add_comment' AND o.status = 'pending'",
+                args,
+            )
+            .await
+            .unwrap()
+            .expect("vanishing-task intent")
+            .try_get("id")
+            .unwrap();
+        // Hard-delete the task (automation history survives by design).
+        {
+            let mut c = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(&vanishing_id);
+            c.execute("DELETE FROM tasks WHERE id = ?", args)
+                .await
+                .unwrap();
+        }
+        {
+            let mut tx = db.begin().await.unwrap();
+            let outcome = tasker::rules::outbox::execute_internal_action(&mut tx, &vanish_intent)
+                .await
+                .expect("deleted-task handling");
+            tx.commit().await.unwrap();
+            assert_eq!(outcome, tasker::rules::outbox::ExecutionOutcome::Completed);
+        }
+        let mut args = tasker::db::Args::new();
+        args.s(&vanish_intent);
+        let row = conn2
+            .fetch_optional(
+                "SELECT outcome, detail FROM rule_action_results WHERE outbox_id = ?",
+                args,
+            )
+            .await
+            .unwrap()
+            .expect("skip result");
+        assert_eq!(row.try_get::<String, _>("outcome").unwrap(), "skipped");
+        assert!(
+            row.try_get::<Option<String>, _>("detail")
+                .unwrap()
+                .unwrap()
+                .contains("task_deleted"),
+            "[{engine}] skip reason recorded"
+        );
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM comments WHERE task_id = ?",
+                Some(&vanishing_id)
+            )
+            .await,
+            0,
+            "[{engine}] no comment on a deleted task"
+        );
+
+        // -- Concurrency: two simultaneous executions, one effect ------------
+        let (code, task4) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "Concurrent target", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let task4_id = task4["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task4_id}/transition"),
+            Some(&member),
+            json!({"to": "todo"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let mut conn2 = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(&task4_id);
+        let conc_intent: String = conn2
+            .fetch_optional(
+                "SELECT o.id FROM automation_outbox o \
+                 JOIN rule_executions e ON e.id = o.execution_id \
+                 WHERE e.task_id = ? AND o.action_type = 'add_comment'",
+                args,
+            )
+            .await
+            .unwrap()
+            .expect("concurrency intent")
+            .try_get("id")
+            .unwrap();
+        {
+            let db1 = db.clone();
+            let db2 = db.clone();
+            let intent1 = conc_intent.clone();
+            let intent2 = conc_intent.clone();
+            let (r1, r2) = tokio::join!(
+                async move {
+                    let mut tx = db1.begin().await.unwrap();
+                    let out =
+                        tasker::rules::outbox::execute_internal_action(&mut tx, &intent1).await;
+                    if out.is_ok() {
+                        tx.commit().await.unwrap();
+                    } else {
+                        tx.rollback().await;
+                    }
+                    out
+                },
+                async move {
+                    let mut tx = db2.begin().await.unwrap();
+                    let out =
+                        tasker::rules::outbox::execute_internal_action(&mut tx, &intent2).await;
+                    if out.is_ok() {
+                        tx.commit().await.unwrap();
+                    } else {
+                        tx.rollback().await;
+                    }
+                    out
+                },
+            );
+            let completed = matches!(&r1, Ok(tasker::rules::outbox::ExecutionOutcome::Completed))
+                as u8
+                + matches!(&r2, Ok(tasker::rules::outbox::ExecutionOutcome::Completed)) as u8;
+            assert_eq!(
+                completed, 1,
+                "[{engine}] exactly one concurrent completion ({r1:?} / {r2:?})"
+            );
+        }
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM comments WHERE task_id = ?",
+                Some(&task4_id)
+            )
+            .await,
+            1,
+            "[{engine}] concurrent attempts produce one comment"
+        );
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM rule_action_results WHERE outbox_id = ?",
+                Some(&conc_intent),
+            )
+            .await,
+            1,
+            "[{engine}] one authoritative result"
+        );
+    }
+}
+
+/// Task 4: a ledger persistence failure leaves neither effect nor result.
+#[tokio::test]
+async fn rules_internal_actions_ledger_failure_atomicity() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+        let suffix = Uuid::now_v7().simple();
+
+        let admin_email = format!("rules-ledger-{suffix}@test.local");
+        let member_email = format!("rules-ledger-m-{suffix}@test.local");
+        let admin_id = seed_user(&db, &admin_email, "Ledger Admin").await;
+        seed_user(&db, &member_email, "Ledger Member").await;
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name": "LED"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role": "member", "temp_password": "member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name": "LEDP"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+        let member_id = user_id_by_email(&db, &member_email).await;
+        let (code, task) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "Ledger target", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let task_id = task["id"].as_str().unwrap().to_string();
+        seed_rule(
+            &db,
+            &team_id,
+            "task_status_changed",
+            r#"{"field":"task.status","op":"IN","values":["backlog","todo","in_progress","resolved","in_review","closed"]}"#,
+            r#"[{"body":"ledger probe"}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+
+        // Test-database trigger: abort the ledger INSERT for this task's
+        // intents (same technique as the capture-failure test).
+        {
+            let mut conn = db.conn();
+            let trigger_name = format!("p8_fail_ledger_{suffix}");
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS p8_fail_ledger (task_id TEXT PRIMARY KEY)",
+                tasker::db::Args::new(),
+            )
+            .await
+            .unwrap();
+            let mut args = tasker::db::Args::new();
+            args.s(&task_id);
+            conn.execute("INSERT INTO p8_fail_ledger (task_id) VALUES (?)", args)
+                .await
+                .unwrap();
+            let create = match engine.as_str() {
+                "sqlite" => format!(
+                    "CREATE TRIGGER {trigger_name} BEFORE INSERT ON rule_action_results \
+                     WHEN EXISTS (SELECT 1 FROM automation_outbox o WHERE o.id = NEW.outbox_id \
+                     AND o.task_id IN (SELECT task_id FROM p8_fail_ledger)) \
+                     BEGIN SELECT RAISE(ABORT, 'ledger injection'); END"
+                ),
+                "postgres" => format!(
+                    "CREATE OR REPLACE FUNCTION p8_fail_ledger_{suffix}() RETURNS trigger AS $$ \
+                     BEGIN IF EXISTS (SELECT 1 FROM automation_outbox o WHERE o.id = NEW.outbox_id \
+                     AND o.task_id IN (SELECT task_id FROM p8_fail_ledger)) THEN \
+                     RAISE EXCEPTION 'ledger injection'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql"
+                ),
+                _ => format!(
+                    "CREATE TRIGGER {trigger_name} BEFORE INSERT ON rule_action_results FOR EACH ROW \
+                     BEGIN IF EXISTS (SELECT 1 FROM automation_outbox o WHERE o.id = NEW.outbox_id \
+                     AND o.task_id IN (SELECT task_id FROM p8_fail_ledger)) THEN \
+                     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ledger injection'; END IF; END"
+                ),
+            };
+            conn.execute(&create, tasker::db::Args::new())
+                .await
+                .unwrap();
+            if engine == "postgres" {
+                conn.execute(
+                    &format!(
+                        "CREATE TRIGGER {trigger_name} BEFORE INSERT ON rule_action_results \
+                         FOR EACH ROW EXECUTE FUNCTION p8_fail_ledger_{suffix}()"
+                    ),
+                    tasker::db::Args::new(),
+                )
+                .await
+                .unwrap();
+            }
+        }
+
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/transition"),
+            Some(&member),
+            json!({"to": "todo"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let mut conn = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(&task_id);
+        let intent: String = conn
+            .fetch_optional(
+                "SELECT o.id FROM automation_outbox o \
+                 JOIN rule_executions e ON e.id = o.execution_id WHERE e.task_id = ?",
+                args,
+            )
+            .await
+            .unwrap()
+            .expect("intent")
+            .try_get("id")
+            .unwrap();
+
+        {
+            let mut tx = db.begin().await.unwrap();
+            let err = tasker::rules::outbox::execute_internal_action(&mut tx, &intent)
+                .await
+                .expect_err("[{engine}] ledger injection fails the execution");
+            tx.rollback().await;
+            assert!(
+                format!("{err}").contains("ledger injection"),
+                "[{engine}] injection surfaced: {err}"
+            );
+        }
+        // Neither the effect nor a successful result survived.
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM comments WHERE task_id = ?",
+                Some(&task_id)
+            )
+            .await,
+            0,
+            "[{engine}] no comment without its ledger entry"
+        );
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM rule_action_results WHERE outbox_id = ?",
+                Some(&intent),
+            )
+            .await,
+            0,
+            "[{engine}] no ledger entry"
+        );
+        let mut args = tasker::db::Args::new();
+        args.s(&intent);
+        let row = conn
+            .fetch_optional("SELECT status FROM automation_outbox WHERE id = ?", args)
+            .await
+            .unwrap()
+            .expect("intent");
+        assert_eq!(
+            row.try_get::<String, _>("status").unwrap(),
+            "pending",
+            "[{engine}] intent remains retryable"
+        );
+    }
+}
+
+async fn rules_capture_insert_failure_atomicity() {
+    for (engine, url) in test_db_urls() {
+        for stage in ["rule_executions", "automation_outbox"] {
+            let app = spawn_app(&url).await;
+            let db = app.db.clone();
+            let suffix = Uuid::now_v7().simple();
+
+            let admin_email = format!("rules-inject-{suffix}@test.local");
+            let member_email = format!("rules-inject-m-{suffix}@test.local");
+            let admin_id = seed_user(&db, &admin_email, "Rules Inject").await;
+            seed_user(&db, &member_email, "Rules Inject Member").await;
+            let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+            let member = login_as(&app.app, &member_email, "test-password-123").await;
+            let (code, team) = send_json(
+                &app.app,
+                "POST",
+                "/api/v1/teams",
+                Some(&admin),
+                json!({"name": "RI"}),
+            )
+            .await;
+            assert_eq!(code, StatusCode::CREATED);
+            let team_id = team["id"].as_str().unwrap().to_string();
+            let (code, _) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/teams/{team_id}/members"),
+                Some(&admin),
+                json!({"email": member_email, "role": "member", "temp_password": "member-temp-pw"}),
+            )
+            .await;
+            assert_eq!(code, StatusCode::CREATED);
+            let (code, project) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/teams/{team_id}/projects"),
+                Some(&admin),
+                json!({"name": "RIP"}),
+            )
+            .await;
+            assert_eq!(code, StatusCode::CREATED);
+            let project_id = project["id"].as_str().unwrap().to_string();
+            let member_id = user_id_by_email(&db, &member_email).await;
+            let (code, task) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/projects/{project_id}/tasks"),
+                Some(&admin),
+                json!({"title": "Injection target", "assignee_id": member_id}),
+            )
+            .await;
+            assert_eq!(code, StatusCode::CREATED);
+            let task_id = task["id"].as_str().unwrap().to_string();
+
+            seed_rule(
+                &db,
+                &team_id,
+                "task_status_changed",
+                r#"{"field":"task.status","op":"IN","values":["backlog","todo","in_progress","resolved","in_review","closed"]}"#,
+                r#"[{"body":"injected"}]"#,
+                true,
+                1,
+                &admin_id,
+            )
+            .await;
+
+            // The injection trigger: aborts the stage's INSERT for this task.
+            {
+                let mut conn = db.conn();
+                let target_table = stage;
+                let trigger_name = format!("p8_fail_{stage}_{suffix}");
+                let create = match engine.as_str() {
+                    "sqlite" => format!(
+                        "CREATE TRIGGER {trigger_name} BEFORE INSERT ON {target_table} \
+                         WHEN (SELECT COUNT(*) FROM p8_fail_targets WHERE task_id = NEW.task_id) > 0 \
+                         BEGIN SELECT RAISE(ABORT, 'test injection'); END"
+                    ),
+                    "postgres" => format!(
+                        "CREATE OR REPLACE FUNCTION p8_fail_{suffix}() RETURNS trigger AS $$ \
+                         BEGIN IF (SELECT COUNT(*) FROM p8_fail_targets WHERE task_id = NEW.task_id) > 0 THEN \
+                         RAISE EXCEPTION 'test injection'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql"
+                    ),
+                    _ => format!(
+                        "CREATE TRIGGER {trigger_name} BEFORE INSERT ON {target_table} FOR EACH ROW \
+                         BEGIN IF (SELECT COUNT(*) FROM p8_fail_targets WHERE task_id = NEW.task_id) > 0 THEN \
+                         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'test injection'; END IF; END"
+                    ),
+                };
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS p8_fail_targets (task_id TEXT PRIMARY KEY)",
+                    tasker::db::Args::new(),
+                )
+                .await
+                .unwrap_or_else(|e| panic!("[{engine}] helper table: {e}"));
+                let mut args = tasker::db::Args::new();
+                args.s(&task_id);
+                conn.execute("INSERT INTO p8_fail_targets (task_id) VALUES (?)", args)
+                    .await
+                    .unwrap();
+                conn.execute(&create, tasker::db::Args::new())
+                    .await
+                    .unwrap_or_else(|e| panic!("[{engine}] create trigger: {e}"));
+                if engine == "postgres" {
+                    conn.execute(
+                        &format!(
+                            "CREATE TRIGGER {trigger_name} BEFORE INSERT ON {target_table} \
+                             FOR EACH ROW EXECUTE FUNCTION p8_fail_{suffix}()"
+                        ),
+                        tasker::db::Args::new(),
+                    )
+                    .await
+                    .unwrap_or_else(|e| panic!("[{engine}] create pg trigger: {e}"));
+                }
+            }
+
+            // The creation-assignment event already exists; the injected
+            // failure must add nothing.
+            let events_before = count_rows(
+                &db,
+                "SELECT COUNT(*) FROM domain_events WHERE task_id = ?",
+                Some(&task_id),
+            )
+            .await;
+            let exec_before = count_rows(
+                &db,
+                "SELECT COUNT(*) FROM rule_executions WHERE task_id = ?",
+                Some(&task_id),
+            )
+            .await;
+            let outbox_before = count_rows(
+                &db,
+                "SELECT COUNT(*) FROM automation_outbox WHERE task_id = ?",
+                Some(&task_id),
+            )
+            .await;
+            let (code, _) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/tasks/{task_id}/transition"),
+                Some(&member),
+                json!({"to": "todo"}),
+            )
+            .await;
+            assert_eq!(
+                code,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "[{engine}] {stage} injection fails the mutation"
+            );
+
+            // Persisted state after the aborted transaction: nothing added.
+            assert_eq!(
+                count_rows(
+                    &db,
+                    "SELECT COUNT(*) FROM domain_events WHERE task_id = ?",
+                    Some(&task_id),
+                )
+                .await,
+                events_before,
+                "[{engine}] {stage}: no event"
+            );
+            assert_eq!(
+                count_rows(
+                    &db,
+                    "SELECT COUNT(*) FROM rule_executions WHERE task_id = ?",
+                    Some(&task_id),
+                )
+                .await,
+                exec_before,
+                "[{engine}] {stage}: no execution"
+            );
+            assert_eq!(
+                count_rows(
+                    &db,
+                    "SELECT COUNT(*) FROM automation_outbox WHERE task_id = ?",
+                    Some(&task_id),
+                )
+                .await,
+                outbox_before,
+                "[{engine}] {stage}: no intent"
+            );
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(&task_id);
+            let row = conn
+                .fetch_optional("SELECT status FROM tasks WHERE id = ?", args)
+                .await
+                .unwrap()
+                .expect("task row");
+            assert_eq!(
+                row.try_get::<String, _>("status").unwrap(),
+                "backlog",
+                "[{engine}] {stage}: task mutation rolled back"
+            );
+
+            // Remove the injection; the same transition then succeeds fully.
+            {
+                let mut conn = db.conn();
+                let trigger_name = format!("p8_fail_{stage}_{suffix}");
+                conn.execute("DELETE FROM p8_fail_targets WHERE task_id = ?", {
+                    let mut args = tasker::db::Args::new();
+                    args.s(&task_id);
+                    args
+                })
+                .await
+                .unwrap();
+                if engine == "postgres" {
+                    conn.execute(
+                        &format!("DROP TRIGGER {trigger_name} ON {stage}"),
+                        tasker::db::Args::new(),
+                    )
+                    .await
+                    .unwrap();
+                    conn.execute(
+                        &format!("DROP FUNCTION p8_fail_{suffix}()"),
+                        tasker::db::Args::new(),
+                    )
+                    .await
+                    .unwrap();
+                } else {
+                    conn.execute(
+                        &format!("DROP TRIGGER {trigger_name}"),
+                        tasker::db::Args::new(),
+                    )
+                    .await
+                    .unwrap();
+                }
+            }
+            let (code, _) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/tasks/{task_id}/transition"),
+                Some(&member),
+                json!({"to": "todo"}),
+            )
+            .await;
+            assert_eq!(
+                code,
+                StatusCode::OK,
+                "[{engine}] {stage}: control transition succeeds"
+            );
+            assert_eq!(
+                count_rows(
+                    &db,
+                    "SELECT COUNT(*) FROM domain_events WHERE task_id = ?",
+                    Some(&task_id),
+                )
+                .await,
+                events_before + 1,
+                "[{engine}] {stage}: control event persisted"
+            );
+            assert_eq!(
+                count_rows(
+                    &db,
+                    "SELECT COUNT(*) FROM automation_outbox WHERE task_id = ?",
+                    Some(&task_id),
+                )
+                .await,
+                outbox_before + 1,
+                "[{engine}] {stage}: control intent persisted"
+            );
+        }
+    }
+}
+
+async fn rules_capture_atomicity_on_failure() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+        let suffix = Uuid::now_v7().simple();
+
+        let admin_email = format!("rules-atom-{suffix}@test.local");
+        let member_email = format!("rules-atom-m-{suffix}@test.local");
+        let admin_id = seed_user(&db, &admin_email, "Rules Atomic").await;
+        seed_user(&db, &member_email, "Rules Atomic Member").await;
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name": "RA"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role": "member", "temp_password": "member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name": "RAP"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+        let member_id = user_id_by_email(&db, &member_email).await;
+        let (code, task) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "Atomicity target", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let task_id = task["id"].as_str().unwrap().to_string();
+
+        // Corruption A: a stored version whose condition is not valid JSON.
+        // The application contract makes this unwritable; inserting it raw
+        // simulates external corruption, and the pipeline must fail the WHOLE
+        // transaction rather than skip the rule.
+        seed_rule(
+            &db,
+            &team_id,
+            "task_status_changed",
+            "not json at all",
+            r#"[{"body":"x"}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+
+        // The creation-assignment event already exists; the corrupt
+        // transition must add NOTHING.
+        let events_before = count_rows(
+            &db,
+            "SELECT COUNT(*) FROM domain_events WHERE task_id = ?",
+            Some(&task_id),
+        )
+        .await;
+        let exec_before = count_rows(&db, "SELECT COUNT(*) FROM rule_executions", None).await;
+        let outbox_before = count_rows(&db, "SELECT COUNT(*) FROM automation_outbox", None).await;
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/transition"),
+            Some(&member),
+            json!({"to": "todo"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "[{engine}] corrupt definition fails the mutation"
+        );
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM domain_events WHERE task_id = ?",
+                Some(&task_id),
+            )
+            .await,
+            events_before,
+            "[{engine}] no event persisted"
+        );
+        assert_eq!(
+            count_rows(&db, "SELECT COUNT(*) FROM rule_executions", None).await,
+            exec_before,
+            "[{engine}] no execution persisted"
+        );
+        assert_eq!(
+            count_rows(&db, "SELECT COUNT(*) FROM automation_outbox", None).await,
+            outbox_before,
+            "[{engine}] no intent persisted"
+        );
+        // The originating mutation itself rolled back.
+        let mut conn = db.conn();
+        let mut args = tasker::db::Args::new();
+        args.s(&task_id);
+        let row = conn
+            .fetch_optional("SELECT status FROM tasks WHERE id = ?", args)
+            .await
+            .unwrap()
+            .expect("task row");
+        assert_eq!(
+            row.try_get::<String, _>("status").unwrap(),
+            "backlog",
+            "[{engine}] task mutation rolled back"
+        );
+
+        // Corruption B: an action list that violates the application cap.
+        seed_rule(
+            &db,
+            &team_id,
+            "task_status_changed",
+            r#"{"field":"task.status","op":"IN","values":["backlog","todo","in_progress","resolved","in_review","closed"]}"#,
+            r#"[{"body":"1"},{"body":"2"},{"body":"3"},{"body":"4"},{"body":"5"},{"body":"6"}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/transition"),
+            Some(&member),
+            json!({"to": "todo"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "[{engine}] oversized action list fails the mutation"
+        );
+        assert_eq!(
+            count_rows(&db, "SELECT COUNT(*) FROM automation_outbox", None).await,
+            outbox_before,
+            "[{engine}] still no intents"
+        );
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM domain_events WHERE task_id = ?",
+                Some(&task_id),
+            )
+            .await,
+            events_before,
+            "[{engine}] still no events"
+        );
+
+        // Control: with the corrupt definitions removed, the same transition
+        // succeeds end to end.
+        {
+            let mut dconn = db.conn();
+            // Child-first: rule_versions RESTRICT-deletes on rules.
+            dconn
+                .execute(
+                    "DELETE FROM rule_versions WHERE rule_id IN (SELECT id FROM rules WHERE team_id = ?)",
+                    {
+                        let mut args = tasker::db::Args::new();
+                        args.s(&team_id);
+                        args
+                    },
+                )
+                .await
+                .unwrap();
+            let mut args = tasker::db::Args::new();
+            args.s(&team_id);
+            dconn
+                .execute("DELETE FROM rules WHERE team_id = ?", args)
+                .await
+                .unwrap();
+        }
+        seed_rule(
+            &db,
+            &team_id,
+            "task_status_changed",
+            r#"{"field":"task.status","op":"IN","values":["backlog","todo","in_progress","resolved","in_review","closed"]}"#,
+            r#"[{"body":"ok now"}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/transition"),
+            Some(&member),
+            json!({"to": "todo"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] healthy pipeline succeeds");
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM domain_events WHERE task_id = ?",
+                Some(&task_id),
+            )
+            .await,
+            events_before + 1,
+            "[{engine}] event persisted"
+        );
+        assert_eq!(
+            count_rows(&db, "SELECT COUNT(*) FROM automation_outbox", None).await,
+            outbox_before + 1,
+            "[{engine}] intent persisted"
+        );
+    }
+}
+
 async fn db_user_mfa_exists(db: &Database, user_id: &str) -> bool {
     let mut conn = db.conn();
     let mut args = tasker::db::Args::new();
@@ -6094,5 +8235,402 @@ async fn profile_and_team_settings_matrix() {
         assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] team gone");
         let (code, _) = get_json(&app.app, &format!("/api/v1/projects/{project_id}"), &admin).await;
         assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] projects cascaded");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 10.5: project soft-delete / restore / purge + capacity endpoint.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn project_delete_and_capacity_matrix() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let suffix = Uuid::now_v7();
+        let admin_email = format!("p105-admin-{suffix}@test.local");
+        let manager_email = format!("p105-manager-{suffix}@test.local");
+        let member_email = format!("p105-member-{suffix}@test.local");
+        seed_user(&app.db, &admin_email, "P105 Admin").await;
+        seed_user(&app.db, &manager_email, "P105 Manager").await;
+        seed_user(&app.db, &member_email, "P105 Member").await;
+
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let manager = login_as(&app.app, &manager_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name":"P105T"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        for (email, role) in [(&manager_email, "manager"), (&member_email, "member")] {
+            let (code, _) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/teams/{team_id}/members"),
+                Some(&admin),
+                json!({"email": email, "role": role, "temp_password":"member-temp-pw"}),
+            )
+            .await;
+            assert_eq!(code, StatusCode::CREATED, "[{engine}] add {role}");
+        }
+
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name":"P105P"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+
+        // Seed tasks for the capacity math: member gets 3 open (1 overdue,
+        // 1 due soon), manager gets 1 closed.
+        let member_id = {
+            let (code, members) = get_json(
+                &app.app,
+                &format!("/api/v1/teams/{team_id}/members"),
+                &admin,
+            )
+            .await;
+            assert_eq!(code, StatusCode::OK);
+            members["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["role"] == "member")
+                .unwrap()["user"]["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let today = tasker::util::parse_today_iso();
+        let soon = tasker::util::parse_iso_date(&today)
+            .unwrap()
+            .checked_add(time::Duration::days(3))
+            .unwrap()
+            .to_string();
+        let past = tasker::util::parse_iso_date(&today)
+            .unwrap()
+            .checked_sub(time::Duration::days(5))
+            .unwrap()
+            .to_string();
+        for (title, due) in [
+            ("cap-open", None),
+            ("cap-overdue", Some(past)),
+            ("cap-soon", Some(soon)),
+        ] {
+            let (code, _) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/projects/{project_id}/tasks"),
+                Some(&admin),
+                json!({"title": title, "assignee_id": member_id, "due_date": due}),
+            )
+            .await;
+            assert_eq!(code, StatusCode::CREATED, "[{engine}] seed {title}");
+        }
+
+        // Capacity: manager allowed, member forbidden (404-style), admin allowed.
+        let (code, cap) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/capacity?window=week"),
+            &manager,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] manager reads capacity");
+        assert_eq!(cap["window_days"], 7);
+        assert_eq!(
+            cap["summary"]["total_open_tasks"], 3,
+            "[{engine}] summary open"
+        );
+        let member_row = cap["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["user_id"] == json!(member_id))
+            .unwrap();
+        assert_eq!(member_row["open_tasks"], 3);
+        assert_eq!(member_row["overdue_tasks"], 1);
+        assert_eq!(member_row["due_this_week"], 1, "[{engine}] due soon");
+        assert_eq!(
+            member_row["capacity_limit"], 10,
+            "[{engine}] default capacity"
+        );
+        assert_eq!(
+            member_row["status"], "underutilized",
+            "[{engine}] 3/10 < 0.6 underutilized"
+        );
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/capacity"),
+            &member,
+        )
+        .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] member forbidden");
+
+        // Month window flips the counter fields.
+        let (code, cap_month) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/capacity?window=month"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let member_month = cap_month["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["user_id"] == json!(member_id))
+            .unwrap();
+        assert_eq!(member_month["due_this_month"], 1);
+        assert!(
+            member_month["due_this_week"].is_null(),
+            "[{engine}] week null in month window"
+        );
+        // Unknown window rejected.
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/capacity?window=year"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+
+        // Capacity limit: member sets their own via PATCH /me; capacity view reflects it.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            "/api/v1/me",
+            Some(&member),
+            json!({"capacity_limit": 3}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] set capacity");
+        let (_code, cap2) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/capacity"),
+            &admin,
+        )
+        .await;
+        let member_row2 = cap2["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["user_id"] == json!(member_id))
+            .unwrap();
+        assert_eq!(member_row2["capacity_limit"], 3);
+        assert_eq!(
+            member_row2["status"], "balanced",
+            "[{engine}] 3/3 == 1.0 -> balanced (overloaded is > 1.0)"
+        );
+        // Out-of-range clamps.
+        let (code, me_now) = send_json(
+            &app.app,
+            "PATCH",
+            "/api/v1/me",
+            Some(&member),
+            json!({"capacity_limit": 500}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(me_now["capacity_limit"], 100, "[{engine}] clamped to max");
+
+        // -- Project soft-delete -------------------------------------------
+        // Member cannot delete.
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/projects/{project_id}"),
+            Some(&member),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] member delete forbidden"
+        );
+        // Manager cannot delete (Managers archive, not delete).
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/projects/{project_id}"),
+            Some(&manager),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] manager delete forbidden"
+        );
+        // Admin soft-deletes.
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/projects/{project_id}"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] admin soft delete");
+
+        // Invisible everywhere.
+        let (code, _) = get_json(&app.app, &format!("/api/v1/projects/{project_id}"), &admin).await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] get 404 after delete"
+        );
+        let (code, list) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/projects?include_archived=true"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(
+            list["items"].as_array().unwrap().len(),
+            0,
+            "[{engine}] list hides deleted"
+        );
+        let (_code, my) = get_json(&app.app, "/api/v1/me/tasks", &member).await;
+        assert_eq!(
+            my["total"], 0,
+            "[{engine}] my-tasks hides deleted project tasks"
+        );
+        let (_code, summary) = get_json(&app.app, "/api/v1/me/summary", &member).await;
+        assert_eq!(
+            summary["by_status"]["backlog"], 0,
+            "[{engine}] summary hides deleted"
+        );
+        // Capacity also drops to zero open tasks.
+        let (_code, cap3) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/capacity"),
+            &admin,
+        )
+        .await;
+        assert_eq!(
+            cap3["summary"]["total_open_tasks"], 0,
+            "[{engine}] capacity hides deleted"
+        );
+
+        // Trash lists it (admin only; member gets 404).
+        let (code, trash) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/projects/trash"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] trash list");
+        assert_eq!(trash["items"].as_array().unwrap().len(), 1);
+        assert_eq!(trash["items"][0]["name"], "P105P");
+        assert!(trash["items"][0]["retention_expires_at"].is_i64());
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/projects/trash"),
+            &member,
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] trash member 404");
+
+        // Restore brings everything back.
+        let (code, restored) = send_request(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/restore"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] restore");
+        assert_eq!(restored["name"], "P105P");
+        let (_code, my) = get_json(&app.app, "/api/v1/me/tasks", &member).await;
+        assert_eq!(my["total"], 3, "[{engine}] tasks restored");
+
+        // Soft-delete again, then purge: owner-only + name + password.
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/projects/{project_id}"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT);
+        // Admin (non-owner) cannot purge.
+        let (code, _) = send_json(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/projects/{project_id}/purge"),
+            Some(&manager),
+            json!({"confirm_name": "P105P", "current_password": "test-password-123"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] manager purge forbidden"
+        );
+        // Wrong name.
+        let (code, _) = send_json(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/projects/{project_id}/purge"),
+            Some(&admin),
+            json!({"confirm_name": "wrong", "current_password": "test-password-123"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] wrong name"
+        );
+        // Wrong password.
+        let (code, _) = send_json(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/projects/{project_id}/purge"),
+            Some(&admin),
+            json!({"confirm_name": "P105P", "current_password": "nope-nope-nope"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] wrong password"
+        );
+        // Owner purge succeeds; tasks are cascade-deleted.
+        let (code, _) = send_json(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/projects/{project_id}/purge"),
+            Some(&admin),
+            json!({"confirm_name": "P105P", "current_password": "test-password-123"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] owner purge");
+        let (_code, trash) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/projects/trash"),
+            &admin,
+        )
+        .await;
+        assert_eq!(
+            trash["items"].as_array().unwrap().len(),
+            0,
+            "[{engine}] trash empty after purge"
+        );
+        // Task rows are gone (cascade) — the task count endpoint confirms.
+        let (code, _) = get_json(&app.app, &format!("/api/v1/teams/{team_id}"), &admin).await;
+        assert_eq!(
+            code,
+            StatusCode::OK,
+            "[{engine}] team survives project purge"
+        );
     }
 }

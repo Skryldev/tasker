@@ -15,10 +15,25 @@ pub struct User {
     pub username: Option<String>,
     pub bio: Option<String>,
     pub timezone: Option<String>,
+    /// Forward-looking capacity unit for the Capacity view (1-100, default 10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capacity_limit: Option<i64>,
     pub created_at: i64,
 }
 
-const USER_COLUMNS: &str = "id, email, display_name, username, bio, timezone, created_at";
+const USER_COLUMNS: &str =
+    "id, email, display_name, username, bio, timezone, capacity_limit, created_at";
+
+/// The default and bounds for the per-user capacity limit.
+pub const CAPACITY_DEFAULT: i64 = 10;
+pub const CAPACITY_MIN: i64 = 1;
+pub const CAPACITY_MAX: i64 = 100;
+
+/// Clamp a requested capacity limit into the allowed range.
+#[must_use]
+pub fn clamp_capacity(raw: i64) -> i64 {
+    raw.clamp(CAPACITY_MIN, CAPACITY_MAX)
+}
 
 /// Reduced user shape embedded in task/comment responses. Hover-card data
 /// (username, bio) is fetched separately via the batch user-info endpoint so
@@ -38,6 +53,10 @@ fn row_to_user(row: &sqlx::any::AnyRow) -> Result<User, AppError> {
         username: row.try_get("username")?,
         bio: row.try_get("bio")?,
         timezone: row.try_get("timezone")?,
+        capacity_limit: Some(
+            row.try_get::<i64, _>("capacity_limit")
+                .unwrap_or(CAPACITY_DEFAULT),
+        ),
         created_at: row.try_get("created_at")?,
     })
 }
@@ -68,6 +87,10 @@ pub async fn find_active_by_email(
                 username: r.try_get("username")?,
                 bio: r.try_get("bio")?,
                 timezone: r.try_get("timezone")?,
+                capacity_limit: Some(
+                    r.try_get::<i64, _>("capacity_limit")
+                        .unwrap_or(CAPACITY_DEFAULT),
+                ),
                 created_at: r.try_get("created_at")?,
             },
             r.try_get("password_hash")?,
@@ -246,6 +269,7 @@ pub struct ProfileUpdate<'a> {
     pub timezone: Option<Option<String>>,
     pub avatar: Option<Option<String>>,
     pub notification_prefs: Option<String>,
+    pub capacity_limit: Option<i64>,
 }
 
 /// Persist a profile change. All values must be validated by the caller;
@@ -281,6 +305,10 @@ pub async fn update_profile(
     if let Some(json) = &update.notification_prefs {
         sets.push("notification_prefs = ?");
         args.s(json.clone());
+    }
+    if let Some(cap) = update.capacity_limit {
+        sets.push("capacity_limit = ?");
+        args.i(clamp_capacity(cap));
     }
     if sets.is_empty() {
         return Ok(());

@@ -33,6 +33,7 @@ const adminUser = {
   display_name: "Ada Admin",
   created_at: 1,
   mfa_enabled: false,
+  capacity_limit: 10,
 };
 
 /** Controls whether the mocked /me endpoint currently fails (dead session). */

@@ -21,6 +21,11 @@ if (!Element.prototype.hasPointerCapture) {
   };
 }
 
+// jsdom lacks Element.scrollIntoView; Radix Select scrolls items on open.
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
+}
+
 // jsdom lacks window.matchMedia; components use it for theme detection.
 Object.defineProperty(window, "matchMedia", {
   writable: true,

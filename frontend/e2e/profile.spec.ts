@@ -67,6 +67,8 @@ test.describe.serial("Profile", () => {
     await expect(toggle).toHaveAttribute("aria-checked", "true");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "false");
+    // Auto-save debounces 300ms — wait for the Saved flash before reloading.
+    await expect(page.getByTestId("prefs-saved")).toHaveAttribute("style", /opacity: 1/);
 
     await page.reload();
     await expect(page.getByTestId("pref-task-rejected")).toHaveAttribute(

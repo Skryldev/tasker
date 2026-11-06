@@ -45,7 +45,7 @@ export function ProjectPage() {
   const [order, setOrder] = useState("desc");
   const [page, setPage] = useState(1);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(() => params.get("new") === "task");
 
   const members = useMembers(teamId);
   const labels = useLabels(teamId);

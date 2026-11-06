@@ -98,6 +98,9 @@ pub struct UpdateProfileRequest {
     pub avatar: Option<Option<String>>,
     #[serde(default)]
     pub notification_prefs: Option<serde_json::Value>,
+    /// Forward-looking capacity unit (1-100); clamped server-side.
+    #[serde(default)]
+    pub capacity_limit: Option<i64>,
 }
 
 /// Merge a field-scoped validation error into an aggregate list.
@@ -240,6 +243,7 @@ async fn update_me(
             timezone,
             avatar: avatar_update,
             notification_prefs: prefs_json,
+            capacity_limit: body.capacity_limit,
         },
     )
     .await?;
@@ -264,6 +268,7 @@ pub async fn profile_response(
         "username": user.username,
         "bio": user.bio,
         "timezone": user.timezone,
+        "capacity_limit": user.capacity_limit.unwrap_or(crate::users::CAPACITY_DEFAULT),
         "created_at": user.created_at,
         "notification_prefs": prefs,
     }))
@@ -338,7 +343,7 @@ pub struct StatusCounts {
 fn my_tasks_where() -> &'static str {
     "assignee_id = ? AND parent_task_id IS NULL \
      AND EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id = tasks.team_id AND tm.user_id = ?) \
-     AND EXISTS (SELECT 1 FROM projects p WHERE p.id = tasks.project_id AND p.status = 'active')"
+     AND EXISTS (SELECT 1 FROM projects p WHERE p.id = tasks.project_id AND p.status = 'active' AND p.deleted_at IS NULL)"
 }
 
 async fn my_summary(

@@ -85,7 +85,7 @@ describe("LoginForm", () => {
       email: "admin@tasker.local",
       display_name: "Ada",
       created_at: 0,
-      mfa_enabled: false,
+      mfa_enabled: false, capacity_limit: 10,
     });
     renderWithProviders(<LoginPage />);
     await user.type(screen.getByLabelText("Email"), "admin@tasker.local");

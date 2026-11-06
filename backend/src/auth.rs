@@ -101,6 +101,10 @@ async fn find_valid_session(
                 username: r.try_get("username")?,
                 bio: r.try_get("bio")?,
                 timezone: r.try_get("timezone")?,
+                capacity_limit: Some(
+                    r.try_get::<i64, _>("capacity_limit")
+                        .unwrap_or(crate::users::CAPACITY_DEFAULT),
+                ),
                 created_at: r.try_get("created_at")?,
             },
             r.try_get::<String, _>("session_id")?,
@@ -247,6 +251,9 @@ pub struct UserResponse {
     pub username: Option<String>,
     pub bio: Option<String>,
     pub timezone: Option<String>,
+    /// Forward-looking capacity unit (Phase 10.5). Unset storage = default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capacity_limit: Option<i64>,
     pub created_at: i64,
     /// Whether TOTP two-factor authentication is enabled for this account.
     pub mfa_enabled: bool,
@@ -269,6 +276,10 @@ impl UserResponse {
             username: user.username,
             bio: user.bio,
             timezone: user.timezone,
+            capacity_limit: Some(
+                user.capacity_limit
+                    .unwrap_or(crate::users::CAPACITY_DEFAULT),
+            ),
             created_at: user.created_at,
             mfa_enabled,
             notification_prefs,
@@ -285,6 +296,7 @@ impl From<User> for UserResponse {
             username: u.username,
             bio: u.bio,
             timezone: u.timezone,
+            capacity_limit: Some(u.capacity_limit.unwrap_or(crate::users::CAPACITY_DEFAULT)),
             created_at: u.created_at,
             mfa_enabled: false,
             notification_prefs: crate::notifications::NotificationPrefs::default(),

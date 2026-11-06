@@ -82,6 +82,16 @@ pub enum EventOrigin {
     Automation,
 }
 
+impl EventOrigin {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Automation => "automation",
+        }
+    }
+}
+
 /// Trigger-relevant event state. Every field is optional; only the fields
 /// relevant to the event's trigger type are populated. Enum values are
 /// canonical (`&'static str` from the domain arrays); identifiers are

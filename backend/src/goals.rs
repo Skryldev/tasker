@@ -820,7 +820,7 @@ async fn get_goal(
         None
     };
 
-    let project_sql = "SELECT p.id, p.name, p.status FROM goal_projects gp JOIN projects p ON p.id = gp.project_id WHERE gp.goal_id = ? ORDER BY p.created_at";
+    let project_sql = "SELECT p.id, p.name, p.status FROM goal_projects gp JOIN projects p ON p.id = gp.project_id WHERE gp.goal_id = ? AND p.deleted_at IS NULL ORDER BY p.created_at";
     let mut args = Args::new();
     args.s(&goal_id);
     let project_rows = conn.fetch_all(project_sql, args).await?;
@@ -1216,7 +1216,7 @@ async fn list_goal_projects(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let mut conn = state.db.conn();
     require_goal_access(&mut conn, &goal_id, &user.id).await?;
-    let assoc_sql = "SELECT p.id, p.name, p.status FROM goal_projects gp JOIN projects p ON p.id = gp.project_id WHERE gp.goal_id = ? ORDER BY p.created_at";
+    let assoc_sql = "SELECT p.id, p.name, p.status FROM goal_projects gp JOIN projects p ON p.id = gp.project_id WHERE gp.goal_id = ? AND p.deleted_at IS NULL ORDER BY p.created_at";
     let mut args = Args::new();
     args.s(&goal_id);
     let rows = conn.fetch_all(assoc_sql, args).await?;

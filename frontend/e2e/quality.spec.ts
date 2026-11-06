@@ -1,5 +1,5 @@
 import { AxeBuilder } from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 /**
  * Phase 10 quality gates:
@@ -63,7 +63,7 @@ test.describe.serial("Visual baselines", () => {
     await context.close();
   });
 
-  async function login(page: import("@playwright/test").Page) {
+  async function login(page: Page) {
     await page.goto("/login");
     await page.getByLabel("Email").fill(ADMIN.email);
     await page.getByLabel("Password").fill(ADMIN.password);
@@ -72,7 +72,7 @@ test.describe.serial("Visual baselines", () => {
   }
 
   async function screenshotPair(
-    page: import("@playwright/test").Page,
+    page: Page,
     name: string,
     prepare: () => Promise<void>,
   ) {
@@ -141,7 +141,7 @@ test.describe("Accessibility (axe-core)", () => {
   });
 
   async function expectNoCritical(
-    page: import("@playwright/test").Page,
+    page: Page,
     url: string,
     label: string,
   ) {
@@ -161,7 +161,7 @@ test.describe("Accessibility (axe-core)", () => {
     expect(critical, `${label} critical violations`).toHaveLength(0);
   }
 
-  test("login", async ({ page }) => {
+  test("login", async ({ page }: { page: Page }) => {
     // Scan the login screen without a session.
     await page.evaluate(() => localStorage.clear());
     await page.goto("/login");
@@ -181,23 +181,16 @@ test.describe("Accessibility (axe-core)", () => {
   });
 
   test("kanban", async ({ page }) => {
-    // Board lives on the first project of the first team.
-    const teams = await page.request.get("/api/v1/teams");
-    const firstTeam = ((await teams.json()).items as { id: string }[])[0];
-    const projects = await page.request.get(`/api/v1/teams/${firstTeam.id}/projects`);
-    const firstProject = ((await projects.json()).items as { id: string }[])[0];
+    // The board lives on the shared fixture team/project from the visual
+    // describe's beforeAll (never assume teams.items[0] has a project).
     await expectNoCritical(
       page,
-      `/projects/${firstProject.id}?team=${firstTeam.id}&view=board`,
+      `/projects/${projectId}?team=${teamId}&view=board`,
       "kanban",
     );
   });
 
   test("task detail", async ({ page }) => {
-    const teams = await page.request.get("/api/v1/teams");
-    const firstTeam = ((await teams.json()).items as { id: string }[])[0];
-    const projects = await page.request.get(`/api/v1/teams/${firstTeam.id}/projects`);
-    const firstProject = ((await projects.json()).items as { id: string }[])[0];
     await expectNoCritical(page, `/tasks/${taskId}?team=${teamId}`, "task-detail");
   });
 

@@ -45,18 +45,41 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
+export interface ToastOptions {
+  /** Single action button (e.g. "Undo"), rendered at the toast's right. */
+  action?: ToastAction;
+  /** Override the default per-kind duration (ms). */
+  duration?: number;
+}
+
 /** Push a standardized feedback toast. */
-export function pushToast(kind: ToastKind, title: string, description?: string) {
-  const options = { description, duration: DURATION[kind] };
+export function pushToast(
+  kind: ToastKind,
+  title: string,
+  description?: string,
+  options?: ToastOptions,
+) {
+  const toastOptions = {
+    description,
+    duration: options?.duration ?? DURATION[kind],
+    action: options?.action
+      ? { label: options.action.label, onClick: options.action.onClick }
+      : undefined,
+  };
   switch (kind) {
     case "success":
-      toast.success(title, options);
+      toast.success(title, toastOptions);
       break;
     case "error":
-      toast.error(title, options);
+      toast.error(title, toastOptions);
       break;
     case "info":
-      toast.info(title, options);
+      toast.info(title, toastOptions);
       break;
   }
 }

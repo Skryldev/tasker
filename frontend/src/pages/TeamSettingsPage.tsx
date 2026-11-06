@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   MoreHorizontal,
@@ -13,7 +13,7 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
-import { api, ApiError, type Member } from "@/api/client";
+import { api, ApiError, type Member, type TrashProject } from "@/api/client";
 import {
   useLabels,
   useMembers,
@@ -117,6 +117,12 @@ export function TeamSettingsPage() {
       <GuestsSection teamId={teamId} canManage={isAdmin} />
       <Separator className="my-8" />
       <LabelsSection teamId={teamId} isAdmin={isAdmin} />
+      {isAdmin ? (
+        <>
+          <Separator className="my-8" />
+          <ProjectTrashSection teamId={teamId} />
+        </>
+      ) : null}
       {isAdmin ? (
         <>
           <Separator className="my-8" />
@@ -955,6 +961,173 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
           </Button>
         </form>
       ) : null}
+    </section>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Project trash (Phase 10.5): soft-deleted projects, restorable 30 days.
+// ---------------------------------------------------------------------------
+
+function ProjectTrashSection({ teamId }: { teamId: string }) {
+  const trash = useQuery({
+    queryKey: ["project-trash", teamId],
+    queryFn: () => api.projectTrash(teamId),
+  });
+  const { push } = useToast();
+  const qc = useQueryClient();
+  const [purgeOpen, setPurgeOpen] = useState(false);
+  const [purgeTarget, setPurgeTarget] = useState<TrashProject | null>(null);
+  const [confirmName, setConfirmName] = useState("");
+  const [purgePassword, setPurgePassword] = useState("");
+  const [purgeError, setPurgeError] = useState<string | null>(null);
+
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: ["project-trash", teamId] });
+    void qc.invalidateQueries({ queryKey: ["projects"] });
+  };
+
+  const restore = useMutation({
+    mutationFn: (id: string) => api.restoreProject(id),
+    onSuccess: () => {
+      push("success", "Project restored");
+      invalidate();
+    },
+    onError: (error) =>
+      push("error", "Could not restore project", error instanceof ApiError ? error.message : undefined),
+  });
+
+  const purge = useMutation({
+    mutationFn: () =>
+      purgeTarget
+        ? api.purgeProject(purgeTarget.id, confirmName.trim(), purgePassword)
+        : Promise.reject(new Error("no project selected")),
+    onSuccess: () => {
+      push("info", "Project permanently deleted");
+      setPurgeOpen(false);
+      setPurgeTarget(null);
+      invalidate();
+    },
+    onError: (error) =>
+      setPurgeError(error instanceof ApiError ? error.message : "Could not purge the project."),
+  });
+
+  const purgeReady = purgeTarget !== null && confirmName.trim() === purgeTarget.name && purgePassword.length > 0;
+
+  return (
+    <section aria-label="Deleted projects" data-testid="project-trash">
+      <h2 className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
+        <Trash2 className="h-4 w-4" /> Deleted projects
+      </h2>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Projects stay here for 30 days before they can only be purged permanently.
+      </p>
+      {trash.isLoading ? (
+        <Skeleton className="h-16 w-full" />
+      ) : (trash.data?.items.length ?? 0) === 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="trash-empty">
+          Nothing here — no deleted projects.
+        </p>
+      ) : (
+        <ul className="overflow-hidden rounded-lg border" data-testid="trash-list">
+          {trash.data?.items.map((item) => (
+            <li key={item.id} className="flex flex-wrap items-center gap-3 border-b px-4 py-2.5 last:border-0">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{item.name}</p>
+                <p className="truncate text-2xs text-muted-foreground">
+                  {item.task_count} task{item.task_count === 1 ? "" : "s"} · deleted{" "}
+                  {timeAgo(item.deleted_at)} · retention ends{" "}
+                  {item.retention_expires_at ? timeAgo(item.retention_expires_at) : "—"}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={restore.isPending}
+                onClick={() => restore.mutate(item.id)}
+                data-testid={`restore-project-${item.id}`}
+              >
+                Restore
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={purge.isPending}
+                onClick={() => {
+                  setPurgeTarget(item);
+                  setConfirmName("");
+                  setPurgePassword("");
+                  setPurgeError(null);
+                  setPurgeOpen(true);
+                }}
+                data-testid={`purge-project-${item.id}`}
+              >
+                Purge
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Dialog open={purgeOpen} onOpenChange={setPurgeOpen}>
+        <DialogContent role="alertdialog">
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Purge this project permanently?</DialogTitle>
+            <DialogDescription>
+              This is irreversible: every task, comment, and dependency of{" "}
+              <span className="font-semibold">{purgeTarget?.name}</span> is deleted forever. Type the
+              project name and your current password to confirm.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (purgeReady) purge.mutate();
+            }}
+            noValidate
+            data-testid="purge-form"
+          >
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="purge-confirm-name">Project name</Label>
+              <Input
+                id="purge-confirm-name"
+                value={confirmName}
+                onChange={(e) => setConfirmName(e.target.value)}
+                placeholder={purgeTarget?.name}
+                autoComplete="off"
+                data-testid="purge-project-name"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="purge-password">Your current password</Label>
+              <Input
+                id="purge-password"
+                type="password"
+                value={purgePassword}
+                onChange={(e) => setPurgePassword(e.target.value)}
+                autoComplete="current-password"
+                data-testid="purge-password"
+              />
+            </div>
+            {purgeError ? <p className="text-2xs text-destructive" role="alert">{purgeError}</p> : null}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setPurgeOpen(false)} disabled={purge.isPending}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                type="submit"
+                disabled={!purgeReady || purge.isPending}
+                data-testid="purge-submit"
+              >
+                {purge.isPending ? "Purging…" : "Delete forever"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

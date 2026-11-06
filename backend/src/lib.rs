@@ -59,6 +59,12 @@ pub mod util {
     /// validation is intentionally out of scope.
     pub fn validate_email(email: &str) -> Result<(), String> {
         let email = email.trim().to_lowercase();
+        // The Automation Principal identity (Phase 8A) must never be held by
+        // a real account: registration, admin provisioning, and bootstrap all
+        // route through this choke point.
+        if email == crate::rules::actions::AUTOMATION_PRINCIPAL_EMAIL {
+            return Err("this email address is reserved".into());
+        }
         if email.len() < 3 || email.len() > 255 {
             return Err("email must be 3-255 characters".into());
         }

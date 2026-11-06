@@ -24,10 +24,15 @@ pub fn routes() -> Router<AppState> {
         )
         .route(
             "/projects/{project_id}",
-            get(get_project).patch(update_project),
+            get(get_project)
+                .patch(update_project)
+                .delete(delete_project),
         )
         .route("/projects/{project_id}/archive", post(archive_project))
         .route("/projects/{project_id}/unarchive", post(unarchive_project))
+        .route("/projects/{project_id}/restore", post(restore_project))
+        .route("/projects/{project_id}/purge", delete(purge_project))
+        .route("/teams/{team_id}/projects/trash", get(list_trash))
         .route(
             "/projects/{project_id}/guests",
             get(list_guests).post(grant_guest),
@@ -58,17 +63,45 @@ pub struct Project {
     /// grant rather than team membership (read-only).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub is_guest: bool,
+    /// Soft-delete timestamp (Phase 10.5). `None` while live; live queries
+    /// always filter `deleted_at IS NULL`. Serialized only when deleted so
+    /// live payloads stay byte-identical to the Phase 1-10 contract.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<i64>,
 }
 
-const PROJECT_COLUMNS: &str =
-    "id, team_id, name, description, status, owner_id, created_by, created_at, updated_at";
+const PROJECT_COLUMNS: &str = "id, team_id, name, description, status, owner_id, created_by, created_at, updated_at, deleted_at";
+
+/// Soft-deleted projects stay outside the retention window after this long.
+pub const RETENTION_WINDOW_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
 pub async fn find_project(conn: &mut Conn<'_>, project_id: &str) -> Result<Project, AppError> {
     let mut args = Args::new();
     args.s(project_id);
     let row = conn
         .fetch_optional(
-            &format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?"),
+            &format!(
+                "SELECT {PROJECT_COLUMNS} FROM projects                  WHERE id = ? AND deleted_at IS NULL"
+            ),
+            args,
+        )
+        .await?
+        .ok_or(AppError::NotFound("project not found"))?;
+    row_to_project(&row)
+}
+
+/// Look up a soft-deleted project (trash view, restore, purge).
+pub async fn find_deleted_project(
+    conn: &mut Conn<'_>,
+    project_id: &str,
+) -> Result<Project, AppError> {
+    let mut args = Args::new();
+    args.s(project_id);
+    let row = conn
+        .fetch_optional(
+            &format!(
+                "SELECT {PROJECT_COLUMNS} FROM projects                  WHERE id = ? AND deleted_at IS NOT NULL"
+            ),
             args,
         )
         .await?
@@ -87,6 +120,7 @@ fn row_to_project(row: &sqlx::any::AnyRow) -> Result<Project, AppError> {
         created_by: row.try_get("created_by")?,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
+        deleted_at: row.try_get("deleted_at")?,
         open_task_count: None,
         my_role: None,
         is_guest: false,
@@ -326,6 +360,7 @@ async fn create_project(
             created_by: user.id,
             created_at: now,
             updated_at: now,
+            deleted_at: None,
             open_task_count: Some(0),
             my_role: None,
             is_guest: false,
@@ -352,10 +387,10 @@ async fn list_projects(
     let rows = conn
         .fetch_all(
             "SELECT p.id, p.team_id, p.name, p.description, p.status, p.owner_id, p.created_by, \
-                    p.created_at, p.updated_at, \
+                    p.created_at, p.updated_at, p.deleted_at, \
                     (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status != 'closed') AS open_task_count \
              FROM projects p \
-             WHERE p.team_id = ? AND (p.status = 'active' OR ? = TRUE) \
+             WHERE p.team_id = ? AND p.deleted_at IS NULL AND (p.status = 'active' OR ? = TRUE) \
              ORDER BY p.created_at",
             args,
         )
@@ -444,6 +479,7 @@ async fn update_project(
         created_by: project.created_by,
         created_at: project.created_at,
         updated_at: now,
+        deleted_at: project.deleted_at,
         open_task_count: project.open_task_count,
         my_role: project.my_role,
         is_guest: project.is_guest,
@@ -673,4 +709,187 @@ async fn revoke_guest(
     }
     conn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Soft delete / restore / purge (Phase 10.5)
+//
+// Semantics (ADR-0013, docs/adr-0013-project-delete.md):
+// - DELETE /projects/{id}        soft-delete (Owner/Admin). Sets deleted_at;
+//                                every live query filters it out, so tasks,
+//                                comments, and dependencies become invisible
+//                                without touching their rows. Recoverable.
+// - POST   /projects/{id}/restore  undo within the retention window.
+// - DELETE /projects/{id}/purge    irreversible hard delete (Owner only,
+//                                typed name + password). Engine cascades
+//                                remove tasks/comments/notifications/
+//                                dependencies/templates/guest grants/goal
+//                                links; activity rows keep their historical
+//                                project_id (audit trail outlives the data).
+// - GET    /teams/{id}/projects/trash   trash listing (Owner/Admin).
+//
+// Rules-engine note: Phase 8A rules are team-scoped (rules.team_id) and never
+// reference projects, so nothing can block a project deletion — the check the
+// spec anticipated does not exist in the schema and is documented as N/A.
+// ---------------------------------------------------------------------------
+
+/// Owner or Admin only: Managers archive, they do not delete.
+async fn require_delete_capability(
+    conn: &mut Conn<'_>,
+    team_id: &str,
+    user_id: &str,
+) -> Result<Role, AppError> {
+    let membership = require_membership(conn, team_id, user_id).await?;
+    if !matches!(membership.role, Role::Owner | Role::Admin) {
+        return Err(AppError::Forbidden(
+            "deleting a project requires the Admin role or above",
+        ));
+    }
+    Ok(membership.role)
+}
+
+async fn delete_project(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(project_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    let mut conn = state.db.begin().await?;
+    let project = find_project(&mut conn, &project_id).await?;
+    require_delete_capability(&mut conn, &project.team_id, &user.id).await?;
+    if project.status == "archived" {
+        return Err(AppError::Conflict(
+            "archived projects cannot be deleted; unarchive first".into(),
+        ));
+    }
+    let now = util::now_ms();
+    let mut args = Args::new();
+    args.i(now).i(now).s(&project_id);
+    let affected = conn
+        .execute(
+            "UPDATE projects SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+            args,
+        )
+        .await?;
+    if affected == 0 {
+        // A concurrent delete won the race; treat as already-deleted.
+        return Err(AppError::NotFound("project not found"));
+    }
+    conn.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn restore_project(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(project_id): Path<String>,
+) -> Result<Json<Project>, AppError> {
+    let mut conn = state.db.begin().await?;
+    let project = find_deleted_project(&mut conn, &project_id).await?;
+    require_delete_capability(&mut conn, &project.team_id, &user.id).await?;
+    if util::now_ms() - project.deleted_at.unwrap_or(0) > RETENTION_WINDOW_MS {
+        return Err(AppError::Conflict(
+            "the retention window (30 days) has expired; the project can only be purged".into(),
+        ));
+    }
+    let mut args = Args::new();
+    args.i(util::now_ms()).s(&project_id);
+    conn.execute(
+        "UPDATE projects SET deleted_at = NULL, updated_at = ? WHERE id = ?",
+        args,
+    )
+    .await?;
+    conn.commit().await?;
+    let mut conn = state.db.conn();
+    let mut restored = find_project(&mut conn, &project_id).await?;
+    restored.my_role = crate::authorization::get_membership(&mut conn, &restored.team_id, &user.id)
+        .await?
+        .map(|m| m.role);
+    Ok(Json(restored))
+}
+
+#[derive(Deserialize)]
+pub struct PurgeProjectRequest {
+    /// The project name, typed by the caller as a deliberate confirmation.
+    pub confirm_name: String,
+    /// The caller's current password (re-verification for an irreversible act).
+    pub current_password: String,
+}
+
+async fn purge_project(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(project_id): Path<String>,
+    Json(body): Json<PurgeProjectRequest>,
+) -> Result<StatusCode, AppError> {
+    let mut conn = state.db.begin().await?;
+    let project = find_deleted_project(&mut conn, &project_id).await?;
+    let membership = require_membership(&mut conn, &project.team_id, &user.id).await?;
+    if membership.role != Role::Owner {
+        return Err(AppError::Forbidden(
+            "only the team owner can purge a project",
+        ));
+    }
+    if body.confirm_name.trim() != project.name {
+        return Err(AppError::validation(
+            "confirm_name",
+            "the typed name does not match the project name",
+        ));
+    }
+    let found = crate::users::find_active_by_email(&mut conn, &user.email).await?;
+    let Some((_, password_hash)) = found else {
+        return Err(AppError::Unauthenticated);
+    };
+    if !crate::security::password::verify(&body.current_password, &password_hash) {
+        return Err(AppError::validation(
+            "current_password",
+            "current password is incorrect",
+        ));
+    }
+    let mut args = Args::new();
+    args.s(&project_id);
+    conn.execute("DELETE FROM projects WHERE id = ?", args)
+        .await?;
+    conn.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_trash(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(team_id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let mut conn = state.db.conn();
+    let membership = require_membership(&mut conn, &team_id, &user.id).await?;
+    if !matches!(membership.role, Role::Owner | Role::Admin) {
+        // Guests and lower roles learn nothing about deleted projects.
+        return Err(AppError::NotFound("team not found"));
+    }
+    let mut args = Args::new();
+    args.s(&team_id);
+    let rows = conn
+        .fetch_all(
+            "SELECT p.id, p.team_id, p.name, p.description, p.status, p.owner_id, p.created_by, \
+                    p.created_at, p.updated_at, p.deleted_at, \
+                    (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id) AS task_count \
+             FROM projects p WHERE p.team_id = ? AND p.deleted_at IS NOT NULL \
+             ORDER BY p.deleted_at DESC",
+            args,
+        )
+        .await?;
+    let items = rows
+        .iter()
+        .map(|row| {
+            Ok(json!({
+                "id": row.try_get::<String, _>("id")?,
+                "name": row.try_get::<String, _>("name")?,
+                "description": row.try_get::<Option<String>, _>("description")?,
+                "status": row.try_get::<String, _>("status")?,
+                "deleted_at": row.try_get::<Option<i64>, _>("deleted_at")?,
+                "task_count": row.try_get::<i64, _>("task_count")?,
+                "retention_expires_at": row.try_get::<Option<i64>, _>("deleted_at")?
+                    .map(|d| d + RETENTION_WINDOW_MS),
+            }))
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+    Ok(Json(json!({ "items": items })))
 }

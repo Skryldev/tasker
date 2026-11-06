@@ -27,6 +27,9 @@ pub mod events {
     pub const TASK_ACCEPTED: &str = "task_accepted";
     pub const TASK_REJECTED: &str = "task_rejected";
     pub const TASK_STATUS_CHANGED: &str = "task_status_changed";
+    /// Rules Engine automation (Phase 8A): a rule executed an internal
+    /// notification action. In-app only; never email/push.
+    pub const AUTOMATION_TRIGGERED: &str = "automation_triggered";
 }
 
 /// The events a user can turn off in their profile (Phase 9). Every other
