@@ -346,3 +346,52 @@ same task are serialized by the existing status compare-and-update
 (ADR-0011); the loser 409s and emits nothing (tested). Rule tables are
 team-scoped and indexed; per-event evaluation is bounded by the rule count
 of one team and the Task 1 complexity caps.
+
+---
+
+## Internal actions, Automation Principal & idempotency ledger (Task 4)
+
+### Automation Execution Principal
+
+- **Identity**: fixed `users` row, id `00000000-0000-0000-0000-000000000001`,
+  email `automation@tasker.local`, display name "Tasker Automation",
+  `password_hash` = a deliberately invalid PHC string (Argon2 parse fails →
+  no password verifies → no interactive session possible).
+- **Provisioning** (`rules::actions::provision_principal`): idempotent
+  upsert keyed on the fixed id, lazily inside the execution transaction. A
+  foreign row holding the reserved email fails closed with
+  `principal_email_conflict` — never adopted.
+- **Reservation**: `util::validate_email` (the single choke point used by
+  registration, admin provisioning, and bootstrap) rejects the address.
+- **No privileges**: no `team_members` rows; every capability check denies
+  it. Permission comes only from the executor's explicit scope policy.
+
+### Internal action execution (`rules::outbox::execute_internal_action`)
+
+Minimal primitive called with a transaction + intent id (the Task 5 worker
+claims, then calls this). Pipeline inside ONE transaction:
+
+1. load the intent with its full scope chain and **validate cross-references**
+   (intent ↔ execution ↔ event ↔ rule agree on task, team, and rule version —
+   corrupted references fail loudly),
+2. ledger pre-check (`rule_action_results.outbox_id`) → `AlreadyExecuted`,
+3. re-validate the stored payload against the Task 1 model (type must match
+   the intent's action type),
+4. classify: `send_message` → `ExternalPending` (intent untouched, stays
+   `pending` for the Task 5 dispatcher; **no** delivery result recorded),
+5. revalidate the task: hard-deleted → durable `skipped(task_deleted)`
+   result; archived project → `skipped(project_archived)`; no effect either way,
+6. execute the internal effect — `add_comment` via the narrow
+   `comments::create_automation_comment` path (same body validation, activity
+   record, and mention notifications as the interactive path; author =
+   principal; never guest-visible) — `send_notification` via the existing
+   `notifications::record_batch` (selectors resolved against current task
+   state; explicit users revalidated as team members; ineligible recipients
+   skipped and counted),
+7. insert the ledger row (`UNIQUE(outbox_id)`) and transition the outbox row
+   to `delivered` guarded on `status IN ('pending','processing')`, and commit.
+
+Exactly-once internal effect = effect + ledger entry + outbox completion in
+one transaction. Concurrent duplicates: one commits, the loser rolls back
+(loud unique violation or the pre-check); constraints are the defense — no
+process-local state.

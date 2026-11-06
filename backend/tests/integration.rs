@@ -5458,6 +5458,7 @@ async fn rules_internal_actions_ledger_failure_atomicity() {
     }
 }
 
+#[tokio::test]
 async fn rules_capture_insert_failure_atomicity() {
     for (engine, url) in test_db_urls() {
         for stage in ["rule_executions", "automation_outbox"] {
@@ -5722,6 +5723,7 @@ async fn rules_capture_insert_failure_atomicity() {
     }
 }
 
+#[tokio::test]
 async fn rules_capture_atomicity_on_failure() {
     for (engine, url) in test_db_urls() {
         let app = spawn_app(&url).await;
