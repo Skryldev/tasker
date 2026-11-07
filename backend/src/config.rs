@@ -78,6 +78,46 @@ pub struct Config {
     pub static_dir: Option<String>,
     /// Log format: structured text or machine-readable JSON.
     pub log_format_json: bool,
+    /// Rules Engine outbox dispatcher (Phase 8A, Task 5).
+    pub rules_worker: RulesWorkerConfig,
+}
+
+/// Outbox dispatcher operational parameters. Defaults follow the Task 5
+/// specification (1s poll, batch 16, 2 concurrent executions, 60s lease,
+/// 8 attempts).
+#[derive(Debug, Clone)]
+pub struct RulesWorkerConfig {
+    /// Whether the dispatcher starts with the server.
+    pub enabled: bool,
+    /// Poll interval between claim cycles.
+    pub poll_interval_ms: u64,
+    /// Maximum intents claimed per cycle.
+    pub batch_size: u32,
+    /// Maximum intents executed concurrently.
+    pub max_concurrent: u32,
+    /// Claim lease duration before a record is recoverable again.
+    pub lease_ms: u64,
+    /// Attempts (execution failures) before an intent dead-letters.
+    pub max_attempts: u32,
+    /// Exponential backoff base: delay = base * 2^(attempt-1), jittered.
+    pub backoff_base_ms: u64,
+    /// Exponential backoff ceiling.
+    pub backoff_max_ms: u64,
+}
+
+impl Default for RulesWorkerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            poll_interval_ms: 1_000,
+            batch_size: 16,
+            max_concurrent: 2,
+            lease_ms: 60_000,
+            max_attempts: 8,
+            backoff_base_ms: 1_000,
+            backoff_max_ms: 60_000,
+        }
+    }
 }
 
 impl Config {
@@ -165,6 +205,18 @@ impl Config {
             "json" | "JSON"
         );
 
+        let rules_worker = RulesWorkerConfig {
+            enabled: env_or("TASKER_RULES_WORKER_ENABLED", "true".to_string())?
+                .eq_ignore_ascii_case("true"),
+            poll_interval_ms: env_parsed("TASKER_RULES_WORKER_POLL_MS", 1_000u64)?.max(50),
+            batch_size: env_parsed("TASKER_RULES_WORKER_BATCH", 16u32)?.clamp(1, 100),
+            max_concurrent: env_parsed("TASKER_RULES_WORKER_CONCURRENCY", 2u32)?.clamp(1, 16),
+            lease_ms: env_parsed("TASKER_RULES_WORKER_LEASE_MS", 60_000u64)?.max(1_000),
+            max_attempts: env_parsed("TASKER_RULES_WORKER_MAX_ATTEMPTS", 8u32)?.clamp(1, 100),
+            backoff_base_ms: env_parsed("TASKER_RULES_WORKER_BACKOFF_BASE_MS", 1_000u64)?.max(1),
+            backoff_max_ms: env_parsed("TASKER_RULES_WORKER_BACKOFF_MAX_MS", 60_000u64)?.max(1),
+        };
+
         Ok(Self {
             environment,
             http_host: env_or("TASKER_HTTP_HOST", "0.0.0.0".to_string())?,
@@ -186,6 +238,7 @@ impl Config {
             body_limit_bytes,
             static_dir,
             log_format_json,
+            rules_worker,
         })
     }
 

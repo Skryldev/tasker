@@ -883,6 +883,7 @@ mod tests {
             body_limit_bytes: 1_048_576,
             static_dir: None,
             log_format_json: false,
+            rules_worker: crate::config::RulesWorkerConfig::default(),
         };
         let pool = Database::connect(&config).await.unwrap().pool;
         let mut conn = pool.acquire().await.unwrap();

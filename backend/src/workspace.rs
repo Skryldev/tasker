@@ -599,7 +599,7 @@ pub struct TaskTemplate {
 }
 
 const TEMPLATE_COLUMNS: &str = "t.id, t.project_id, t.name, t.default_title, t.default_description, \
-     t.default_priority, t.created_by, t.created_at, t.updated_at, \
+     t.default_priority, t.default_subtasks, t.created_by, t.created_at, t.updated_at, \
      u.email AS creator_email, u.display_name AS creator_name";
 
 fn row_to_template(row: &sqlx::any::AnyRow) -> Result<TaskTemplate, AppError> {
@@ -836,6 +836,8 @@ async fn create_template(
     let (name, title, description, priority) = validate_template(&body)?;
     let team_id = team_of(&mut conn, &project_id).await?;
     crate::tasks::validate_label_ids(&mut conn, &team_id, &body.label_ids).await?;
+    let subtasks_json = serde_json::to_string(&validate_subtasks(&body.default_subtasks)?)
+        .map_err(|e| AppError::internal(e.to_string()))?;
 
     let id = util::new_id();
     let now = util::now_ms();
@@ -846,12 +848,13 @@ async fn create_template(
         .s(&title)
         .opt_s(description.clone())
         .s(priority)
+        .s(&subtasks_json)
         .s(&user.id)
         .i(now)
         .i(now);
     conn.execute(
-        "INSERT INTO task_templates (id, project_id, name, default_title, default_description, default_priority, created_by, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO task_templates (id, project_id, name, default_title, default_description, default_priority, default_subtasks, created_by, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         args,
     )
     .await?;
@@ -905,6 +908,8 @@ async fn update_template(
     let (name, title, description, priority) = validate_template(&body)?;
     let team_id = team_of(&mut conn, &template.project_id).await?;
     crate::tasks::validate_label_ids(&mut conn, &team_id, &body.label_ids).await?;
+    let subtasks_json = serde_json::to_string(&validate_subtasks(&body.default_subtasks)?)
+        .map_err(|e| AppError::internal(e.to_string()))?;
 
     let now = util::now_ms();
     let mut args = Args::new();
@@ -912,10 +917,11 @@ async fn update_template(
         .s(&title)
         .opt_s(description.clone())
         .s(priority)
+        .s(&subtasks_json)
         .i(now)
         .s(&template_id);
     conn.execute(
-        "UPDATE task_templates SET name = ?, default_title = ?, default_description = ?, default_priority = ?, updated_at = ? \
+        "UPDATE task_templates SET name = ?, default_title = ?, default_description = ?, default_priority = ?, default_subtasks = ?, updated_at = ? \
          WHERE id = ?",
         args,
     )
@@ -1131,6 +1137,12 @@ pub struct FromTemplateRequest {
     pub assignee_id: Option<String>,
     #[serde(default)]
     pub due_date: Option<String>,
+    /// Overrides the creation status (backlog/todo/in_progress only).
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Overrides the template's default label set.
+    #[serde(default)]
+    pub label_ids: Option<Vec<String>>,
     /// Overrides the template's default subtask titles.
     #[serde(default)]
     pub subtasks: Option<Vec<String>>,

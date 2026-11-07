@@ -558,10 +558,27 @@ export const api = {
       query: { page, page_size: pageSize },
     }) as Promise<{ items: Comment[]; total: number }>;
   },
-  createComment(taskId: string, body: string): Promise<Comment> {
+  createComment(
+    taskId: string,
+    body: string,
+    parentCommentId?: string,
+  ): Promise<Comment> {
     return request("post", "/tasks/{task_id}/comments".replace("{task_id}", taskId), {
-      body: { body },
+      body: { body, parent_comment_id: parentCommentId || undefined },
     }) as Promise<Comment>;
+  },
+  setTaskPosition(taskId: string, beforeTaskId?: string): Promise<void> {
+    return request("patch", `/tasks/${taskId}/position`, {
+      body: { before_task_id: beforeTaskId || undefined },
+    }) as Promise<void>;
+  },
+  createTaskFromTemplate(
+    templateId: string,
+    overrides: components["schemas"]["FromTemplateRequest"] = {},
+  ): Promise<Task> {
+    return request("post", `/tasks/from-template/${templateId}`, {
+      body: overrides,
+    }) as Promise<Task>;
   },
   updateComment(commentId: string, body: string): Promise<Comment> {
     return request("patch", "/comments/{comment_id}".replace("{comment_id}", commentId), {

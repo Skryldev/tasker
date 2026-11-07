@@ -2,8 +2,9 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { CalendarClock, AtSign, ListTodo, Search, X } from "lucide-react";
-import { api } from "@/api/client";
+import { api, type Task } from "@/api/client";
 import { useMyTasks } from "@/api/hooks";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -13,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 import { EmptyState, ErrorState } from "@/components/app/EmptyState";
 import { Skeleton } from "@/components/ui/badge";
 // Lazy: the detail panel (with the status control and inline editors) is
@@ -24,6 +26,7 @@ import { TaskTable } from "@/components/app/TaskTable";
 import { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES, STATUS_LABELS } from "@/lib/utils";
 
 export function MyTasksPage() {
+  const { push } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -67,6 +70,26 @@ export function MyTasksPage() {
   );
 
   const tasks = useMyTasks(filters);
+  const qc = useQueryClient();
+  // Manual ordering (Phase 11): optimistic local move, server PATCH, rollback.
+  const reorder = useMutation({
+    mutationFn: ({ taskId, beforeTaskId }: { taskId: string; beforeTaskId?: string }) =>
+      api.setTaskPosition(taskId, beforeTaskId),
+    onError: () => {
+      void tasks.refetch();
+      push("error", "Could not reorder", "The order was restored.");
+    },
+  });
+  const reorderTask = (dragged: Task, beforeTaskId?: string) => {
+    const current = tasks.data?.items ?? [];
+    const from = current.findIndex((t) => t.id === dragged.id);
+    const to = beforeTaskId ? current.findIndex((t) => t.id === beforeTaskId) : current.length - 1;
+    if (from < 0 || to < 0) return;
+    const next = [...current];
+    next.splice(to, 0, ...next.splice(from, 1));
+    qc.setQueryData(["my-tasks", filters], { ...tasks.data, items: next });
+    reorder.mutate({ taskId: dragged.id, beforeTaskId });
+  };
   const detail = useQuery({
     queryKey: ["task", selectedTaskId],
     queryFn: () => api.getTask(selectedTaskId!),
@@ -187,6 +210,7 @@ export function MyTasksPage() {
             selectedId={selectedTaskId ?? undefined}
             onSelect={(task) => setSelectedTaskId(task.id)}
             isLoading={tasks.isLoading}
+            onReorder={reorderTask}
             renderContext={(task) => {
               const row = task as typeof task & { team_name?: string; project_name?: string };
               return [row.team_name, row.project_name].filter(Boolean).join(" · ");

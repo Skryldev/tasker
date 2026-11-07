@@ -9,11 +9,13 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  Stamp,
   ListTree,
   Trash2,
   X,
 } from "lucide-react";
 import { api, type Task } from "@/api/client";
+import { useTemplates } from "@/api/hooks";
 import { cn, PRIORITY_LABELS, PRIORITIES, type Priority } from "@/lib/utils";
 import {
   useActivity,
@@ -43,7 +45,8 @@ import { StatusBadge } from "./TaskBadges";
 // first open so the eager task views do not carry it.
 const TaskDialog = lazy(() => import("./TaskDialog").then((m) => ({ default: m.TaskDialog })));
 import { StatusControl } from "./StatusControl";
-import { CommentBody, CommentComposer } from "./Mentions";
+import { CommentComposer } from "./Mentions";
+import { CommentThread, buildThreads } from "./CommentThread";
 import { DependenciesPanel } from "./DependenciesPanel";
 // Lazy: the Doran picker stack (~56 kB raw) must stay out of the eager
 // bundle (Phase 10 gate). It loads on the first due-date inline edit.
@@ -54,6 +57,7 @@ import { useToast } from "@/components/ui/toast";
 
 import { Timestamp } from "@/components/app/Timestamp";
 import { formatJalaliDate } from "@/lib/jalali";
+import { renderMarkdown } from "@/lib/markdown";
 import { useQueryClient } from "@tanstack/react-query";
 
 const EVENT_LABELS: Record<string, string> = {
@@ -86,6 +90,8 @@ export function TaskDetailPanel({
   const [commentDraft, setCommentDraft] = useState("");
   const [editingComment, setEditingComment] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  // Parent-with-replies delete confirmation (Phase 11 threading).
+  const [deleteReplies, setDeleteReplies] = useState<{ id: string; count: number } | null>(null);
   const { push } = useToast();
   const qc = useQueryClient();
 
@@ -112,6 +118,9 @@ export function TaskDetailPanel({
     return [...new Set(ids.filter((id): id is string => Boolean(id)))];
   }, [task, comments.data, activity.data]);
   const hoverInfo = useUserInfo(hoverIds);
+  const templates = useTemplates(task?.project_id);
+  const templateName = (id: string) =>
+    templates.data?.items.find((t) => t.id === id)?.name ?? "template";
   const hoverTitle = (id: string | undefined, name: string): string | undefined => {
     if (!id) return undefined;
     const info = hoverInfo.data?.items.find((i) => i.id === id);
@@ -133,7 +142,7 @@ export function TaskDetailPanel({
   const submitComment = async () => {
     if (!commentDraft.trim() || createComment.isPending) return;
     try {
-      await createComment.mutateAsync(commentDraft.trim());
+      await createComment.mutateAsync({ body: commentDraft.trim() });
       setCommentDraft("");
     } catch (error) {
       push("error", "Could not add comment", error instanceof Error ? error.message : undefined);
@@ -211,6 +220,16 @@ export function TaskDetailPanel({
               push("error", "Could not update task", error instanceof Error ? error.message : undefined),
           },
         )} />
+
+        {task.from_template_id ? (
+          <p
+            className="mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-2xs text-muted-foreground"
+            data-testid="from-template-badge"
+          >
+            <Stamp className="h-3 w-3" aria-hidden />
+            From template: {templateName(task.from_template_id)}
+          </p>
+        ) : null}
 
         <DescriptionBlock
           value={task.description ?? ""}
@@ -296,86 +315,52 @@ export function TaskDetailPanel({
               pending={createComment.isPending}
             />
           </form>
-          <div className="flex flex-col">
+          <div className="flex flex-col" data-testid="comment-threads">
             {comments.isLoading ? (
               <>
                 <Skeleton className="h-14 w-full" />
                 <Skeleton className="h-14 w-full" />
               </>
             ) : (
-              comments.data?.items.map((comment) => (
-                <article key={comment.id} className="group border-b py-3 first:pt-0 last:border-0">
-                  <header className="flex items-center gap-2 text-xs">
-                    <Avatar
-                      name={comment.author.display_name}
-                      size="sm"
-                      title={hoverTitle(comment.author.id, comment.author.display_name)}
-                    />
-                    <span className="text-[13px] font-semibold">{comment.author.display_name}</span>
-                    <span className="text-muted-foreground"><Timestamp value={comment.created_at} /></span>
-                    {comment.created_at !== comment.updated_at ? (
-                      <span className="text-muted-foreground">(edited)</span>
-                    ) : null}
-                    <span className="ml-auto flex gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
-                      <button
-                        type="button"
-                        className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                        onClick={() => {
-                          setEditingComment(comment.id);
-                          setEditDraft(comment.body);
-                        }}
-                        aria-label="Edit comment"
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded px-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                        onClick={() =>
-                          deleteComment.mutate(comment.id, {
-                            onError: (error) =>
-                              push("error", "Could not delete comment", error instanceof Error ? error.message : undefined),
-                          })
-                        }
-                        aria-label="Delete comment"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </span>
-                  </header>
-                  {editingComment === comment.id ? (
-                    <form
-                      className="mt-2 flex flex-col gap-2"
-                      onSubmit={async (e) => {
-                        e.preventDefault();
-                        await updateComment.mutateAsync({ commentId: comment.id, body: editDraft });
-                        setEditingComment(null);
-                      }}
-                    >
-                      <textarea
-                        value={editDraft}
-                        onChange={(e) => setEditDraft(e.target.value)}
-                        onKeyDown={(e) => {
-                          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                            e.preventDefault();
-                            void e.currentTarget.form?.requestSubmit();
-                          }
-                        }}
-                        rows={2}
-                        aria-label="Edit comment"
-                        className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      />
-                      <div className="flex gap-2">
-                        <Button type="submit" size="sm">Save</Button>
-                        <Button type="button" size="sm" variant="ghost" onClick={() => setEditingComment(null)}>
-                          Cancel
-                        </Button>
-                      </div>
-                    </form>
-                  ) : (
-                    <CommentBody body={comment.body} teamId={task.team_id} />
-                  )}
-                </article>
+              buildThreads(comments.data?.items ?? []).map((thread) => (
+                <CommentThread
+                  key={thread.parent.id}
+                  thread={thread}
+                  task={task}
+                  hoverTitle={hoverTitle}
+                  onReply={(body) =>
+                    createComment
+                      .mutateAsync({ body, parentId: thread.parent.id })
+                      .then(() => push("success", "Reply posted"))
+                      .catch((error) =>
+                        push("error", "Could not reply", error instanceof Error ? error.message : undefined),
+                      )
+                  }
+                  replyPending={createComment.isPending}
+                  onEdit={(commentId, body) =>
+                    updateComment
+                      .mutateAsync({ commentId, body })
+                      .then(() => setEditingComment(null))
+                      .catch((error) =>
+                        push("error", "Could not update comment", error instanceof Error ? error.message : undefined),
+                      )
+                  }
+                  editingComment={editingComment}
+                  setEditingComment={setEditingComment}
+                  editDraft={editDraft}
+                  setEditDraft={setEditDraft}
+                  onDelete={(comment) => {
+                    const replyCount = comment.id === thread.parent.id ? thread.replies.length : 0;
+                    if (replyCount > 0) {
+                      setDeleteReplies({ id: comment.id, count: replyCount });
+                    } else {
+                      deleteComment.mutate(comment.id, {
+                        onError: (error) =>
+                          push("error", "Could not delete comment", error instanceof Error ? error.message : undefined),
+                      });
+                    }
+                  }}
+                />
               ))
             )}
           </div>
@@ -390,6 +375,26 @@ export function TaskDetailPanel({
       <footer className="shrink-0 border-t bg-card p-3" data-testid="task-detail-footer">
         <StatusControl task={task} />
       </footer>
+
+      <ConfirmDialog
+        open={deleteReplies !== null}
+        onOpenChange={(v) => {
+          if (!v) setDeleteReplies(null);
+        }}
+        title={`Delete this comment and its ${deleteReplies?.count ?? 0} repl${deleteReplies?.count === 1 ? "y" : "ies"}?`}
+        description="Deleting the parent removes its replies too. This cannot be undone."
+        confirmLabel="Delete all"
+        pending={deleteComment.isPending}
+        onConfirm={() => {
+          if (deleteReplies) {
+            deleteComment.mutate(deleteReplies.id, {
+              onSuccess: () => setDeleteReplies(null),
+              onError: (error) =>
+                push("error", "Could not delete comment", error instanceof Error ? error.message : undefined),
+            });
+          }
+        }}
+      />
 
       <ConfirmDialog
         open={deleteOpen}
@@ -742,10 +747,10 @@ function DescriptionBlock({
         <button
           type="button"
           onClick={start}
-          className="w-full whitespace-pre-wrap px-2 py-1.5 text-left text-sm leading-relaxed text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full px-2 py-1.5 text-left text-sm leading-relaxed text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label="Edit description"
         >
-          {value}
+          {renderMarkdown(value, "desc")}
         </button>
       ) : (
         <button

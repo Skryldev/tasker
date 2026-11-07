@@ -43,15 +43,15 @@ function withProviders(ui: React.ReactElement) {
 }
 
 describe("CommentBody", () => {
-  it("highlights known team mentions by email", () => {
+  it("resolves known team mentions by email in the rendered body", () => {
     withProviders(<CommentBody teamId="t1" body="ping @mona@test.example please" />);
-    expect(screen.getByText("@Mona Member")).toBeVisible();
-    expect(screen.queryByText("@mona@test.example")).toBeNull();
+    expect(screen.getByText((_content, el) => el?.tagName === "P" && el.textContent === "ping @Mona Member please")).toBeVisible();
+    expect(screen.queryByText(/@mona@test\.example/)).toBeNull();
   });
 
   it("renders unknown addresses as plain text", () => {
     withProviders(<CommentBody teamId="t1" body="ping @stranger@nowhere.example" />);
-    expect(screen.getByText(/@stranger@nowhere\.example/)).toBeVisible();
+    expect(screen.getByText((_content, el) => el?.tagName === "P" && (el.textContent?.includes("@stranger@nowhere.example") ?? false))).toBeVisible();
   });
 });
 

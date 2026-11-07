@@ -118,6 +118,15 @@ export function useLabels(teamId: string | undefined) {
   });
 }
 
+export function useTemplates(projectId: string | undefined) {
+  return useQuery({
+    queryKey: ["templates", projectId],
+    queryFn: () => api.listTemplates(projectId!),
+    enabled: Boolean(projectId),
+    staleTime: 60_000,
+  });
+}
+
 export function useTeamGuests(teamId: string | undefined) {
   return useQuery({
     queryKey: queryKeys.teamGuests(teamId ?? ""),
@@ -354,7 +363,8 @@ export function useDeleteTask() {
 export function useCreateComment(taskId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: string) => api.createComment(taskId, body),
+    mutationFn: ({ body, parentId }: { body: string; parentId?: string }) =>
+      api.createComment(taskId, body, parentId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["comments", taskId] });
       void qc.invalidateQueries({ queryKey: ["activity", taskId] });

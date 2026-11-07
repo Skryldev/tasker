@@ -395,3 +395,105 @@ Exactly-once internal effect = effect + ledger entry + outbox completion in
 one transaction. Concurrent duplicates: one commits, the loser rolls back
 (loud unique violation or the pre-check); constraints are the defense — no
 process-local state.
+
+---
+
+## Outbox dispatcher & worker (Task 5)
+
+### Architecture
+
+`rules::dispatcher` owns the polling loop and lifecycle; `rules::outbox` is
+the repository boundary (claim, lease recovery, execution, failure
+recording). One poll cycle (`dispatcher::run_once`) is independently
+callable — the integration tests drive cycles directly, without the HTTP
+server or wall-clock sleeps.
+
+### Claim and lease semantics
+
+1. `recover_expired_leases` first: `processing` rows whose
+   `lease_expires_at < now` return to `pending` with all claim fields
+   cleared. **Attempt count is not incremented** — a crash between claim and
+   execute never burns retry budget.
+2. Eligibility: `next_attempt_at <= now`, status `pending` or
+   `retryable_failed` (retry whose backoff elapsed), and an internal action
+   type. `send_message` is **never claimed** by this dispatcher.
+3. Claiming is a guarded per-row `UPDATE … WHERE id = ? AND next_attempt_at
+   <= ? AND status IN ('pending','retryable_failed')` — the winner set is
+   exact (affected-rows == 1 per row); a competing worker's update
+   re-evaluates the predicate against the locked row and loses. No
+   `SKIP LOCKED`, no `LIMIT`-in-subquery — portable across all three engines.
+
+### Fencing-token guarantees
+
+Every claim carries a fresh token (256-bit, hashed storage domain); every
+subsequent completion/failure update is predicated on it. A worker whose
+lease was reaped and whose record was re-claimed holds a stale token: its
+completion matches zero rows, so `execute_internal_action` returns
+`Conflict` and the **whole execution transaction — business effect, ledger
+entry, completion — rolls back**. A stale worker can neither mark an intent
+delivered nor overwrite a newer worker's claim, and it cannot extend a lease
+(no lease-extension operation exists).
+
+### Retry and terminal failure
+
+`classify_failure` is explicit: payload/type/scope/principal-corruption
+errors are **Permanent** (immediate `dead_letter`); everything else
+(DB errors, commit races) is **Retryable**. `record_failure` (fenced by
+token) increments `attempts`, persists bounded sanitized diagnostics
+(`last_error_category`, truncated `last_error_detail`), and either
+reschedules — `status='retryable_failed'`, `next_attempt_at = now +
+min(max, base·2^(attempt−1)) · jitter` (full-jitter bounds unit-tested) — or
+dead-letters when `attempts >= max_attempts`. Config knobs:
+`TASKER_RULES_WORKER_{ENABLED,POLL_MS,BATCH,CONCURRENCY,LEASE_MS,MAX_ATTEMPTS,BACKOFF_BASE_MS,BACKOFF_MAX_MS}`
+(defaults: enabled, 1000, 16, 2, 60000, 8, 1000, 60000).
+
+### Execution transaction boundary
+
+Per claimed intent: `db.begin()` → `execute_internal_action(tx, id,
+Some(token))` (Task 4 primitive: scope validation, payload revalidation,
+principal provisioning, effect, ledger row, fenced completion) → commit.
+The transaction covers only database work — no network I/O. Commit failure
+leaves the lease to expire and the intent to retry; duplicate effects
+converge through the ledger (`AlreadyExecuted` + fenced completion of the
+still-owned row).
+
+### Lifecycle
+
+`dispatcher::spawn` is called from `main` only when `enabled`, wired to the
+server's shutdown signal via a `watch` channel: shutdown stops claiming
+immediately, the loop exits, `main` awaits the join handle before closing
+the pool. No detached tasks; the semaphore bounds concurrent executions
+(default 2) inside each cycle.
+
+### Observability
+
+`Metrics::observe_outbox` feeds bounded-cardinality counters exposed on
+`/metrics`: `tasker_outbox_intents_claimed_total`,
+`_actions_executed_total`, `_already_executed_total`,
+`_external_pending_total`, `_retryable_failures_total`,
+`_dead_lettered_total`, `_leases_recovered_total`,
+`_stale_rejections_total`, and
+`tasker_outbox_execution_duration_seconds_{sum,count}`. Structured tracing
+covers startup/shutdown, claim batches, executions, retries, dead-letters,
+and stale rejections — with intent/action/worker fields, never payloads or
+secrets.
+
+### External `send_message` handoff boundary
+
+The internal dispatcher's claim query excludes `send_message`. The future
+Messaging Integration Service identifies work via
+`status='pending' AND action_type='send_message'` and can reuse the same
+claim/lease/fence fields and `rule_action_results` ledger semantics without
+any Rules Engine contract change. Until that service exists, those intents
+remain durable, visible, and unconsumed.
+
+### Cross-database validation risks (deferred to the final Phase 8 CI gate)
+
+- The guarded claim UPDATE relies on read-committed re-evaluation of the
+  `status` predicate under concurrent workers — verified on SQLite only;
+  PostgreSQL 17 and MySQL 8.4 semantics must be confirmed in CI.
+- `LIMIT ?` bound-parameter behavior through the Any driver on MySQL.
+- CHECK-constraint timing on MySQL 8.4 (old-row vs new-row token predicates)
+  for the fenced completion under concurrency.
+- `recover_expired_leases` + `claim_batch` ordering under MySQL's
+  REPEATABLE READ isolation.

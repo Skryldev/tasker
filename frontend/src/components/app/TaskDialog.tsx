@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES, STATUS_LABELS, type Priority, type TaskStatus } from "@/lib/utils";
-import { useLabels, useMembers } from "@/api/hooks";
+import { useLabels, useMembers, useTemplates } from "@/api/hooks";
 import { useWorkspace } from "@/lib/workspace";
 
 export interface TaskDialogProps {
@@ -72,11 +72,17 @@ export function TaskDialog(props: TaskDialogProps) {
   });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
+  // Create-from-template (Phase 11): a picker precedes the blank form for new
+  // tasks; selecting one prefills the fields via GET /templates/{id} — every
+  // field stays editable and all existing validation applies unchanged.
+  const [templateId, setTemplateId] = useState<string>("");
+  const templates = useTemplates(projectId);
 
   useEffect(() => {
     if (open) {
       setFieldErrors({});
       setSelectedLabels(task?.labels.map((l) => l.id) ?? []);
+      setTemplateId("");
       setForm({
         title: task?.title ?? "",
         description: task?.description ?? "",
@@ -88,6 +94,29 @@ export function TaskDialog(props: TaskDialogProps) {
       });
     }
   }, [open, task, parentTaskId]);
+
+  const applyTemplate = async (id: string) => {
+    const resolved = id === "__blank__" ? "" : id;
+    setTemplateId(resolved);
+    if (!resolved) {
+      setForm((f) => ({ ...f, title: "", description: "", priority: "medium" }));
+      setSelectedLabels([]);
+      return;
+    }
+    try {
+      const template = await api.getTemplate(id);
+      setForm((f) => ({
+        ...f,
+        title: template.default_title,
+        description: template.default_description ?? "",
+        priority: (template.default_priority as Priority) ?? "medium",
+      }));
+      setSelectedLabels(template.label_ids);
+    } catch {
+      // Template vanished mid-pick: fall back to a blank form.
+      setTemplateId("");
+    }
+  };
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -112,6 +141,20 @@ export function TaskDialog(props: TaskDialogProps) {
         due_date: form.due_date || undefined,
         label_ids: selectedLabels.length > 0 ? selectedLabels : undefined,
       };
+      if (!task && templateId) {
+        // From-template creation (Phase 11): provenance + subtasks + label
+        // defaults applied server-side; all overrides stay editable and
+        // every validation rule still runs.
+        return api.createTaskFromTemplate(templateId, {
+          title: body.title,
+          default_description: body.description,
+          priority: body.priority,
+          assignee_id: body.assignee_id,
+          due_date: body.due_date,
+          status: body.status,
+          label_ids: body.label_ids,
+        });
+      }
       if (task) {
         // Status changes use the lifecycle transition endpoint (board drag or
         // the workflow actions); the generic update only edits fields.
@@ -175,6 +218,29 @@ export function TaskDialog(props: TaskDialogProps) {
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
+          {!task && !parentTaskId ? (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="task-template">From template (optional)</Label>
+              <Select
+                value={templateId}
+                onValueChange={(v) => void applyTemplate(v)}
+              >
+                <SelectTrigger id="task-template" data-testid="template-picker">
+                  <SelectValue placeholder="Start blank or pick a template" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__blank__" data-testid="template-none">
+                    Start blank
+                  </SelectItem>
+                  {(templates.data?.items ?? []).map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="task-title">Title</Label>
             <Input

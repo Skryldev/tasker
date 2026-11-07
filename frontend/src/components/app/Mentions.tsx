@@ -2,6 +2,7 @@ import { useMemo, useState, type KeyboardEvent } from "react";
 import { useMembers } from "@/api/hooks";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { applySlashCommand, renderMarkdown } from "@/lib/markdown";
 
 /**
  * Renders comment bodies with team-member mentions highlighted. A mention is
@@ -10,6 +11,24 @@ import { cn } from "@/lib/utils";
  * text — no link affordance for strangers.
  */
 export function CommentBody({ body, teamId }: { body: string; teamId: string }) {
+  // Phase 11: markdown rendering (sanitized by construction — see
+  // lib/markdown.tsx). Mention resolution wraps the markdown output: known
+  // @email tokens are replaced with resolved display names in text form
+  // before rendering, so they survive markdown parsing as plain text.
+  const members = useMembers(teamId);
+  const resolved = useMemo(() => {
+    const known = new Map(
+      (members.data?.items ?? []).map((m) => [m.user.email.toLowerCase(), m.user.display_name]),
+    );
+    return body.replace(
+      /@([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)/g,
+      (m, email) => { const n = known.get(String(email).toLowerCase()); return n ? `@${n}` : m; }
+    );
+  }, [body, members.data]);
+  return <div className="text-sm leading-relaxed">{renderMarkdown(resolved, "cm")}</div>;
+}
+
+export function CommentBodyLegacy({ body, teamId }: { body: string; teamId: string }) {
   const members = useMembers(teamId);
   const parts = useMemo<Array<{ text: string; mention?: boolean }>>(() => {
     const known = new Map(

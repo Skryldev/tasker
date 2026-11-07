@@ -89,6 +89,7 @@ export function TaskTable({
   onSelect,
   isLoading,
   renderContext,
+  onReorder,
 }: {
   tasks: Task[];
   total?: number;
@@ -97,6 +98,8 @@ export function TaskTable({
   isLoading: boolean;
   /** Optional secondary line under the title (e.g. team/project context). */
   renderContext?: (task: Task) => ReactNode;
+  /** Manual ordering (Phase 11): move `task` above `before` in its column. */
+  onReorder?: (task: Task, beforeTaskId?: string) => void;
 }) {
   // One batched identity request powers every hover card in the table.
   const assigneeIds = useMemo(
@@ -158,8 +161,38 @@ export function TaskTable({
                     key={task.id}
                     tabIndex={0}
                     onClick={() => onSelect(task)}
+                    draggable={Boolean(onReorder)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/task-id", task.id);
+                      e.dataTransfer.effectAllowed = "move";
+                    }}
+                    onDragOver={(e) => {
+                      if (e.dataTransfer.types.includes("text/task-id")) e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const draggedId = e.dataTransfer.getData("text/task-id");
+                      const dragged = tasks.find((t) => t.id === draggedId);
+                      if (dragged && dragged.id !== task.id && onReorder) {
+                        onReorder(dragged, task.id);
+                      }
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") onSelect(task);
+                      // Keyboard reordering (Phase 11): Alt+Up/Down moves the
+                      // task above/below its neighbor in the filtered list.
+                      if (onReorder && e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+                        e.preventDefault();
+                        const idx = tasks.findIndex((t) => t.id === task.id);
+                        const neighbor = tasks[idx + (e.key === "ArrowUp" ? -1 : 1)];
+                        if (neighbor) {
+                          if (e.key === "ArrowUp") {
+                            onReorder(task, neighbor.id);
+                          } else {
+                            onReorder(neighbor, task.id);
+                          }
+                        }
+                      }
                     }}
                     className={cn(
                       "h-9 cursor-pointer border-b transition-colors duration-100 last:border-0 hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-none",

@@ -64,6 +64,7 @@ fn test_config(database_url: String) -> Config {
         body_limit_bytes: 1_048_576,
         static_dir: None,
         log_format_json: false,
+        rules_worker: tasker::config::RulesWorkerConfig::default(),
     }
 }
 
@@ -4769,9 +4770,10 @@ async fn rules_internal_actions_end_to_end() {
         // -- send_message: external delivery never happens here -------------
         {
             let mut tx = db.begin().await.unwrap();
-            let outcome = tasker::rules::outbox::execute_internal_action(&mut tx, &message_intent)
-                .await
-                .expect("external classification");
+            let outcome =
+                tasker::rules::outbox::execute_internal_action(&mut tx, &message_intent, None)
+                    .await
+                    .expect("external classification");
             tx.commit().await.unwrap();
             assert_eq!(
                 outcome,
@@ -4805,9 +4807,10 @@ async fn rules_internal_actions_end_to_end() {
         // -- add_comment: exactly one comment authored by the principal -----
         {
             let mut tx = db.begin().await.unwrap();
-            let outcome = tasker::rules::outbox::execute_internal_action(&mut tx, &comment_intent)
-                .await
-                .expect("comment execution");
+            let outcome =
+                tasker::rules::outbox::execute_internal_action(&mut tx, &comment_intent, None)
+                    .await
+                    .expect("comment execution");
             tx.commit().await.unwrap();
             assert_eq!(outcome, tasker::rules::outbox::ExecutionOutcome::Completed);
         }
@@ -4888,9 +4891,10 @@ async fn rules_internal_actions_end_to_end() {
         // -- Duplicate execution: no duplicate effect ------------------------
         {
             let mut tx = db.begin().await.unwrap();
-            let outcome = tasker::rules::outbox::execute_internal_action(&mut tx, &comment_intent)
-                .await
-                .expect("duplicate is a clean no-op");
+            let outcome =
+                tasker::rules::outbox::execute_internal_action(&mut tx, &comment_intent, None)
+                    .await
+                    .expect("duplicate is a clean no-op");
             tx.commit().await.unwrap();
             assert_eq!(
                 outcome,
@@ -4921,9 +4925,10 @@ async fn rules_internal_actions_end_to_end() {
         // -- send_notification: selectors + revalidated explicit recipients --
         {
             let mut tx = db.begin().await.unwrap();
-            let outcome = tasker::rules::outbox::execute_internal_action(&mut tx, &notify_intent)
-                .await
-                .expect("notification execution");
+            let outcome =
+                tasker::rules::outbox::execute_internal_action(&mut tx, &notify_intent, None)
+                    .await
+                    .expect("notification execution");
             tx.commit().await.unwrap();
             assert_eq!(outcome, tasker::rules::outbox::ExecutionOutcome::Completed);
         }
@@ -4961,9 +4966,10 @@ async fn rules_internal_actions_end_to_end() {
         // Duplicate execution: no duplicate notifications.
         {
             let mut tx = db.begin().await.unwrap();
-            let outcome = tasker::rules::outbox::execute_internal_action(&mut tx, &notify_intent)
-                .await
-                .expect("duplicate notification is a clean no-op");
+            let outcome =
+                tasker::rules::outbox::execute_internal_action(&mut tx, &notify_intent, None)
+                    .await
+                    .expect("duplicate notification is a clean no-op");
             tx.commit().await.unwrap();
             assert_eq!(
                 outcome,
@@ -5061,7 +5067,7 @@ async fn rules_internal_actions_end_to_end() {
         }
         {
             let mut tx = db.begin().await.unwrap();
-            let err = tasker::rules::outbox::execute_internal_action(&mut tx, &scope_intent)
+            let err = tasker::rules::outbox::execute_internal_action(&mut tx, &scope_intent, None)
                 .await
                 .expect_err("[{engine}] cross-scope reference must fail");
             tx.rollback().await;
@@ -5139,9 +5145,10 @@ async fn rules_internal_actions_end_to_end() {
         }
         {
             let mut tx = db.begin().await.unwrap();
-            let outcome = tasker::rules::outbox::execute_internal_action(&mut tx, &vanish_intent)
-                .await
-                .expect("deleted-task handling");
+            let outcome =
+                tasker::rules::outbox::execute_internal_action(&mut tx, &vanish_intent, None)
+                    .await
+                    .expect("deleted-task handling");
             tx.commit().await.unwrap();
             assert_eq!(outcome, tasker::rules::outbox::ExecutionOutcome::Completed);
         }
@@ -5218,7 +5225,8 @@ async fn rules_internal_actions_end_to_end() {
                 async move {
                     let mut tx = db1.begin().await.unwrap();
                     let out =
-                        tasker::rules::outbox::execute_internal_action(&mut tx, &intent1).await;
+                        tasker::rules::outbox::execute_internal_action(&mut tx, &intent1, None)
+                            .await;
                     if out.is_ok() {
                         tx.commit().await.unwrap();
                     } else {
@@ -5229,7 +5237,8 @@ async fn rules_internal_actions_end_to_end() {
                 async move {
                     let mut tx = db2.begin().await.unwrap();
                     let out =
-                        tasker::rules::outbox::execute_internal_action(&mut tx, &intent2).await;
+                        tasker::rules::outbox::execute_internal_action(&mut tx, &intent2, None)
+                            .await;
                     if out.is_ok() {
                         tx.commit().await.unwrap();
                     } else {
@@ -5413,7 +5422,7 @@ async fn rules_internal_actions_ledger_failure_atomicity() {
 
         {
             let mut tx = db.begin().await.unwrap();
-            let err = tasker::rules::outbox::execute_internal_action(&mut tx, &intent)
+            let err = tasker::rules::outbox::execute_internal_action(&mut tx, &intent, None)
                 .await
                 .expect_err("[{engine}] ledger injection fails the execution");
             tx.rollback().await;
@@ -5720,6 +5729,785 @@ async fn rules_capture_insert_failure_atomicity() {
                 "[{engine}] {stage}: control intent persisted"
             );
         }
+    }
+}
+
+/// Task 5: dispatcher claim/execute cycle, external isolation, duplicate
+/// convergence, and metrics wiring.
+#[tokio::test]
+async fn rules_dispatcher_claims_and_executes() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+        let suffix = Uuid::now_v7().simple();
+
+        let admin_email = format!("rules-dsp-{suffix}@test.local");
+        let member_email = format!("rules-dsp-m-{suffix}@test.local");
+        let admin_id = seed_user(&db, &admin_email, "Dsp Admin").await;
+        seed_user(&db, &member_email, "Dsp Member").await;
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name": "DSP"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role": "member", "temp_password": "member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name": "DSPP"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+        let member_id = user_id_by_email(&db, &member_email).await;
+        let (code, task) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "Dispatcher target", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let task_id = task["id"].as_str().unwrap().to_string();
+
+        seed_rule(
+            &db,
+            &team_id,
+            "task_status_changed",
+            r#"{"field":"task.status","op":"IN","values":["backlog","todo","in_progress","resolved","in_review","closed"]}"#,
+            r#"[{"body":"dispatcher triage"},{"recipients":{"selectors":["assignee"],"users":[]}},{"message":{"connection_ref":"c","destination_ref":"d","format":"plain_text","body":"x"}}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/transition"),
+            Some(&member),
+            json!({"to": "todo"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+
+        let pending_count = count_rows(
+            &db,
+            "SELECT COUNT(*) FROM automation_outbox WHERE status = 'pending'",
+            None,
+        )
+        .await;
+        assert_eq!(
+            pending_count, 3,
+            "[{engine}] three pending intents after transition"
+        );
+        // Batch limit: batch=1 claims exactly one.
+        let metrics = tasker::http::metrics::Metrics::new();
+        let claimed = tasker::rules::outbox::claim_batch(
+            &mut db.conn(),
+            "worker-a",
+            1,
+            60_000,
+            tasker::util::now_ms(),
+        )
+        .await
+        .expect("claim");
+        assert_eq!(claimed.len(), 1, "[{engine}] batch=1 claims exactly one");
+        // The claimed one is an internal action; send_message is never claimed.
+        assert_ne!(
+            claimed[0].action_type, "send_message",
+            "[{engine}] external intent is not claimable by the internal dispatcher"
+        );
+
+        // A full run_once executes the remaining due intents (including the
+        // already-claimed one? No — it is 'processing' now, so only the other
+        // internal intent is claimed) and leaves the external one pending.
+        let config = tasker::config::RulesWorkerConfig::default();
+        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(2));
+        tasker::rules::dispatcher::run_once(&db, &config, "worker-a", &metrics, &semaphore)
+            .await
+            .expect("run_once");
+
+        // Execute the manually claimed intent through the fenced primitive.
+        {
+            let mut tx = db.begin().await.unwrap();
+            let outcome = tasker::rules::outbox::execute_internal_action(
+                &mut tx,
+                &claimed[0].outbox_id,
+                Some(&claimed[0].claim_token),
+            )
+            .await
+            .expect("claimed execution");
+            tx.commit().await.unwrap();
+            assert_eq!(outcome, tasker::rules::outbox::ExecutionOutcome::Completed);
+        }
+
+        // All internal effects landed; the external intent is untouched.
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM comments WHERE task_id = ?",
+                Some(&task_id)
+            )
+            .await,
+            1,
+            "[{engine}] comment executed by the dispatcher"
+        );
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM notifications WHERE task_id = ? AND event = 'automation_triggered'",
+                Some(&task_id),
+            )
+            .await,
+            1,
+            "[{engine}] notification executed by the dispatcher"
+        );
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM automation_outbox WHERE task_id = ? AND action_type = 'send_message' AND status = 'pending'",
+                Some(&task_id),
+            )
+            .await,
+            1,
+            "[{engine}] external intent durable and pending"
+        );
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM automation_outbox WHERE task_id = ? AND status = 'delivered'",
+                Some(&task_id),
+            )
+            .await,
+            2,
+            "[{engine}] both internal intents delivered"
+        );
+
+        // Metrics reflect the dispatcher work (rendered counters).
+        let rendered = metrics.render(0);
+        assert!(
+            rendered.contains("tasker_outbox_intents_claimed_total 1"),
+            "[{engine}] claimed counter: {}",
+            rendered
+        );
+        assert!(
+            rendered.contains("tasker_outbox_actions_executed_total 1"),
+            "[{engine}] executed counter"
+        );
+        assert!(
+            rendered.contains("tasker_outbox_external_pending_total 0"),
+            "[{engine}] external intents are never claimed (counter stays 0)"
+        );
+
+        // Duplicate convergence: re-running the same intent is a no-op.
+        {
+            let mut tx = db.begin().await.unwrap();
+            let outcome = tasker::rules::outbox::execute_internal_action(
+                &mut tx,
+                &claimed[0].outbox_id,
+                Some(&claimed[0].claim_token),
+            )
+            .await
+            .expect("duplicate");
+            tx.commit().await.unwrap();
+            assert_eq!(
+                outcome,
+                tasker::rules::outbox::ExecutionOutcome::AlreadyExecuted
+            );
+        }
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM comments WHERE task_id = ?",
+                Some(&task_id)
+            )
+            .await,
+            1,
+            "[{engine}] no duplicate comment"
+        );
+
+        // A second run_once claims nothing new (nothing due).
+        let claimed_again = tasker::rules::outbox::claim_batch(
+            &mut db.conn(),
+            "worker-a",
+            16,
+            60_000,
+            tasker::util::now_ms(),
+        )
+        .await
+        .expect("second claim");
+        assert!(
+            claimed_again.is_empty(),
+            "[{engine}] no due intents remain for the internal dispatcher"
+        );
+        let _ = member; // assignee exercised through the notification path
+    }
+}
+
+/// Task 5: fencing, lease recovery, and stale-worker rejection.
+#[tokio::test]
+async fn rules_dispatcher_fencing_and_recovery() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+        let suffix = Uuid::now_v7().simple();
+
+        let admin_email = format!("rules-fen-{suffix}@test.local");
+        let member_email = format!("rules-fen-m-{suffix}@test.local");
+        let admin_id = seed_user(&db, &admin_email, "Fen Admin").await;
+        seed_user(&db, &member_email, "Fen Member").await;
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name": "FEN"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role": "member", "temp_password": "member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name": "FENP"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+        let member_id = user_id_by_email(&db, &member_email).await;
+        let (code, task) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "Fencing target", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let task_id = task["id"].as_str().unwrap().to_string();
+        seed_rule(
+            &db,
+            &team_id,
+            "task_status_changed",
+            r#"{"field":"task.status","op":"IN","values":["backlog","todo","in_progress","resolved","in_review","closed"]}"#,
+            r#"[{"body":"fenced triage"}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/transition"),
+            Some(&member),
+            json!({"to": "todo"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+
+        // Worker A claims, then "crashes" (lease expires, no execution).
+        let claimed_a = tasker::rules::outbox::claim_batch(
+            &mut db.conn(),
+            "worker-a",
+            16,
+            60_000,
+            tasker::util::now_ms(),
+        )
+        .await
+        .expect("claim A");
+        assert_eq!(claimed_a.len(), 1);
+        {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.i(tasker::util::now_ms() - 1_000)
+                .s(&claimed_a[0].outbox_id);
+            conn.execute(
+                "UPDATE automation_outbox SET lease_expires_at = ? WHERE id = ?",
+                args,
+            )
+            .await
+            .unwrap();
+        }
+
+        // Worker B reclaims the recovered record with a fresh token.
+        let claimed_b = tasker::rules::outbox::claim_batch(
+            &mut db.conn(),
+            "worker-b",
+            16,
+            60_000,
+            tasker::util::now_ms(),
+        )
+        .await
+        .expect("claim B");
+        assert_eq!(
+            claimed_b.len(),
+            1,
+            "[{engine}] lease recovery re-queues the record"
+        );
+        assert_eq!(claimed_b[0].outbox_id, claimed_a[0].outbox_id);
+        assert_ne!(
+            claimed_b[0].claim_token, claimed_a[0].claim_token,
+            "[{engine}] fresh fencing token"
+        );
+        assert_eq!(
+            claimed_b[0].attempts, 0,
+            "[{engine}] crash recovery does not burn retry budget"
+        );
+
+        // Stale worker A tries to execute with its expired token: the fenced
+        // completion rejects it and the whole transaction rolls back.
+        {
+            let mut tx = db.begin().await.unwrap();
+            let err = tasker::rules::outbox::execute_internal_action(
+                &mut tx,
+                &claimed_a[0].outbox_id,
+                Some(&claimed_a[0].claim_token),
+            )
+            .await
+            .expect_err("[{engine}] stale token must be rejected");
+            tx.rollback().await;
+            assert!(
+                format!("{err}").contains("no longer owned"),
+                "[{engine}] stale rejection: {err}"
+            );
+        }
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM comments WHERE task_id = ?",
+                Some(&task_id)
+            )
+            .await,
+            0,
+            "[{engine}] stale worker produced no effect"
+        );
+
+        // Current owner B executes successfully.
+        {
+            let mut tx = db.begin().await.unwrap();
+            let outcome = tasker::rules::outbox::execute_internal_action(
+                &mut tx,
+                &claimed_b[0].outbox_id,
+                Some(&claimed_b[0].claim_token),
+            )
+            .await
+            .expect("owner execution");
+            tx.commit().await.unwrap();
+            assert_eq!(outcome, tasker::rules::outbox::ExecutionOutcome::Completed);
+        }
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM comments WHERE task_id = ?",
+                Some(&task_id)
+            )
+            .await,
+            1,
+            "[{engine}] current owner's effect committed"
+        );
+    }
+}
+
+/// Task 5: retry classification, backoff rescheduling, and exhaustion.
+#[tokio::test]
+async fn rules_dispatcher_retry_and_dead_letter() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+        let suffix = Uuid::now_v7().simple();
+
+        let admin_email = format!("rules-retry-{suffix}@test.local");
+        let member_email = format!("rules-retry-m-{suffix}@test.local");
+        let admin_id = seed_user(&db, &admin_email, "Retry Admin").await;
+        seed_user(&db, &member_email, "Retry Member").await;
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name": "RTR"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role": "member", "temp_password": "member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name": "RTRP"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+        let member_id = user_id_by_email(&db, &member_email).await;
+        let (code, task) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "Retry target", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let task_id = task["id"].as_str().unwrap().to_string();
+        seed_rule(
+            &db,
+            &team_id,
+            "task_status_changed",
+            r#"{"field":"task.status","op":"IN","values":["backlog","todo","in_progress","resolved","in_review","closed"]}"#,
+            r#"[{"body":"retry probe"}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/transition"),
+            Some(&member),
+            json!({"to": "todo"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let intent = tasker::rules::outbox::claim_batch(
+            &mut db.conn(),
+            "worker-a",
+            16,
+            60_000,
+            tasker::util::now_ms(),
+        )
+        .await
+        .expect("claim");
+        assert_eq!(intent.len(), 1);
+        let intent = &intent[0];
+
+        // Retryable failure: rescheduled with backoff, attempts burn. Each
+        // cycle mirrors reality: the backoff elapses, the worker re-claims
+        // the due intent, the next attempt fails again.
+        let transient = tasker::error::AppError::internal("database temporarily unavailable");
+        let mut current = intent.clone();
+        for attempt in 1..=7u32 {
+            let disposition = tasker::rules::outbox::record_failure(
+                &mut db.conn(),
+                &current,
+                tasker::rules::outbox::FailureClass::Retryable,
+                &transient,
+                8,
+                1_000,
+                60_000,
+                1_000, // full jitter = deterministic bound
+                tasker::util::now_ms(),
+            )
+            .await
+            .expect("record retryable");
+            assert_eq!(
+                disposition,
+                tasker::rules::outbox::FailureDisposition::Rescheduled,
+                "[{engine}] attempt {attempt} reschedules"
+            );
+            // Backoff elapsed: make the intent due again and re-claim it.
+            {
+                let mut c = db.conn();
+                let mut args = tasker::db::Args::new();
+                args.i(tasker::util::now_ms()).s(&current.outbox_id);
+                c.execute(
+                    "UPDATE automation_outbox SET next_attempt_at = ? WHERE id = ?",
+                    args,
+                )
+                .await
+                .unwrap();
+            }
+            let reclaimed = tasker::rules::outbox::claim_batch(
+                &mut db.conn(),
+                "worker-a",
+                16,
+                60_000,
+                tasker::util::now_ms(),
+            )
+            .await
+            .expect("re-claim");
+            assert_eq!(reclaimed.len(), 1, "[{engine}] attempt {attempt} re-claims");
+            assert_eq!(
+                reclaimed[0].attempts, attempt as i64,
+                "[{engine}] attempts burn"
+            );
+            current = reclaimed[0].clone();
+        }
+        // The 8th failure exhausts the budget: dead-letter.
+        let disposition = tasker::rules::outbox::record_failure(
+            &mut db.conn(),
+            &current,
+            tasker::rules::outbox::FailureClass::Retryable,
+            &transient,
+            8,
+            1_000,
+            60_000,
+            1_000,
+            tasker::util::now_ms(),
+        )
+        .await
+        .expect("record exhaustion");
+        assert_eq!(
+            disposition,
+            tasker::rules::outbox::FailureDisposition::DeadLettered,
+            "[{engine}] 8 attempts reach the terminal state"
+        );
+        let mut args = tasker::db::Args::new();
+        args.s(&intent.outbox_id);
+        let row = db
+            .conn()
+            .fetch_optional(
+                "SELECT status, attempts, last_error_category FROM automation_outbox WHERE id = ?",
+                args,
+            )
+            .await
+            .unwrap()
+            .expect("intent");
+        assert_eq!(row.try_get::<String, _>("status").unwrap(), "dead_letter");
+        assert_eq!(row.try_get::<i64, _>("attempts").unwrap(), 8);
+        assert_eq!(
+            row.try_get::<String, _>("last_error_category").unwrap(),
+            "permanent"
+        );
+
+        // Permanent failures dead-letter on the first failure.
+        seed_rule(
+            &db,
+            &team_id,
+            "task_priority_changed",
+            r#"{"field":"task.priority","op":"IN","values":["low","medium","high","urgent"]}"#,
+            r#"[{"body":"permanent probe"}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{task_id}"),
+            Some(&admin),
+            json!({"priority": "high"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let intent = tasker::rules::outbox::claim_batch(
+            &mut db.conn(),
+            "worker-a",
+            16,
+            60_000,
+            tasker::util::now_ms(),
+        )
+        .await
+        .expect("claim permanent");
+        assert_eq!(intent.len(), 1);
+        let invalid_payload = tasker::error::AppError::internal(
+            "stored action payload failed validation: condition: boom",
+        );
+        assert_eq!(
+            tasker::rules::outbox::classify_failure(&invalid_payload),
+            tasker::rules::outbox::FailureClass::Permanent,
+            "[{engine}] payload corruption is permanent"
+        );
+        let disposition = tasker::rules::outbox::record_failure(
+            &mut db.conn(),
+            &intent[0],
+            tasker::rules::outbox::FailureClass::Permanent,
+            &invalid_payload,
+            8,
+            1_000,
+            60_000,
+            1_000,
+            tasker::util::now_ms(),
+        )
+        .await
+        .expect("record permanent");
+        assert_eq!(
+            disposition,
+            tasker::rules::outbox::FailureDisposition::DeadLettered,
+            "[{engine}] permanent failure dead-letters immediately"
+        );
+    }
+}
+
+/// Task 5: graceful shutdown without claiming, and concurrent claim safety.
+#[tokio::test]
+async fn rules_dispatcher_shutdown_and_concurrent_claims() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+        let suffix = Uuid::now_v7().simple();
+
+        let admin_email = format!("rules-shut-{suffix}@test.local");
+        let member_email = format!("rules-shut-m-{suffix}@test.local");
+        let admin_id = seed_user(&db, &admin_email, "Shut Admin").await;
+        seed_user(&db, &member_email, "Shut Member").await;
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name": "SHU"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role": "member", "temp_password": "member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name": "SHUP"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+        let member_id = user_id_by_email(&db, &member_email).await;
+        let (code, task) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "Shutdown target", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let task_id = task["id"].as_str().unwrap().to_string();
+        seed_rule(
+            &db,
+            &team_id,
+            "task_status_changed",
+            r#"{"field":"task.status","op":"IN","values":["backlog","todo","in_progress","resolved","in_review","closed"]}"#,
+            r#"[{"body":"shutdown probe"}]"#,
+            true,
+            1,
+            &admin_id,
+        )
+        .await;
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/transition"),
+            Some(&member),
+            json!({"to": "todo"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+
+        // Shutdown signalled BEFORE spawn: the worker exits without claiming.
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(true);
+        let handle = tasker::rules::dispatcher::spawn(
+            (*db).clone(),
+            tasker::config::RulesWorkerConfig::default(),
+            tasker::http::metrics::Metrics::new(),
+            shutdown_rx,
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("[{engine}] shutdown worker exits promptly")
+            .expect("worker task");
+        assert_eq!(
+            count_rows(
+                &db,
+                "SELECT COUNT(*) FROM automation_outbox WHERE status = 'pending'",
+                None,
+            )
+            .await,
+            1,
+            "[{engine}] shutdown worker claimed nothing"
+        );
+
+        // Concurrent claims: disjoint winner sets, no double ownership.
+        let db1 = db.clone();
+        let db2 = db.clone();
+        let mut conn_a = db1.conn();
+        let mut conn_b = db2.conn();
+        let (a, b) = tokio::join!(
+            tasker::rules::outbox::claim_batch(
+                &mut conn_a,
+                "worker-a",
+                16,
+                60_000,
+                tasker::util::now_ms(),
+            ),
+            tasker::rules::outbox::claim_batch(
+                &mut conn_b,
+                "worker-b",
+                16,
+                60_000,
+                tasker::util::now_ms(),
+            ),
+        );
+        let a = a.expect("claim A");
+        let b = b.expect("claim B");
+        let a_ids: Vec<&String> = a.iter().map(|c| &c.outbox_id).collect();
+        let b_ids: Vec<&String> = b.iter().map(|c| &c.outbox_id).collect();
+        assert_eq!(
+            a_ids.len() + b_ids.len(),
+            1,
+            "[{engine}] one record, two workers: exactly one winner"
+        );
+        assert!(
+            a_ids.iter().all(|id| !b_ids.contains(id)),
+            "[{engine}] claims are disjoint"
+        );
     }
 }
 
@@ -8636,3 +9424,318 @@ async fn project_delete_and_capacity_matrix() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Phase 11: comment threads, from-template, position reordering.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn threading_templates_position_matrix() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let suffix = Uuid::now_v7();
+        let admin_email = format!("p11-admin-{suffix}@test.local");
+        let member_email = format!("p11-member-{suffix}@test.local");
+        seed_user(&app.db, &admin_email, "P11 Admin").await;
+        seed_user(&app.db, &member_email, "P11 Member").await;
+
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+
+        let (code, team) =
+            send_json(&app.app, "POST", "/api/v1/teams", Some(&admin), json!({"name":"P11T"})).await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role":"member", "temp_password":"member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let member_id = {
+            let (code, members) =
+                get_json(&app.app, &format!("/api/v1/teams/{team_id}/members"), &admin).await;
+            assert_eq!(code, StatusCode::OK);
+            members["items"].as_array().unwrap()
+                .iter().find(|m| m["role"] == "member").unwrap()["user"]["id"]
+                .as_str().unwrap().to_string()
+        };
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name":"P11P"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+        let (code, task) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "P11 root", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let task_id = task["id"].as_str().unwrap().to_string();
+
+        // -- Comment threads ------------------------------------------------
+        let (code, root) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/comments"),
+            Some(&admin),
+            json!({"body": "root comment"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let root_id = root["id"].as_str().unwrap().to_string();
+        assert!(root["parent_comment_id"].is_null(), "[{engine}] top-level has no parent");
+
+        // Reply: allowed; parent author notified.
+        let (code, reply) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/comments"),
+            Some(&member),
+            json!({"body": "a reply", "parent_comment_id": root_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] reply created");
+        assert_eq!(reply["parent_comment_id"], json!(root_id), "[{engine}] reply carries parent");
+        let reply_id = reply["id"].as_str().unwrap().to_string();
+        let (code, notifications) = get_json(&app.app, "/api/v1/notifications", &admin).await;
+        assert!(notifications["items"].as_array().unwrap().iter().any(|n| {
+            n["event"] == "comment_mention" && n["summary"].as_str().unwrap().contains("replied to your comment")
+        }), "[{engine}] parent author notified of reply");
+
+        // Reply-to-reply: 422 (depth 2).
+        let (code, err) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/comments"),
+            Some(&admin),
+            json!({"body": "too deep", "parent_comment_id": reply_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] depth limit");
+        assert!(err["errors"].as_array().unwrap().iter().any(|e| e["message"].as_str().unwrap().contains("depth")), "[{engine}] depth message");
+
+        // Cross-task parent rejected.
+        let (code, task2) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "P11 second"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let task2_id = task2["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task2_id}/comments"),
+            Some(&admin),
+            json!({"body": "x", "parent_comment_id": root_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] cross-task parent");
+
+        // comment_replied activity recorded.
+        let (code, activity) = get_json(&app.app, &format!("/api/v1/tasks/{task_id}/activity"), &admin).await;
+        assert_eq!(code, StatusCode::OK);
+        assert!(activity["items"].as_array().unwrap().iter().any(|a| a["event"] == "comment_replied"), "[{engine}] comment_replied event");
+
+        // Delete parent with replies: allowed (cascade in app policy).
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/comments/{root_id}"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] delete parent");
+        // Replies cascade: the task's comment list no longer contains either.
+        let (code, remaining) =
+            get_json(&app.app, &format!("/api/v1/tasks/{task_id}/comments"), &admin).await;
+        assert_eq!(code, StatusCode::OK);
+        let ids: Vec<&str> = remaining["items"].as_array().unwrap()
+            .iter().map(|c| c["id"].as_str().unwrap()).collect();
+        assert!(!ids.contains(&root_id.as_str()), "[{engine}] parent gone");
+        assert!(!ids.contains(&reply_id.as_str()), "[{engine}] reply gone with parent");
+
+        // -- From-template ---------------------------------------------------
+        let (code, template) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/templates"),
+            Some(&admin),
+            json!({
+                "name": "P11 Bug",
+                "default_title": "Bug: ",
+                "default_description": "steps to reproduce",
+                "default_priority": "high",
+                "label_ids": [],
+                "default_subtasks": ["reproduce", "fix", "verify"]
+            }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] template create");
+        let template_id = template["id"].as_str().unwrap().to_string();
+        assert_eq!(template["default_subtasks"].as_array().unwrap().len(), 3, "[{engine}] subtasks stored");
+
+        // Single fetch.
+        let (code, fetched) = get_json(&app.app, &format!("/api/v1/templates/{template_id}"), &admin).await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] get single template");
+        assert_eq!(fetched["name"], "P11 Bug");
+
+        // Create-from-template with an override.
+        let (code, from_t) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/from-template/{template_id}"),
+            Some(&admin),
+            json!({"title": "Bug: login loop", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] from-template");
+        assert_eq!(from_t["title"], "Bug: login loop", "[{engine}] override applied");
+        assert_eq!(from_t["priority"], "high", "[{engine}] template priority");
+        assert_eq!(from_t["from_template_id"], json!(template_id), "[{engine}] provenance");
+        let from_task_id = from_t["id"].as_str().unwrap().to_string();
+        let subtasks = from_t["subtasks"].as_array().unwrap();
+        assert_eq!(subtasks.len(), 3, "[{engine}] template subtasks applied");
+        // Validation still applies: empty title override falls back — but an
+        // invalid priority is rejected.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/from-template/{template_id}"),
+            Some(&admin),
+            json!({"priority": "catastrophic"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] template cannot bypass validation");
+        void_task(&from_task_id);
+
+        // -- Position reordering ---------------------------------------------
+        let (code, t1) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "pos a"}),
+        )
+        .await;
+        let (code, t2) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "pos b"}),
+        )
+        .await;
+        let (code, t3) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "pos c"}),
+        )
+        .await;
+        let id1 = t1["id"].as_str().unwrap().to_string();
+        let id2 = t2["id"].as_str().unwrap().to_string();
+        let id3 = t3["id"].as_str().unwrap().to_string();
+
+        // Move c before a: c's position becomes the midpoint above a.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{id3}/position"),
+            Some(&admin),
+            json!({"before_task_id": id1}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] reorder");
+
+        // Member (assignee of the root task? no) — member is not creator/assignee
+        // of t1: forbidden.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{id1}/position"),
+            Some(&member),
+            json!({"before_task_id": id2}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] member reorder forbidden");
+
+        // Self-reference rejected.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{id1}/position"),
+            Some(&admin),
+            json!({"before_task_id": id1}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] self reference");
+
+        // Different-column reference rejected: move a helper task to
+        // in_progress first, then reference it from a backlog task.
+        let (code, helper) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "pos helper", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let helper_id = helper["id"].as_str().unwrap().to_string();
+        for to in ["todo", "in_progress"] {
+            let (code, _) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/tasks/{helper_id}/transition"),
+                Some(&member),
+                json!({"to": to}),
+            )
+            .await;
+            assert_eq!(code, StatusCode::OK, "[{engine}] helper to {to}");
+        }
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{id1}/position"),
+            Some(&admin),
+            json!({"before_task_id": helper_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] cross-column reference");
+
+        // Board ordering reflects the move: c before a.
+        let (code, board) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/board"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let backlog = board["columns"].as_array().unwrap()
+            .iter().find(|c| c["status"] == "backlog").unwrap();
+        let titles: Vec<&str> = backlog["items"].as_array().unwrap()
+            .iter().map(|t| t["title"].as_str().unwrap()).collect();
+        let ci = titles.iter().position(|t| *t == "pos c").unwrap();
+        let ai = titles.iter().position(|t| *t == "pos a").unwrap();
+        assert!(ci < ai, "[{engine}] c ordered before a: {titles:?}");
+    }
+}
+
+fn void_task(_: &str) {}

@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import {
   DndContext,
   KeyboardSensor,
@@ -12,12 +12,12 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { ChevronDown, Plus } from "lucide-react";
 import type { BoardColumn, Task } from "@/api/client";
 import { api } from "@/api/client";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/badge";
+import { Badge, Skeleton } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { PriorityBadge } from "./TaskBadges";
 import { cn, PRIORITY_LABELS, STATUS_LABELS, type TaskStatus } from "@/lib/utils";
@@ -150,18 +150,26 @@ function KanbanColumn({
   );
 }
 
+export type SwimlaneMode = "none" | "assignee" | "priority" | "label";
+
 export function KanbanBoard({
   projectId,
   columns,
   isLoading,
   onOpenTask,
   onCreateTask,
+  swimlane = "none",
+  onSwimlaneDrag,
 }: {
   projectId: string;
   columns: BoardColumn[] | undefined;
   isLoading: boolean;
   onOpenTask: (task: Task) => void;
   onCreateTask: (status: string) => void;
+  /** Grouping mode (Phase 11). `none` renders the classic single-lane board. */
+  swimlane?: SwimlaneMode;
+  /** Drag between assignee/priority/label swimlanes: applies the field change. */
+  onSwimlaneDrag?: (task: Task, field: "assignee" | "priority" | "label", value: string | null) => void;
 }) {
   // Pointer for mouse/touch; keyboard so cards can be moved with Space +
   // arrows (dnd-kit announces instructions via the card's aria attributes).
@@ -233,6 +241,222 @@ export function KanbanBoard({
             <Skeleton className="h-20 w-full" />
           </div>
         ))}
+      </div>
+    );
+  }
+
+  // Swimlane grouping (Phase 11): partition the flat board into lanes by
+  // assignee / priority / label. Cards not matching a named lane fall into
+  // the trailing "Unassigned" lane. Lanes mount lazily: columns render on
+  // first visibility (IntersectionObserver with a pre-scroll margin).
+  const lanes = useMemo(() => {
+    if (swimlane === "none") return [];
+    const map = new Map<
+      string,
+      { key: string; label: string; avatar?: string; tone?: string; columns: BoardColumn[] }
+    >();
+    for (const column of columns ?? []) {
+      for (const task of column.items) {
+        let key = "none";
+        let label = "Unassigned";
+        let avatar: string | undefined;
+        let tone: string | undefined;
+        if (swimlane === "assignee") {
+          key = task.assignee?.id ?? "none";
+          label = task.assignee?.display_name ?? "Unassigned";
+          avatar = label;
+        } else if (swimlane === "priority") {
+          key = task.priority;
+          label = PRIORITY_LABELS[task.priority as keyof typeof PRIORITY_LABELS] ?? task.priority;
+          tone = task.priority;
+        } else if (swimlane === "label") {
+          key = task.labels[0]?.id ?? "none";
+          label = task.labels[0]?.name ?? "No label";
+          tone = task.labels[0]?.color;
+        }
+        const lane =
+          map.get(key) ?? { key, label, avatar, tone, columns: [] as BoardColumn[] };
+        let laneColumn = lane.columns.find((c) => c.status === column.status);
+        if (!laneColumn) {
+          laneColumn = { status: column.status, items: [], total: 0 };
+          lane.columns.push(laneColumn);
+        }
+        laneColumn.items = [...laneColumn.items.filter((t) => t.id !== task.id), task];
+        laneColumn.total += 1;
+        map.set(key, lane);
+      }
+    }
+    const list = [...map.values()];
+    const unassigned = list.find((l) => l.key === "none");
+    return [...list.filter((l) => l.key !== "none"), ...(unassigned ? [unassigned] : [])];
+  }, [columns, swimlane]);
+
+  const [collapsedLanes, setCollapsedLanes] = useState<Set<string>>(new Set());
+  const [showEmpty, setShowEmpty] = useState(false);
+  const [mountedLanes, setMountedLanes] = useState<Set<string>>(new Set());
+
+  const laneRef = (key: string) => (el: HTMLElement | null) => {
+    if (el && !mountedLanes.has(key)) {
+      const observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting) {
+              setMountedLanes((prev) => new Set(prev).add(key));
+              observer.disconnect();
+            }
+          }
+        },
+        { rootMargin: "200px" },
+      );
+      observer.observe(el);
+    }
+  };
+
+  // Swimlane drag-end: moving a card across lanes changes the grouping field
+  // (assignee / priority / label) through the parent's mutation with an undo
+  // toast; within-lane moves keep the status-transition semantics.
+  const onSwimlaneDragEnd = (event: DragEndEvent) => {
+    const task = event.active.data.current?.task as Task | undefined;
+    if (!task || !event.over) return;
+    const overId = String(event.over.id);
+    if (swimlane === "assignee" && overId.startsWith("member:")) {
+      const value = overId.slice(7);
+      if ((task.assignee?.id ?? "none") !== value) {
+        onSwimlaneDrag?.(task, "assignee", value === "none" ? null : value);
+      }
+      return;
+    }
+    if (swimlane === "priority" && overId.startsWith("priority:")) {
+      const value = overId.slice(9);
+      if (task.priority !== value) {
+        onSwimlaneDrag?.(task, "priority", value);
+      }
+      return;
+    }
+    if (swimlane === "label" && overId.startsWith("label:")) {
+      const value = overId.slice(6);
+      const has = task.labels.some((l) => l.id === value);
+      if (!has) {
+        onSwimlaneDrag?.(task, "label", value);
+      }
+      return;
+    }
+    // Fall through to status-transition semantics for drops on columns.
+    onDragEnd(event);
+  };
+
+  if (swimlane !== "none") {
+    const orderedColumns = columns ?? [];
+    const visibleLanes = lanes.filter((lane) => {
+      if (lane.key === "none") return showEmpty || lane.columns.some((c) => c.items.length > 0);
+      return true;
+    });
+    return (
+      <div className="flex h-full flex-col" data-testid="kanban-swimlanes">
+        <div className="flex items-center justify-end gap-2 px-4 pt-2">
+          <label className="flex items-center gap-1.5 text-2xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={showEmpty}
+              onChange={(e) => setShowEmpty(e.target.checked)}
+              data-testid="swimlane-show-empty"
+            />
+            Show empty lanes
+          </label>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
+          {visibleLanes.map((lane) => {
+            const collapsed = collapsedLanes.has(lane.key);
+            const mounted = mountedLanes.has(lane.key);
+            return (
+              <section
+                key={lane.key}
+                ref={laneRef(lane.key)}
+                role="group"
+                aria-labelledby={"swimlane-" + lane.key}
+                className="border-t first:border-t-0"
+                data-testid={"swimlane-" + lane.key}
+              >
+                <header className="sticky top-0 z-[5] flex items-center gap-2 border-b bg-card/95 px-4 py-2 backdrop-blur">
+                  <button
+                    type="button"
+                    aria-expanded={!collapsed}
+                    aria-controls={"swimlane-body-" + lane.key}
+                    onClick={() =>
+                      setCollapsedLanes((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(lane.key)) next.delete(lane.key);
+                        else next.add(lane.key);
+                        return next;
+                      })
+                    }
+                    className="flex items-center gap-2 rounded text-sm font-semibold hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    data-testid={"swimlane-toggle-" + lane.key}
+                  >
+                    <ChevronDown
+                      className={cn(
+                        "h-4 w-4 transition-transform duration-200",
+                        collapsed && "-rotate-90",
+                      )}
+                      aria-hidden
+                    />
+                    {lane.avatar ? <Avatar name={lane.avatar} size="xs" /> : null}
+                    {lane.tone && lane.tone.startsWith("#") ? (
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ backgroundColor: lane.tone }}
+                        aria-hidden
+                      />
+                    ) : null}
+                    <span id={"swimlane-" + lane.key}>{lane.label}</span>
+                  </button>
+                  <Badge variant="muted">
+                    {lane.columns.reduce((sum, c) => sum + c.items.length, 0)}
+                  </Badge>
+                </header>
+                <div
+                  id={"swimlane-body-" + lane.key}
+                  className={cn("transition-opacity duration-200", collapsed ? "hidden" : "block")}
+                >
+                  {mounted || !collapsed ? (
+                    <DndContext
+                      sensors={sensors}
+                      onDragStart={onDragStart}
+                      onDragEnd={onSwimlaneDragEnd}
+                    >
+                      <div
+                        className="flex h-full gap-3 overflow-x-auto scrollbar-thin p-4"
+                        data-testid={"kanban-board-" + lane.key}
+                      >
+                        {orderedColumns.map((statusColumn) => {
+                          const laneColumn =
+                            lane.columns.find((c) => c.status === statusColumn.status) ??
+                            ({ status: statusColumn.status, items: [], total: 0 } as BoardColumn);
+                          return (
+                            <KanbanColumn
+                              key={statusColumn.status}
+                              column={laneColumn}
+                              onOpen={onOpenTask}
+                              onAdd={onCreateTask}
+                            />
+                          );
+                        })}
+                      </div>
+                      <DragOverlay>
+                        {activeTask ? <TaskCard task={activeTask} overlay /> : null}
+                      </DragOverlay>
+                    </DndContext>
+                  ) : null}
+                </div>
+              </section>
+            );
+          })}
+          {visibleLanes.length === 0 ? (
+            <p className="p-8 text-center text-sm text-muted-foreground">
+              No tasks in this swimlane mode.
+            </p>
+          ) : null}
+        </div>
       </div>
     );
   }

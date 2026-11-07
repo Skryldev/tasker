@@ -125,12 +125,24 @@ async fn run_server(config: Config) -> i32 {
     };
     tracing::info!(%addr, "tasker listening");
 
+    // Outbox dispatcher (Phase 8A, Task 5): started only when enabled, wired
+    // to the same shutdown signal as the HTTP server. The handle is awaited
+    // after serve returns so in-flight executions drain cleanly.
+    let (worker_shutdown_tx, worker_shutdown_rx) = tokio::sync::watch::channel(false);
+    let worker_handle = tasker::rules::dispatcher::spawn(
+        state.db.clone(),
+        config.rules_worker.clone(),
+        state.metrics.clone(),
+        worker_shutdown_rx,
+    );
+
     let app_state = state.clone();
     let shutdown = async move {
         wait_for_shutdown().await;
         tracing::info!("shutdown signal received; draining connections");
-        // Give in-flight requests a bounded grace period via axum's graceful
-        // shutdown, then close the pool.
+        // Stop the dispatcher from claiming new work; in-flight executions
+        // finish inside their own transactions before the handle is awaited.
+        let _ = worker_shutdown_tx.send(true);
         let _ = &app_state;
     };
 
@@ -138,7 +150,8 @@ async fn run_server(config: Config) -> i32 {
         .with_graceful_shutdown(shutdown)
         .await;
 
-    // Close database resources cleanly after the server stops accepting.
+    // Await the dispatcher drain, then close database resources cleanly.
+    let _ = worker_handle.await;
     state.db.close().await;
 
     match result {

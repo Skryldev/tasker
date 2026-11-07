@@ -1025,6 +1025,7 @@ mod tests {
             body_limit_bytes: 1_048_576,
             static_dir: None,
             log_format_json: false,
+            rules_worker: crate::config::RulesWorkerConfig::default(),
         };
         let state = AppState::new(
             crate::db::Database::connect(&config).await.expect("db"),

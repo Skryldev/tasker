@@ -36,6 +36,7 @@ fn bench_config(url: String) -> Config {
         body_limit_bytes: 1_048_576,
         static_dir: None,
         log_format_json: false,
+        rules_worker: tasker::config::RulesWorkerConfig::default(),
     }
 }
 

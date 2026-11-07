@@ -6595,6 +6595,23 @@
               "type": "string"
             },
             "maxItems": 20
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "backlog",
+              "todo",
+              "in_progress"
+            ],
+            "description": "Overrides the creation status (actionable states only)."
+          },
+          "label_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Overrides the template's default label set."
           }
         }
       },

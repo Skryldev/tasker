@@ -4486,6 +4486,13 @@ export interface components {
             /** Format: date */
             due_date?: string;
             subtasks?: string[];
+            /**
+             * @description Overrides the creation status (actionable states only).
+             * @enum {string}
+             */
+            status?: "backlog" | "todo" | "in_progress";
+            /** @description Overrides the template's default label set. */
+            label_ids?: string[];
         };
         /** @description The created task (Task shape) with from_template_id provenance. */
         FromTemplateTask: components["schemas"]["Task"];

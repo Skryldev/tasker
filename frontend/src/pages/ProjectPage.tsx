@@ -1,10 +1,10 @@
 import { useDeferredValue, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { KanbanSquare, ListFilter, ListTodo, Plus, Search } from "lucide-react";
+import { CalendarRange, KanbanSquare, ListFilter, ListTodo, Plus, Search } from "lucide-react";
 import { api } from "@/api/client";
 import { TemplateManager } from "@/components/app/TemplateManager";
-import { useLabels, useMembers, useBoard, useTasks, useProject } from "@/api/hooks";
+import { useLabels, useMembers, useBoard, useTasks, useProject, useUpdateTask } from "@/api/hooks";
 import type { Task } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,19 +16,40 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { KanbanBoard } from "@/components/app/KanbanBoard";
+import { TimelinePage as TimelinePageInner } from "@/pages/TimelinePage";
+import type { SwimlaneMode } from "@/components/app/KanbanBoard";
 import { TaskTable } from "@/components/app/TaskTable";
 import { TaskDetailPanel } from "@/components/app/TaskDetailPanel";
 import { TaskDialog } from "@/components/app/TaskDialog";
+import { useToast } from "@/components/ui/toast";
 import { EmptyState, ErrorState } from "@/components/app/EmptyState";
 import { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES, STATUS_LABELS } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
-type View = "list" | "board";
+type View = "list" | "board" | "timeline";
 
 export function ProjectPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [params, setParams] = useSearchParams();
-  const view: View = params.get("view") === "board" ? "board" : "list";
+  const updateTask = useUpdateTask();
+  const { push } = useToast();
+  const rawView = params.get("view");
+  const view: View =
+    rawView === "board" ? "board" : rawView === "timeline" ? "timeline" : "list";
+  // Swimlane grouping (Phase 11): URL first, localStorage fallback.
+  const swimlaneRaw = params.get("swimlane");
+  const swimlane = (["none", "assignee", "priority", "label"] as const).includes(
+    swimlaneRaw as "assignee",
+  )
+    ? (swimlaneRaw as SwimlaneMode)
+    : ((localStorage.getItem("tasker-swimlane") as SwimlaneMode) ?? "none");
+  const setSwimlane = (mode: SwimlaneMode) => {
+    localStorage.setItem("tasker-swimlane", mode);
+    const next = new URLSearchParams(params);
+    if (mode === "none") next.delete("swimlane");
+    else next.set("swimlane", mode);
+    setParams(next, { replace: true });
+  };
 
   const project = useProject(projectId);
   const teamId = project.data?.team_id;
@@ -119,11 +140,25 @@ export function ProjectPage() {
               </span>
             ) : null}
           </div>
+          {view === "board" ? (
+            <Select value={swimlane} onValueChange={(v) => setSwimlane(v as SwimlaneMode)}>
+              <SelectTrigger className="h-8 w-[10.5rem]" aria-label="Group board by" data-testid="swimlane-selector">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No swimlanes</SelectItem>
+                <SelectItem value="assignee">Group by assignee</SelectItem>
+                <SelectItem value="priority">Group by priority</SelectItem>
+                <SelectItem value="label">Group by label</SelectItem>
+              </SelectContent>
+            </Select>
+          ) : null}
           <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5" role="tablist" aria-label="View switcher">
             {(
               [
                 ["list", "List", <ListTodo key="l" />],
                 ["board", "Board", <KanbanSquare key="k" />],
+                ["timeline", "Timeline", <CalendarRange key="c" />],
               ] as const
             ).map(([key, label, icon]) => (
               <button
@@ -313,8 +348,65 @@ export function ProjectPage() {
               isLoading={board.isLoading}
               onOpenTask={(task) => void openTaskDetail(task)}
               onCreateTask={(status) => openCreate(status)}
+              swimlane={swimlane}
+              onSwimlaneDrag={(task, field, value) => {
+                if (field === "assignee") {
+                  const previous = task.assignee?.id ?? "";
+                  updateTask.mutate(
+                    { taskId: task.id, body: { assignee_id: value ?? "" } },
+                    {
+                      onSuccess: () => {
+                        void board.refetch();
+                        push("success", "Task reassigned", undefined, {
+                          action: {
+                            label: "Undo",
+                            onClick: () => {
+                              updateTask.mutate(
+                                { taskId: task.id, body: { assignee_id: previous } },
+                                { onSuccess: () => void board.refetch() },
+                              );
+                            },
+                          },
+                          duration: 5000,
+                        });
+                      },
+                      onError: (error) =>
+                        push("error", "Could not reassign", error instanceof Error ? error.message : undefined),
+                    },
+                  );
+                } else if (field === "priority") {
+                  updateTask.mutate(
+                    { taskId: task.id, body: { priority: (value ?? "medium") as "low" | "medium" | "high" | "urgent" } },
+                    {
+                      onSuccess: () => {
+                        void board.refetch();
+                        push("success", "Priority updated");
+                      },
+                      onError: (error) =>
+                        push("error", "Could not update priority", error instanceof Error ? error.message : undefined),
+                    },
+                  );
+                } else if (field === "label" && value) {
+                  updateTask.mutate(
+                    { taskId: task.id, body: { label_ids: [...task.labels.map((l) => l.id), value] } },
+                    {
+                      onSuccess: () => {
+                        void board.refetch();
+                        push("success", "Label added");
+                      },
+                      onError: (error) =>
+                        push("error", "Could not add label", error instanceof Error ? error.message : undefined),
+                    },
+                  );
+                }
+              }}
             />
           )}
+          {view === "timeline" ? (
+            <div className="min-h-0 flex-1">
+              <TimelinePageInner projectId={projectId!} />
+            </div>
+          ) : null}
           {isGuestProject ? null : (
             <TemplateManager projectId={projectId!} />
           )}

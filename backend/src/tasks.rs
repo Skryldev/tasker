@@ -74,6 +74,10 @@ pub fn routes() -> Router<AppState> {
             get(get_task).patch(update_task).delete(delete_task),
         )
         .route("/tasks/{task_id}/subtasks", post(create_subtask))
+        .route(
+            "/tasks/{task_id}/position",
+            axum::routing::patch(set_task_position),
+        )
         .route("/tasks/{task_id}/transition", post(run_transition))
         .route("/me/tasks", get(my_tasks))
 }

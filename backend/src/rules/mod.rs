@@ -19,6 +19,7 @@
 
 pub mod actions;
 pub mod conditions;
+pub mod dispatcher;
 pub mod engine;
 pub mod events;
 pub mod limits;
