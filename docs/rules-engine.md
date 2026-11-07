@@ -497,3 +497,39 @@ remain durable, visible, and unconsumed.
   for the fenced completion under concurrency.
 - `recover_expired_leases` + `claim_batch` ordering under MySQL's
   REPEATABLE READ isolation.
+
+### Failure classification policy (reliability review)
+
+`classify_failure` maps every error reaching the dispatcher:
+
+| Error | Class | Attempt burned? | Dead-letters? | Duplicate-effect risk |
+|---|---|---|---|---|
+| Payload/type validation failure (`stored action payload…`) | Permanent | Yes (1) | Immediately | None — effect tx rolled back with it |
+| Corrupted scope chain / task-team mismatch | Permanent | Yes (1) | Immediately | None |
+| Principal identity corrupted | Permanent | Yes (1) | Immediately | None |
+| `principal_email_conflict` (foreign holder of the reserved email) | **Permanent** | Yes (1) | Immediately | None |
+| Vanished scope row (`NotFound` on intent/execution/event/rule load) | **Permanent** | Yes (1) | Immediately | None — rows are FK-anchored, so a miss is corruption |
+| DB unavailability, busy, commit races, stale fencing token | Retryable | Yes (1) | After `max_attempts` | None — effect tx rolled back; ledger pre-check converges |
+| Unique violation on the ledger (racing direct calls) | Retryable | Yes (1) | Never in practice — retry pre-check → `AlreadyExecuted` | None — effect rolled back with the failed ledger insert |
+| Commit failure | Retryable via the fenced recorder | Yes (1) **if** the commit truly rolled back | After max_attempts | None — if the commit actually landed, the fenced update matches zero rows (token cleared) and the ledger pre-check converges |
+| Unknown/unrecognized shapes | **Retryable (documented policy)** | Yes (1) | After max_attempts | None — same rollback guarantee |
+
+The unknown-failure policy is explicit: unrecognized error shapes are treated
+as Retryable because (a) the effect's transaction always rolls back with the
+failure, so no committed work can be duplicated; (b) attempts burn only when
+`record_failure` lands, bounding any unknown failure to `max_attempts` and a
+`dead_letter` terminal state; (c) the ledger pre-check converges a
+mis-retried already-committed effect. Stale-token errors (`Conflict: no
+longer owned`) never burn the dead attempt's budget — the fence rejects them
+and the current owner owns the outcome.
+
+A lost failure-record race (infrastructure down while writing the failure)
+is logged as an error and leaves the row `processing` — the lease expires
+and the intent retries without burning an attempt. Distinct from a lost
+*claim* (`Conflict` → `StaleRejected` metric).
+
+Lease recovery is observed on `/metrics`
+(`tasker_outbox_leases_recovered_total`) and logged as a structured warning
+with the recovered count — a persistently nonzero value is the crash-loop
+signal. Recovery never increments attempts, so repeated worker crashes
+cannot strand or exhaust a record.

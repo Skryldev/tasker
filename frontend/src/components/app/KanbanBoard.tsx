@@ -231,20 +231,6 @@ export function KanbanBoard({
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex gap-3 p-4">
-        {[0, 1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="flex w-[270px] shrink-0 flex-col gap-2">
-            <Skeleton className="h-5 w-24" />
-            <Skeleton className="h-20 w-full" />
-            <Skeleton className="h-20 w-full" />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
   // Swimlane grouping (Phase 11): partition the flat board into lanes by
   // assignee / priority / label. Cards not matching a named lane fall into
   // the trailing "Unassigned" lane. Lanes mount lazily: columns render on
@@ -311,6 +297,21 @@ export function KanbanBoard({
       observer.observe(el);
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex gap-3 p-4">
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="flex w-[270px] shrink-0 flex-col gap-2">
+            <Skeleton className="h-5 w-24" />
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
 
   // Swimlane drag-end: moving a card across lanes changes the grouping field
   // (assignee / priority / label) through the parent's mutation with an undo

@@ -50,6 +50,20 @@ pub async fn run_once(
     semaphore: &Arc<Semaphore>,
 ) -> Result<usize, crate::error::AppError> {
     let now = util::now_ms();
+    // Recover crashed claims before claiming, with explicit observability:
+    // a persistent nonzero recovery count is the crash-loop signal.
+    let recovered = {
+        let mut conn = db.conn();
+        super::outbox::recover_expired_leases(&mut conn, now).await?
+    };
+    if recovered > 0 {
+        metrics.observe_outbox(OutboxEvent::LeaseRecovered(recovered));
+        tracing::warn!(
+            worker_id,
+            recovered = recovered,
+            "recovered outbox intents with expired leases"
+        );
+    }
     let claimed = {
         let mut conn = db.conn();
         super::outbox::claim_batch(
@@ -126,26 +140,37 @@ async fn execute_claimed(
     };
     match execute_internal_action(&mut tx, &intent.outbox_id, Some(&intent.claim_token)).await {
         Ok(super::outbox::ExecutionOutcome::Completed) => {
-            if tx.commit().await.is_ok() {
-                metrics.observe_outbox(OutboxEvent::Executed {
-                    duration_ms: started.elapsed().as_secs_f64() * 1000.0,
-                });
-                tracing::info!(
-                    worker_id,
-                    outbox_id = %intent.outbox_id,
-                    action_type = %intent.action_type,
-                    "automation action executed"
-                );
-            } else {
-                // Commit failure: the transaction rolled back; the lease will
-                // expire and the intent is retried (retryable).
-                metrics.observe_outbox(OutboxEvent::RetryableFailed);
-                tracing::warn!(
-                    worker_id,
-                    outbox_id = %intent.outbox_id,
-                    "automation execution commit failed; lease will recover it"
-                );
+            let commit_result = tx.commit().await;
+            if let Err(commit_err) = commit_result {
+                // Commit failure: the transaction rolled back - but we cannot
+                // know that from here. Route through the fenced failure
+                // recorder: if the commit truly failed, the retry is
+                // scheduled and the attempt burns; if it actually landed
+                // (delivered, token cleared), the fenced update matches zero
+                // rows and the ledger pre-check converges on the next claim.
+                // Either way a deterministic commit failure cannot strand the
+                // record in a retry loop.
+                record_failure_and_observe(
+                    &db,
+                    &config,
+                    &worker_id,
+                    &metrics,
+                    &intent,
+                    classify_failure(&commit_err),
+                    &commit_err,
+                )
+                .await;
+                return;
             }
+            metrics.observe_outbox(OutboxEvent::Executed {
+                duration_ms: started.elapsed().as_secs_f64() * 1000.0,
+            });
+            tracing::info!(
+                worker_id,
+                outbox_id = %intent.outbox_id,
+                action_type = %intent.action_type,
+                "automation action executed"
+            );
         }
         Ok(super::outbox::ExecutionOutcome::AlreadyExecuted) => {
             // Converged through the ledger: complete the fence we still own
@@ -251,15 +276,26 @@ async fn record_failure_and_observe(
                 "automation action dead-lettered"
             );
         }
-        Err(conflict) => {
-            // The claim was lost: observe a stale rejection. The current
-            // owner owns the outcome.
+        Err(lost @ crate::error::AppError::Conflict(_)) => {
+            // The claim was lost (reaped + re-claimed): observe a stale
+            // rejection. The current owner owns the outcome.
             metrics.observe_outbox(OutboxEvent::StaleRejected);
             tracing::warn!(
                 worker_id,
                 outbox_id = %intent.outbox_id,
-                error = %conflict,
+                error = %lost,
                 "failure recording lost its claim"
+            );
+        }
+        Err(db_err) => {
+            // The failure record itself could not be written (infrastructure
+            // down): the row stays `processing`, the lease expires, and the
+            // intent is retried without burning an attempt.
+            tracing::error!(
+                worker_id,
+                outbox_id = %intent.outbox_id,
+                error = %db_err,
+                "could not persist automation failure record; lease recovery will re-queue"
             );
         }
     }

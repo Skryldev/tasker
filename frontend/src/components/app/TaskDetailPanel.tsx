@@ -44,6 +44,11 @@ import { StatusBadge } from "./TaskBadges";
 // Phase 10: the edit dialog pulls the Doran calendar stack; it is loaded on
 // first open so the eager task views do not carry it.
 const TaskDialog = lazy(() => import("./TaskDialog").then((m) => ({ default: m.TaskDialog })));
+// Phase 11: the markdown editor (toolbar + slash commands) is pulled in with
+// the first description/comment edit.
+const MarkdownEditor = lazy(() =>
+  import("./MarkdownEditor").then((m) => ({ default: m.MarkdownEditor })),
+);
 import { StatusControl } from "./StatusControl";
 import { CommentComposer } from "./Mentions";
 import { CommentThread, buildThreads } from "./CommentThread";
@@ -710,30 +715,20 @@ function DescriptionBlock({
   };
 
   if (editing) {
+    // Phase 11: the description edits through the markdown editor (toolbar,
+    // slash commands). Cmd/Ctrl+Enter saves; Escape cancels.
     return (
       <div className="mt-3" data-testid="description-editor">
-        <textarea
+        <MarkdownEditor
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              commit();
-            }
-            if (e.key === "Escape") {
-              e.preventDefault();
-              setEditing(false);
-            }
-          }}
-          onBlur={commit}
+          onChange={setDraft}
+          onSubmit={commit}
+          onCancel={() => setEditing(false)}
           rows={5}
+          ariaLabel="Edit description"
           autoFocus
-          aria-label="Edit description"
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          testId="description-markdown"
         />
-        <p className="mt-1 text-2xs text-muted-foreground">
-          Cmd/Ctrl+Enter to save · Escape to cancel
-        </p>
       </div>
     );
   }

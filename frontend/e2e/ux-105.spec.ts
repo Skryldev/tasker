@@ -94,8 +94,9 @@ test("keyboard shortcuts: C, /, G+T, ?", async ({ page }) => {
   await expect(page.getByTestId("task-title-input")).toBeVisible();
   await page.keyboard.press("Escape");
 
-  // "/" focuses the My Tasks search.
+  // "/" focuses the My Tasks search (wait for the lazy page chunk first).
   await page.goto("/");
+  await expect(page.getByTestId("task-search")).toBeVisible();
   await page.keyboard.press("/");
   await expect(page.getByTestId("task-search")).toBeFocused();
 

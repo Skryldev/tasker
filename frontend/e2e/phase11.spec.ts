@@ -158,7 +158,15 @@ test.describe.serial("Phase 11 features", () => {
   });
 
   test("list reorder: keyboard Alt+Up persists via the position API", async ({ page }) => {
-    await page.goto(`/projects/${projectId}?team=${teamId}`);
+    // Pin the list view explicitly, with a hard re-login: long serial suites
+    // can outlive the cached session state on a shared context.
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(ADMIN.email);
+    await page.getByLabel("Password").fill(ADMIN.password);
+    await page.getByTestId("login-submit").click();
+    await expect(page.getByRole("heading", { name: "My Tasks" })).toBeVisible();
+    await page.goto(`/projects/${projectId}?team=${teamId}&view=list`);
+    await expect(page.getByTestId("task-table")).toBeVisible();
     // Two more tasks to reorder among.
     await page.request.post(`/api/v1/projects/${projectId}/tasks`, {
       data: { title: "reorder alpha" },
@@ -174,6 +182,7 @@ test.describe.serial("Phase 11 features", () => {
     // The position PATCH hit the server; verify by reload order.
     await page.waitForTimeout(500);
     await page.reload();
+    await expect(page.getByTestId("task-table")).toBeVisible();
     const titles = await page.locator('[data-testid^="task-row-"]').allTextContents();
     const beta = titles.findIndex((t) => t.includes("reorder beta"));
     const alpha = titles.findIndex((t) => t.includes("reorder alpha"));
@@ -217,12 +226,8 @@ test.describe.serial("Phase 11 rich editor", () => {
   test("markdown editor: bold via toolbar, slash command, XSS rejected, persists", async () => {
     await page.goto(`/tasks/${taskId}?team=${teamId}`);
     await page.getByTestId("task-description").click();
-    // Toolbar bold wrap.
-    await page.getByTestId("description-editor").getByRole("textbox").fill("real");
-    await page
-      .getByTestId("description-editor")
-      .getByRole("textbox")
-      .fill("**bold** text with <script>alert(1)</script>");
+    const editorBox = page.getByRole("textbox", { name: "Edit description" });
+    await editorBox.fill("**bold** text with <script>alert(1)</script>");
     await page.keyboard.press("Control+Enter");
 
     // Read mode: bold rendered; the script attempt is inert — no script
@@ -235,11 +240,12 @@ test.describe.serial("Phase 11 rich editor", () => {
 
     // Slash command in the description editor inserts a task list.
     await page.getByTestId("task-description").click();
-    await page.getByRole("textbox", { name: "Edit description" }).fill("/task");
+    const editorBox2 = page.getByRole("textbox", { name: "Edit description" });
+    await editorBox2.fill("");
+    await editorBox2.pressSequentially("/task");
     await page.getByRole("option", { name: "Task list" }).click();
-    const editorBox = page.getByRole("textbox", { name: "Edit description" });
-    await expect(editorBox).toHaveValue("- [ ] ");
-    await editorBox.fill("- [x] shipped via slash");
+    await expect(editorBox2).toHaveValue("- [ ] ");
+    await editorBox2.fill("- [x] shipped via slash");
     await page.keyboard.press("Control+Enter");
     await expect(page.getByTestId("task-detail")).toContainText("shipped via slash");
 

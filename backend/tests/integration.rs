@@ -6511,7 +6511,166 @@ async fn rules_dispatcher_shutdown_and_concurrent_claims() {
     }
 }
 
+/// Reliability review: the `principal_email_conflict` classification is
+/// exercised end to end — a claimed intent executed while the reserved
+/// identity is held by a foreign account fails, is classified Permanent, and
+/// dead-letters on the first attempt instead of burning the retry budget.
+/// SQLite-leg only: the conflict fixture poisons the principal identity, and
+/// the shared CI PG/MySQL databases must not be affected.
 #[tokio::test]
+async fn rules_dispatcher_email_conflict_dead_letters_immediately() {
+    let url = format!(
+        "sqlite:{}/{}",
+        std::env::temp_dir().display(),
+        Uuid::now_v7()
+    );
+    let engine = "sqlite";
+    let app = spawn_app(&url).await;
+    let db = app.db.clone();
+    let suffix = Uuid::now_v7().simple();
+
+    // A foreign account holds the reserved identity email BEFORE the
+    // dispatcher ever runs.
+    {
+        let mut conn = db.conn();
+        let now = tasker::util::now_ms();
+        let mut args = tasker::db::Args::new();
+        args.s(Uuid::now_v7().to_string())
+            .s("automation@tasker.local")
+            .s("Foreign Squatter")
+            .s("$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+            .b(true)
+            .i(now)
+            .i(now);
+        conn.execute(
+            "INSERT INTO users (id, email, display_name, password_hash, is_active, \
+             created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            args,
+        )
+        .await
+        .unwrap();
+    }
+
+    let admin_email = format!("rules-conf-{suffix}@test.local");
+    let member_email = format!("rules-conf-m-{suffix}@test.local");
+    let admin_id = seed_user(&db, &admin_email, "Conf Admin").await;
+    seed_user(&db, &member_email, "Conf Member").await;
+    let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+    let member = login_as(&app.app, &member_email, "test-password-123").await;
+    let (code, team) = send_json(
+        &app.app,
+        "POST",
+        "/api/v1/teams",
+        Some(&admin),
+        json!({"name": "CONF"}),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CREATED);
+    let team_id = team["id"].as_str().unwrap().to_string();
+    let (code, _) = send_json(
+        &app.app,
+        "POST",
+        &format!("/api/v1/teams/{team_id}/members"),
+        Some(&admin),
+        json!({"email": member_email, "role": "member", "temp_password": "member-temp-pw"}),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CREATED);
+    let (code, project) = send_json(
+        &app.app,
+        "POST",
+        &format!("/api/v1/teams/{team_id}/projects"),
+        Some(&admin),
+        json!({"name": "CONFP"}),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CREATED);
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let member_id = user_id_by_email(&db, &member_email).await;
+    let (code, task) = send_json(
+        &app.app,
+        "POST",
+        &format!("/api/v1/projects/{project_id}/tasks"),
+        Some(&admin),
+        json!({"title": "Conflict target", "assignee_id": member_id}),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CREATED);
+    let task_id = task["id"].as_str().unwrap().to_string();
+    seed_rule(
+        &db,
+        &team_id,
+        "task_status_changed",
+        r#"{"field":"task.status","op":"IN","values":["backlog","todo","in_progress","resolved","in_review","closed"]}"#,
+        r#"[{"body":"conflict probe"}]"#,
+        true,
+        1,
+        &admin_id,
+    )
+    .await;
+    let (code, _) = send_json(
+        &app.app,
+        "POST",
+        &format!("/api/v1/tasks/{task_id}/transition"),
+        Some(&member),
+        json!({"to": "todo"}),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+
+    // A full dispatcher cycle claims the intent itself: the conflict is
+    // classified Permanent and the intent dead-letters on attempt 1 — the
+    // retry budget is not consumed by a permanently unresolvable failure.
+    let metrics = tasker::http::metrics::Metrics::new();
+    let config = tasker::config::RulesWorkerConfig::default();
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(2));
+    tasker::rules::dispatcher::run_once(&db, &config, "worker-a", &metrics, &semaphore)
+        .await
+        .expect("run_once");
+
+    let mut args = tasker::db::Args::new();
+    args.s(&task_id);
+    let row = db
+        .conn()
+        .fetch_optional(
+            "SELECT status, attempts, last_error_category, last_error_detail \
+             FROM automation_outbox WHERE task_id = ?",
+            args,
+        )
+        .await
+        .unwrap()
+        .expect("intent");
+    assert_eq!(
+        row.try_get::<String, _>("status").unwrap(),
+        "dead_letter",
+        "[{engine}] conflict dead-letters immediately"
+    );
+    assert_eq!(
+        row.try_get::<i64, _>("attempts").unwrap(),
+        1,
+        "[{engine}] one attempt, not 8"
+    );
+    assert_eq!(
+        row.try_get::<String, _>("last_error_category").unwrap(),
+        "permanent"
+    );
+    let detail = row.try_get::<String, _>("last_error_detail").unwrap();
+    assert!(
+        detail.contains("principal_email_conflict"),
+        "[{engine}] diagnosable category persisted: {detail}"
+    );
+    // The rendered metrics expose the dead-letter + zero executions.
+    let rendered = metrics.render(0);
+    assert!(
+        rendered.contains("tasker_outbox_dead_lettered_total 1"),
+        "[{engine}] dead-letter counter: {rendered}"
+    );
+    assert!(
+        rendered.contains("tasker_outbox_actions_executed_total 0"),
+        "[{engine}] nothing executed"
+    );
+}
+
 async fn rules_capture_atomicity_on_failure() {
     for (engine, url) in test_db_urls() {
         let app = spawn_app(&url).await;
@@ -9442,8 +9601,14 @@ async fn threading_templates_position_matrix() {
         let admin = login_as(&app.app, &admin_email, "test-password-123").await;
         let member = login_as(&app.app, &member_email, "test-password-123").await;
 
-        let (code, team) =
-            send_json(&app.app, "POST", "/api/v1/teams", Some(&admin), json!({"name":"P11T"})).await;
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name":"P11T"}),
+        )
+        .await;
         assert_eq!(code, StatusCode::CREATED);
         let team_id = team["id"].as_str().unwrap().to_string();
         let (code, _) = send_json(
@@ -9456,12 +9621,22 @@ async fn threading_templates_position_matrix() {
         .await;
         assert_eq!(code, StatusCode::CREATED);
         let member_id = {
-            let (code, members) =
-                get_json(&app.app, &format!("/api/v1/teams/{team_id}/members"), &admin).await;
+            let (code, members) = get_json(
+                &app.app,
+                &format!("/api/v1/teams/{team_id}/members"),
+                &admin,
+            )
+            .await;
             assert_eq!(code, StatusCode::OK);
-            members["items"].as_array().unwrap()
-                .iter().find(|m| m["role"] == "member").unwrap()["user"]["id"]
-                .as_str().unwrap().to_string()
+            members["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["role"] == "member")
+                .unwrap()["user"]["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
         };
         let (code, project) = send_json(
             &app.app,
@@ -9495,7 +9670,10 @@ async fn threading_templates_position_matrix() {
         .await;
         assert_eq!(code, StatusCode::CREATED);
         let root_id = root["id"].as_str().unwrap().to_string();
-        assert!(root["parent_comment_id"].is_null(), "[{engine}] top-level has no parent");
+        assert!(
+            root["parent_comment_id"].is_null(),
+            "[{engine}] top-level has no parent"
+        );
 
         // Reply: allowed; parent author notified.
         let (code, reply) = send_json(
@@ -9507,12 +9685,23 @@ async fn threading_templates_position_matrix() {
         )
         .await;
         assert_eq!(code, StatusCode::CREATED, "[{engine}] reply created");
-        assert_eq!(reply["parent_comment_id"], json!(root_id), "[{engine}] reply carries parent");
+        assert_eq!(
+            reply["parent_comment_id"],
+            json!(root_id),
+            "[{engine}] reply carries parent"
+        );
         let reply_id = reply["id"].as_str().unwrap().to_string();
         let (code, notifications) = get_json(&app.app, "/api/v1/notifications", &admin).await;
-        assert!(notifications["items"].as_array().unwrap().iter().any(|n| {
-            n["event"] == "comment_mention" && n["summary"].as_str().unwrap().contains("replied to your comment")
-        }), "[{engine}] parent author notified of reply");
+        assert!(
+            notifications["items"].as_array().unwrap().iter().any(|n| {
+                n["event"] == "comment_mention"
+                    && n["summary"]
+                        .as_str()
+                        .unwrap()
+                        .contains("replied to your comment")
+            }),
+            "[{engine}] parent author notified of reply"
+        );
 
         // Reply-to-reply: 422 (depth 2).
         let (code, err) = send_json(
@@ -9523,8 +9712,19 @@ async fn threading_templates_position_matrix() {
             json!({"body": "too deep", "parent_comment_id": reply_id}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] depth limit");
-        assert!(err["errors"].as_array().unwrap().iter().any(|e| e["message"].as_str().unwrap().contains("depth")), "[{engine}] depth message");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] depth limit"
+        );
+        assert!(
+            err["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["message"].as_str().unwrap().contains("depth")),
+            "[{engine}] depth message"
+        );
 
         // Cross-task parent rejected.
         let (code, task2) = send_json(
@@ -9545,12 +9745,28 @@ async fn threading_templates_position_matrix() {
             json!({"body": "x", "parent_comment_id": root_id}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] cross-task parent");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] cross-task parent"
+        );
 
         // comment_replied activity recorded.
-        let (code, activity) = get_json(&app.app, &format!("/api/v1/tasks/{task_id}/activity"), &admin).await;
+        let (code, activity) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/activity"),
+            &admin,
+        )
+        .await;
         assert_eq!(code, StatusCode::OK);
-        assert!(activity["items"].as_array().unwrap().iter().any(|a| a["event"] == "comment_replied"), "[{engine}] comment_replied event");
+        assert!(
+            activity["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|a| a["event"] == "comment_replied"),
+            "[{engine}] comment_replied event"
+        );
 
         // Delete parent with replies: allowed (cascade in app policy).
         let (code, _) = send_request(
@@ -9562,13 +9778,24 @@ async fn threading_templates_position_matrix() {
         .await;
         assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] delete parent");
         // Replies cascade: the task's comment list no longer contains either.
-        let (code, remaining) =
-            get_json(&app.app, &format!("/api/v1/tasks/{task_id}/comments"), &admin).await;
+        let (code, remaining) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/comments"),
+            &admin,
+        )
+        .await;
         assert_eq!(code, StatusCode::OK);
-        let ids: Vec<&str> = remaining["items"].as_array().unwrap()
-            .iter().map(|c| c["id"].as_str().unwrap()).collect();
+        let ids: Vec<&str> = remaining["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["id"].as_str().unwrap())
+            .collect();
         assert!(!ids.contains(&root_id.as_str()), "[{engine}] parent gone");
-        assert!(!ids.contains(&reply_id.as_str()), "[{engine}] reply gone with parent");
+        assert!(
+            !ids.contains(&reply_id.as_str()),
+            "[{engine}] reply gone with parent"
+        );
 
         // -- From-template ---------------------------------------------------
         let (code, template) = send_json(
@@ -9588,10 +9815,19 @@ async fn threading_templates_position_matrix() {
         .await;
         assert_eq!(code, StatusCode::CREATED, "[{engine}] template create");
         let template_id = template["id"].as_str().unwrap().to_string();
-        assert_eq!(template["default_subtasks"].as_array().unwrap().len(), 3, "[{engine}] subtasks stored");
+        assert_eq!(
+            template["default_subtasks"].as_array().unwrap().len(),
+            3,
+            "[{engine}] subtasks stored"
+        );
 
         // Single fetch.
-        let (code, fetched) = get_json(&app.app, &format!("/api/v1/templates/{template_id}"), &admin).await;
+        let (code, fetched) = get_json(
+            &app.app,
+            &format!("/api/v1/templates/{template_id}"),
+            &admin,
+        )
+        .await;
         assert_eq!(code, StatusCode::OK, "[{engine}] get single template");
         assert_eq!(fetched["name"], "P11 Bug");
 
@@ -9605,9 +9841,16 @@ async fn threading_templates_position_matrix() {
         )
         .await;
         assert_eq!(code, StatusCode::CREATED, "[{engine}] from-template");
-        assert_eq!(from_t["title"], "Bug: login loop", "[{engine}] override applied");
+        assert_eq!(
+            from_t["title"], "Bug: login loop",
+            "[{engine}] override applied"
+        );
         assert_eq!(from_t["priority"], "high", "[{engine}] template priority");
-        assert_eq!(from_t["from_template_id"], json!(template_id), "[{engine}] provenance");
+        assert_eq!(
+            from_t["from_template_id"],
+            json!(template_id),
+            "[{engine}] provenance"
+        );
         let from_task_id = from_t["id"].as_str().unwrap().to_string();
         let subtasks = from_t["subtasks"].as_array().unwrap();
         assert_eq!(subtasks.len(), 3, "[{engine}] template subtasks applied");
@@ -9621,7 +9864,11 @@ async fn threading_templates_position_matrix() {
             json!({"priority": "catastrophic"}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] template cannot bypass validation");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] template cannot bypass validation"
+        );
         void_task(&from_task_id);
 
         // -- Position reordering ---------------------------------------------
@@ -9674,7 +9921,11 @@ async fn threading_templates_position_matrix() {
             json!({"before_task_id": id2}),
         )
         .await;
-        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] member reorder forbidden");
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] member reorder forbidden"
+        );
 
         // Self-reference rejected.
         let (code, _) = send_json(
@@ -9685,7 +9936,11 @@ async fn threading_templates_position_matrix() {
             json!({"before_task_id": id1}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] self reference");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] self reference"
+        );
 
         // Different-column reference rejected: move a helper task to
         // in_progress first, then reference it from a backlog task.
@@ -9718,7 +9973,11 @@ async fn threading_templates_position_matrix() {
             json!({"before_task_id": helper_id}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] cross-column reference");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] cross-column reference"
+        );
 
         // Board ordering reflects the move: c before a.
         let (code, board) = get_json(
@@ -9728,10 +9987,18 @@ async fn threading_templates_position_matrix() {
         )
         .await;
         assert_eq!(code, StatusCode::OK);
-        let backlog = board["columns"].as_array().unwrap()
-            .iter().find(|c| c["status"] == "backlog").unwrap();
-        let titles: Vec<&str> = backlog["items"].as_array().unwrap()
-            .iter().map(|t| t["title"].as_str().unwrap()).collect();
+        let backlog = board["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["status"] == "backlog")
+            .unwrap();
+        let titles: Vec<&str> = backlog["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["title"].as_str().unwrap())
+            .collect();
         let ci = titles.iter().position(|t| *t == "pos c").unwrap();
         let ai = titles.iter().position(|t| *t == "pos a").unwrap();
         assert!(ci < ai, "[{engine}] c ordered before a: {titles:?}");

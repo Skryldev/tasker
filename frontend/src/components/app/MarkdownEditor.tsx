@@ -16,7 +16,7 @@ import {
   Quote,
   Strikethrough,
 } from "lucide-react";
-import { applyMarkdownAction, applySlashCommand, SLASH_COMMANDS } from "@/lib/markdown";
+import { applyMarkdownAction, SLASH_COMMANDS } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
 
 /**
@@ -92,19 +92,33 @@ export function MarkdownEditor({
     const el = ref.current;
     if (!el) return;
     const current = el.value;
-    const start = slash ? slashStartRef.current : el.selectionStart;
-    const end = slash ? el.selectionStart : el.selectionEnd;
-    const result =
-      action === "codeblock" || slash
-        ? applySlashCommand(current, start, end, action)
-        : applyMarkdownAction(current, start, end, action as EditorAction);
-    // For slash insertion the "/query" text must be removed first.
-    const finalValue = slash
-      ? result.value.slice(0, slashStartRef.current) +
-        result.value.slice(el.selectionStart)
-      : result.value;
+    let result: { value: string; selStart: number; selEnd: number };
+    if (slash) {
+      // Slash insertion: strip the "/query" text first, then apply the
+      // block prefix at the (now empty) line start.
+      const stripped =
+        current.slice(0, slashStartRef.current) + current.slice(el.selectionStart);
+      result =
+        action === "codeblock"
+          ? {
+              value:
+                stripped.slice(0, slashStartRef.current) +
+                "```\n\n```" +
+                stripped.slice(slashStartRef.current),
+              selStart: slashStartRef.current + 4,
+              selEnd: slashStartRef.current + 4,
+            }
+          : applyMarkdownAction(
+              stripped,
+              slashStartRef.current,
+              slashStartRef.current,
+              action as EditorAction,
+            );
+    } else {
+      result = applyMarkdownAction(current, el.selectionStart, el.selectionEnd, action as EditorAction);
+    }
     const caret = slash ? slashStartRef.current + 1 : result.selEnd;
-    onChange(finalValue);
+    onChange(result.value);
     setSlashOpen(false);
     setSlashQuery("");
     requestAnimationFrame(() => {

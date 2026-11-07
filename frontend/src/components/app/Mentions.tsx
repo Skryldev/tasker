@@ -2,7 +2,7 @@ import { useMemo, useState, type KeyboardEvent } from "react";
 import { useMembers } from "@/api/hooks";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { applySlashCommand, renderMarkdown } from "@/lib/markdown";
+import { renderMarkdown } from "@/lib/markdown";
 
 /**
  * Renders comment bodies with team-member mentions highlighted. A mention is

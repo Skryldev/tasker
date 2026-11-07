@@ -76,12 +76,22 @@ pub fn classify_failure(err: &AppError) -> FailureClass {
         "corrupted automation references",
         "automation principal identity corrupted",
         "task's team does not match",
+        // The foreign holder of the reserved identity email never disappears,
+        // so retrying can never succeed.
+        "principal_email_conflict",
     ];
-    if matches!(err, E::BadRequest(_) | E::Validation(_))
+    if matches!(err, E::BadRequest(_) | E::Validation(_) | E::NotFound(_))
         || permanent_markers.iter().any(|m| text.contains(m))
     {
         return FailureClass::Permanent;
     }
+    // Documented unknown-failure policy: any error shape not recognized above
+    // is treated as Retryable. This is safe because (a) a retryable failure's
+    // transaction rolled back with the effect, so no committed work can be
+    // duplicated; (b) attempts burn only when `record_failure` lands, so an
+    // unknown failure is bounded by max_attempts and terminates in
+    // `dead_letter`; (c) the ledger pre-check makes even a mis-retried
+    // already-committed effect converge to `AlreadyExecuted`.
     FailureClass::Retryable
 }
 
@@ -630,19 +640,40 @@ mod tests {
             AppError::internal("stored action payload type `add_comment` disagrees"),
             AppError::internal("corrupted automation references: intent"),
             AppError::BadRequest("bad".into()),
-            AppError::Conflict("integrity".into()),
+            // A vanished scope row is corruption: retrying cannot resurrect it.
+            AppError::NotFound("outbox intent not found"),
+            // The reserved-email conflict never resolves by waiting.
+            AppError::Conflict(
+                "principal_email_conflict: the reserved automation identity email is held".into(),
+            ),
         ];
-        for err in &permanent[..4] {
+        for err in &permanent {
             assert_eq!(classify_failure(err), FailureClass::Permanent, "{err}");
         }
-        // Concurrent-completion conflicts are retryable (pre-check converges).
-        assert_eq!(
-            classify_failure(&AppError::Conflict("completed concurrently".into())),
-            FailureClass::Retryable
-        );
-        assert_eq!(
-            classify_failure(&AppError::internal("database temporarily unavailable")),
-            FailureClass::Retryable
-        );
+    }
+
+    #[test]
+    fn classification_policy_for_unknown_and_transient_errors() {
+        // Documented unknown-failure policy: unrecognized shapes are
+        // Retryable — bounded by max_attempts, terminating in dead_letter,
+        // with no possibility of duplicating a committed effect (the effect's
+        // transaction always rolled back with the failure).
+        let retryable = [
+            AppError::internal("database temporarily unavailable"),
+            // Concurrent-completion conflicts converge via the ledger
+            // pre-check on the next claim.
+            AppError::Conflict("completed concurrently".into()),
+            AppError::Busy {
+                retry_after_secs: 1,
+            },
+            // A unique violation on the ledger (racing direct calls) rolls
+            // back with its transaction; the retry's pre-check converges.
+            AppError::internal("UNIQUE constraint failed: rule_action_results.outbox_id"),
+            // Stale fencing tokens: the current owner owns the outcome.
+            AppError::Conflict("automation outbox row is no longer owned by this claim".into()),
+        ];
+        for err in &retryable {
+            assert_eq!(classify_failure(err), FailureClass::Retryable, "{err}");
+        }
     }
 }
