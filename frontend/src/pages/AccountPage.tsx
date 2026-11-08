@@ -20,6 +20,8 @@ import { Avatar, Separator } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { TimezoneSelect } from "@/components/app/TimezoneSelect";
+import { strengthLabel, strengthTone } from "@/lib/password-strength";
+import { passwordStrength } from "@/lib/password-strength";
 import { useToast } from "@/components/ui/toast";
 import { useAuth, useLogout } from "@/lib/auth";
 import { fileToAvatarDataUrl, AvatarError } from "@/lib/avatar";
@@ -108,10 +110,6 @@ export function AccountPage() {
           className="flex max-w-sm flex-col gap-3"
           onSubmit={(e) => {
             e.preventDefault();
-            if (newPassword.length < 10) {
-              setFormError("New password must be at least 10 characters.");
-              return;
-            }
             change.mutate();
           }}
           noValidate
@@ -142,6 +140,12 @@ export function AccountPage() {
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
             />
+            {newPassword ? (
+              <PasswordStrengthMeter password={newPassword} />
+            ) : null}
+            <p className="text-2xs text-muted-foreground">
+              At least 12 characters with upper, lower, digit and special.
+            </p>
           </div>
           {formError ? <p className="text-2xs text-destructive" role="alert">{formError}</p> : null}
           <Button
@@ -664,6 +668,27 @@ function SessionsSection() {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/**
+ * Live strength meter (Phase 12.5 Bug 8): advisory only — the server
+ * policy (ADR-0016) is the enforcement point. 0-4 scale.
+ */
+function PasswordStrengthMeter({ password }: { password: string }) {
+  const score = passwordStrength(password);
+  return (
+    <div className="flex items-center gap-2" data-testid="password-strength">
+      <span className="flex flex-1 gap-0.5" aria-hidden>
+        {[0, 1, 2, 3].map((i) => (
+          <span
+            key={i}
+            className={`h-1.5 flex-1 rounded-full ${i < score ? strengthTone(score) : "bg-muted"}`}
+          />
+        ))}
+      </span>
+      <span className="text-2xs text-muted-foreground">{strengthLabel(score)}</span>
     </div>
   );
 }

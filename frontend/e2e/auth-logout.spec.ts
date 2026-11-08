@@ -12,10 +12,10 @@ import { expect, test, type BrowserContext, type Page, type Request } from "@pla
  * 4. logout -> login -> logout still works (signed-out state re-arms).
  *
  * Requires a freshly bootstrapped server (see scripts/e2e-server.sh):
- *   admin@tasker.local / admin-pass-12345
+ *   admin@tasker.local / Admin-Pass-12345!
  */
 
-const ADMIN = { email: "admin@tasker.local", password: "admin-pass-12345" };
+const ADMIN = { email: "admin@tasker.local", password: "Admin-Pass-12345!" };
 
 test.describe.serial("Logout and global 401 handling", () => {
   let context: BrowserContext;

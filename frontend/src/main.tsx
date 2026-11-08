@@ -47,6 +47,9 @@ const TimelinePage = lazy(() =>
 const DashboardPage = lazy(() =>
   import("@/pages/DashboardPage").then((m) => ({ default: m.default })),
 );
+const AdminUsersPage = lazy(() =>
+  import("@/pages/AdminUsersPage").then((m) => ({ default: m.default })),
+);
 const GoalsPage = lazy(() => import("@/pages/GoalsPage").then((m) => ({ default: m.GoalsPage })));
 const GoalDetailPage = lazy(() =>
   import("@/pages/GoalDetailPage").then((m) => ({ default: m.GoalDetailPage })),
@@ -91,7 +94,12 @@ const router = createBrowserRouter([
       { path: "goals/:goalId", element: <GoalDetailPage /> },
       { path: "teams/:teamId/settings", element: <TeamSettingsPage /> },
       { path: "projects/:projectId/guests", element: <ProjectGuestsPage /> },
+      {
+        path: "teams/:teamId/projects/:projectId/tasks/:taskId",
+        element: <TaskPage />,
+      },
       { path: "tasks/:taskId", element: <TaskPage /> },
+      { path: "users", element: <AdminUsersPage /> },
       { path: "account", element: <AccountPage /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],

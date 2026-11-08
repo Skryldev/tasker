@@ -52,7 +52,7 @@ esac
 echo "==> Bootstrap + start server on :$PORT"
 TASKER_DATABASE_URL="sqlite:$DB_WIN/load.db" \
   "$ROOT/backend/target/debug/tasker" bootstrap-admin \
-  --email load@tasker.local --password load-admin-pass-1 --display-name "Load" >/dev/null
+  --email load@tasker.local --password Load-Admin-Pass-1! --display-name "Load" >/dev/null
 
 TASKER_DATABASE_URL="sqlite:$DB_WIN/load.db" \
   TASKER_HTTP_PORT="$PORT" \

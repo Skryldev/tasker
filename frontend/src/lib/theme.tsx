@@ -51,7 +51,7 @@ export function themeById(id: string): ThemeDefinition | undefined {
   return THEME_BY_ID.get(id);
 }
 
-type ThemeId = string;
+export type ThemeId = string;
 
 interface ThemeContextValue {
   /** Active theme id (also mirrored to `<html data-theme>`). */

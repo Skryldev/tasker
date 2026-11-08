@@ -1,6 +1,6 @@
 //! Teams: creation, settings, membership management, and labels.
 
-use axum::extract::{Path, State};
+use axum::extract::{Query, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -34,6 +34,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/teams/{team_id}/members",
             get(list_members).post(add_member),
+        )
+        .route(
+            "/teams/{team_id}/members/eligible",
+            get(eligible_members),
         )
         .route(
             "/teams/{team_id}/members/{user_id}",
@@ -233,6 +237,10 @@ pub struct CreateTeamRequest {
     pub description: Option<String>,
 }
 
+/// Bug 7: the product's primary market anchors the team timezone; every new
+/// team defaults to Asia/Tehran and migration 0015 backfilled existing NULLs.
+pub const DEFAULT_TEAM_TIMEZONE: &str = "Asia/Tehran";
+
 async fn create_team(
     State(state): State<AppState>,
     user: AuthedUser,
@@ -247,12 +255,13 @@ async fn create_team(
     args.s(&id)
         .s(&name)
         .opt_s(description.clone())
+        .s(DEFAULT_TEAM_TIMEZONE)
         .s(&user.id)
         .i(now)
         .i(now);
     conn.execute(
-        "INSERT INTO teams (id, name, description, created_by, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO teams (id, name, description, timezone, created_by, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
         args,
     )
     .await?;
@@ -271,7 +280,7 @@ async fn create_team(
             id,
             name,
             description,
-            timezone: None,
+            timezone: Some(DEFAULT_TEAM_TIMEZONE.to_string()),
             archived_at: None,
             created_at: now,
             updated_at: now,
@@ -445,15 +454,11 @@ async fn list_members(
 
 #[derive(Deserialize)]
 pub struct AddMemberRequest {
+    /// Email of an **existing instance user** (Bug 2). Tasker accounts are
+    /// created by an instance Owner via `POST /admin/users`; team membership
+    /// is a separate assignment step.
     pub email: String,
-    #[serde(default)]
-    pub display_name: Option<String>,
     pub role: String,
-    /// Required only when the user does not exist yet (admin-assisted
-    /// provisioning; the administrator hands credentials to the member
-    /// out-of-band). Email invitations are planned for a later phase.
-    #[serde(default)]
-    pub temp_password: Option<String>,
 }
 
 async fn add_member(
@@ -482,25 +487,21 @@ async fn add_member(
     let email = body.email.trim().to_lowercase();
     let mut conn = state.db.begin().await?;
 
-    let now = util::now_ms();
-    let (user_id, display_name, username) =
-        if let Some((existing, _)) = users::find_active_by_email(&mut conn, &email).await? {
-            (existing.id, existing.display_name, existing.username)
-        } else {
-            let temp_password = body.temp_password.clone().unwrap_or_default();
-            let new_user = users::create_validated(
-                &mut conn,
-                &email,
-                body.display_name
-                    .as_deref()
-                    .unwrap_or_else(|| email.split('@').next().unwrap_or("member")),
-                &temp_password,
-            )
-            .await?;
-            (new_user.id, new_user.display_name, new_user.username)
-        };
+    // Assignment only: the account must already exist instance-wide. A 422
+    // with an actionable message replaces the old team-scoped account
+    // creation (ADR-0014).
+    let Some((existing, _)) = users::find_active_by_email(&mut conn, &email).await? else {
+        return Err(AppError::validation(
+            "email",
+            "No Tasker user with this email. Ask an Owner to create the account first.",
+        ));
+    };
+    let user_id = existing.id;
+    let display_name = existing.display_name;
+    let username = existing.username;
 
     let mut args = Args::new();
+    let now = util::now_ms();
     args.s(&team_id).s(&user_id).s(role.as_str()).i(now);
     if let Err(e) = conn
         .execute(
@@ -529,6 +530,112 @@ async fn add_member(
             created_at: now,
         }),
     ))
+}
+
+/// Search instance users eligible to join this team (Phase 12.5 Bug 2):
+/// existing accounts only, excluding current members. Team Owner/Admin —
+/// the same gate as assignment itself.
+#[derive(Deserialize)]
+pub struct EligibleMembersQuery {
+    #[serde(default)]
+    pub q: Option<String>,
+    #[serde(default)]
+    pub page: Option<i64>,
+    #[serde(default)]
+    pub page_size: Option<i64>,
+}
+
+async fn eligible_members(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(team_id): Path<String>,
+    Query(query): Query<EligibleMembersQuery>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let mut conn = state.db.conn();
+    require_membership(&mut conn, &team_id, &user.id).await?;
+    authorization::require_capability(&mut conn, &team_id, &user.id, Capability::AddMember)
+        .await?;
+
+    let page = query.page.unwrap_or(1).max(1);
+    let page_size = query.page_size.unwrap_or(20).clamp(1, 100);
+    let offset = (page - 1) * page_size;
+    let like = query
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+        .map(crate::util::escape_like)
+        .map(|q| format!("%{q}%"));
+
+    let sql_where = "FROM users u          WHERE u.is_active            AND NOT EXISTS (SELECT 1 FROM team_members tm                            WHERE tm.team_id = ? AND tm.user_id = u.id)";
+    let total: i64 = match &like {
+        Some(pattern) => {
+            let mut args = Args::new();
+            args.s(&team_id).s(pattern.clone());
+            conn.fetch_optional(
+                &format!("SELECT COUNT(*) AS n {sql_where}                           AND (u.email LIKE ? ESCAPE '|' OR u.display_name LIKE ? ESCAPE '|' OR u.username LIKE ? ESCAPE '|')"),
+                {
+                    let mut a = Args::new();
+                    a.s(&team_id).s(pattern.clone()).s(pattern.clone()).s(pattern.clone());
+                    a
+                },
+            )
+            .await?
+            .map_or(0, |r| r.try_get("n").unwrap_or(0))
+        }
+        None => {
+            let mut args = Args::new();
+            args.s(&team_id);
+            conn.fetch_optional(&format!("SELECT COUNT(*) AS n {sql_where}"), args)
+                .await?
+                .map_or(0, |r| r.try_get("n").unwrap_or(0))
+        }
+    };
+
+    let rows = match &like {
+        Some(pattern) => {
+            let mut args = Args::new();
+            args.s(&team_id).s(pattern.clone()).s(pattern.clone()).s(pattern.clone());
+            args.i(page_size).i(offset);
+            conn.fetch_all(
+                &format!(
+                    "SELECT u.id, u.email, u.display_name, u.username {sql_where}                      AND (u.email LIKE ? ESCAPE '|' OR u.display_name LIKE ? ESCAPE '|' OR u.username LIKE ? ESCAPE '|')                      ORDER BY u.display_name LIMIT ? OFFSET ?"
+                ),
+                args,
+            )
+            .await?
+        }
+        None => {
+            let mut args = Args::new();
+            args.s(&team_id).i(page_size).i(offset);
+            conn.fetch_all(
+                &format!(
+                    "SELECT u.id, u.email, u.display_name, u.username {sql_where}                      ORDER BY u.display_name LIMIT ? OFFSET ?"
+                ),
+                args,
+            )
+            .await?
+        }
+    };
+
+    let items: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            Ok(serde_json::json!({
+                "id": row.try_get::<String, _>("id")?,
+                "email": row.try_get::<String, _>("email")?,
+                "display_name": row.try_get::<String, _>("display_name")?,
+                "username": row.try_get::<Option<String>, _>("username")?,
+            }))
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+
+    Ok(Json(serde_json::json!({
+        "items": items,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+    })))
 }
 
 #[derive(Deserialize)]

@@ -5,6 +5,7 @@
 //! authorization (`authorization`), and infrastructure (`db`, `security`).
 
 pub mod activity;
+pub mod admin;
 pub mod attachments;
 pub mod auth;
 pub mod authorization;

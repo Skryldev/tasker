@@ -6,6 +6,7 @@ import {
   keepPreviousData,
 } from "@tanstack/react-query";
 import { api, ApiError, type DashboardWindow, type NotificationPrefs, type Task, type TaskCreate, type TaskUpdate } from "./client";
+import { setAvatarVersion } from "@/lib/avatar-version";
 
 export const queryKeys = {
   me: ["me"] as const,
@@ -49,6 +50,14 @@ export function useUpdateProfile() {
     onSuccess: (user) => {
       qc.setQueryData(queryKeys.me, user);
       void qc.invalidateQueries({ queryKey: queryKeys.me });
+      // Bug 5: the capacity view and dashboard embed the profile's
+      // capacity_limit — a profile save must refresh every capacity-derived
+      // surface immediately (prefix match covers all teams/windows).
+      void qc.invalidateQueries({ queryKey: ["capacity"] });
+      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      // Bug 1: cache-bust the avatar URL on every profile write that can
+      // carry a new avatar (the endpoint is max-age=300 at a stable URL).
+      setAvatarVersion(user.id, Date.now());
     },
   });
 }

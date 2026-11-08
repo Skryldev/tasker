@@ -8,8 +8,8 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
  * (scripts/e2e.sh restarts the server and wipes the DB before the run).
  */
 
-const ADMIN = { email: "admin@tasker.local", password: "admin-pass-12345" };
-const MEMBER = { email: "member@tasker.local", password: "member-pass-12345" };
+const ADMIN = { email: "admin@tasker.local", password: "Admin-Pass-12345!" };
+const MEMBER = { email: "member@tasker.local", password: "Member-Pass-1234!" };
 
 test.describe.serial("Phase 2 workflow and notifications", () => {
   let context: BrowserContext;
@@ -46,11 +46,22 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
       (t) => t.name === "P2 Team",
     )!.id;
 
+    // Bug 2 (ADR-0014): the account is created by the Owner on the Users
+    // page; team settings only assign it.
+    // Bug 2 (ADR-0014): Owner-created account; tolerate "already exists"
+    // from an earlier leg of this serial suite.
+    const __created = await page.request.post("/api/v1/admin/users", {
+      data: { email: MEMBER.email, display_name: "P2 Member", temporary_password: MEMBER.password },
+    });
+    if (__created.status() === 422) {
+      // The account exists already — assignment below is still valid.
+    } else {
+      expect(__created.status()).toBe(201);
+    }
     await page.goto(`/teams/${teamId}/settings?team=${teamId}`);
     await page.getByTestId("add-member").click();
-    await page.getByTestId("member-email-input").fill(MEMBER.email);
-    await page.getByLabel("Temporary password (new accounts only)").fill(MEMBER.password);
-    await page.getByTestId("member-submit").click();
+    await page.getByTestId("member-search-input").fill(MEMBER.email);
+    await page.getByTestId("eligible-members-list").getByRole("option").first().click();
     await expect(page.getByTestId("member-list")).toContainText(MEMBER.email);
 
     await page.goto(`/projects?team=${teamId}`);
@@ -105,11 +116,11 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
     });
     expect(patchStatus.status()).toBe(400);
     await mp.goto(`/tasks/${taskId}`);
-    await expect(mp.getByTestId("task-detail")).toContainText("In Progress");
+    await expect(mp.getByTestId("task-page")).toContainText("In Progress");
 
     // The assignee marks the work resolved.
     await mp.getByTestId("resolve-task").click();
-    await expect(mp.getByTestId("task-detail")).toContainText("Resolved");
+    await expect(mp.getByTestId("task-page")).toContainText("Resolved");
 
     // Review decisions belong to the reporter: submission is forbidden for
     // the assignee (legal pair, actor check), and no accept button is
@@ -136,10 +147,10 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
     await expect(list).toContainText("resolved");
     await list.locator('[data-testid^="notification-"]').first().click();
     // Navigation goes to the task page; the reporter submits for review.
-    await expect(page.getByTestId("task-detail")).toContainText("Resolved");
+    await expect(page.getByTestId("task-page")).toContainText("Resolved");
     await expect(page.getByTestId("submit-task")).toBeVisible();
     await page.getByTestId("submit-task").click();
-    await expect(page.getByTestId("task-detail")).toContainText("In Review");
+    await expect(page.getByTestId("task-page")).toContainText("In Review");
     // Then the reporter accepts via the confirmation dialog (Phase 10.5
     // status control shows consequences before closing).
     await page.getByTestId("accept-task").click();
@@ -191,7 +202,7 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
     await page.getByTestId("reject-submit").click();
     await expect(page.getByTestId("resolution-banner")).toContainText("Rejected");
     await expect(page.getByTestId("resolution-banner")).toContainText("the intro needs numbers");
-    await expect(page.getByTestId("task-detail")).toContainText("In Progress");
+    await expect(page.getByTestId("task-page")).toContainText("In Progress");
   });
 
   test("mention in a comment notifies the mentioned member", async ({ browser }) => {

@@ -121,8 +121,17 @@ export function ShortcutsManager() {
       onPalette: loadPalette,
       onCheatsheet: () => setCheatsheetOpen(true),
       onCreateTask: () => {
-        const onProjectPage = window.location.pathname.startsWith("/projects/");
-        navigate(onProjectPage ? `${window.location.pathname}?new=task` : "/projects?new=project");
+        // Preserve the current query (the ?team= workspace param) — dropping
+        // it made the create dialog open against the defaulted team (Bug 3
+        // regression caught by E2E).
+        const next = new URLSearchParams(window.location.search);
+        if (window.location.pathname.startsWith("/projects/")) {
+          next.set("new", "task");
+          navigate(`${window.location.pathname}?${next.toString()}`);
+        } else {
+          next.set("new", "project");
+          navigate(`/projects?${next.toString()}`);
+        }
       },
       onFocusSearch: () => {
         if (window.location.pathname !== "/") navigate("/");

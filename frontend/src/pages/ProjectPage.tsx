@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarRange, KanbanSquare, ListFilter, ListTodo, Plus, Search } from "lucide-react";
@@ -68,6 +68,19 @@ export function ProjectPage() {
   const [page, setPage] = useState(1);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [dialogOpen, setDialogOpen] = useState(() => params.get("new") === "task");
+  // The `?new=task` param opens the create dialog — including on SPA
+  // navigation (the "C" shortcut), where the useState initializer above has
+  // already run. The param is consumed after opening so back/refresh does
+  // not reopen the dialog. (Phase 12.5: the shortcut regression caught by
+  // E2E.)
+  const createParam = params.get("new");
+  useEffect(() => {
+    if (createParam !== "task") return;
+    setDialogOpen(true);
+    const next = new URLSearchParams(params);
+    next.delete("new");
+    setParams(next, { replace: true });
+  }, [createParam, params, setParams]);
 
   const members = useMembers(teamId);
   const labels = useLabels(teamId);

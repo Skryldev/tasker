@@ -20,7 +20,7 @@ echo "==> Building frontend"
 echo "==> Bootstrapping administrator"
 TASKER_DATABASE_URL="sqlite:$DB_WIN/e2e.db" \
   "$ROOT/backend/target/debug/tasker" bootstrap-admin \
-  --email admin@tasker.local --password admin-pass-12345 --display-name "Ada Admin"
+  --email admin@tasker.local --password Admin-Pass-12345! --display-name "Ada Admin"
 
 echo "==> Starting server on :$PORT"
 # TASKER_MFA_ENCRYPTION_KEY / TASKER_RECOVERY_PEPPER: fixed test-only values

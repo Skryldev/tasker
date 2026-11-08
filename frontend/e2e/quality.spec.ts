@@ -8,11 +8,11 @@ import { expect, test, type Page } from "@playwright/test";
  *  - axe-core scans with zero critical violations on five key pages.
  *
  * Requires a freshly bootstrapped server (see scripts/e2e-server.sh):
- *   admin@tasker.local / admin-pass-12345
+ *   admin@tasker.local / Admin-Pass-12345!
  * First run records the baselines under e2e/__screenshots__/.
  */
 
-const ADMIN = { email: "admin@tasker.local", password: "admin-pass-12345" };
+const ADMIN = { email: "admin@tasker.local", password: "Admin-Pass-12345!" };
 
 // Shared fixtures created once by the visual describe's beforeAll and reused
 // by the axe scans.
@@ -41,8 +41,18 @@ test.describe.serial("Visual baselines", () => {
     // A teammate as assignee: the workflow forbids assignee == reporter and
     // the reporter defaults to the creator.
     const memberEmail = `quality-${Date.now().toString(36)}@test.local`;
+      // Bug 2 (ADR-0014): Owner-created account; tolerate "already exists"
+      // from an earlier leg of this serial suite.
+      const __created = await page.request.post("/api/v1/admin/users", {
+        data: { email: memberEmail, display_name: "E2E Member", temporary_password: "Member-Pass-1234!" },
+      });
+      if (__created.status() === 422) {
+        // The account exists already — assignment below is still valid.
+      } else {
+        expect(__created.status()).toBe(201);
+      }
     await page.request.post(`/api/v1/teams/${teamId}/members`, {
-      data: { email: memberEmail, role: "member", temp_password: "member-temp-pw-123" },
+      data: { email: memberEmail, role: "member" },
     });
     const members = await page.request.get(`/api/v1/teams/${teamId}/members`);
     const assigneeId = (

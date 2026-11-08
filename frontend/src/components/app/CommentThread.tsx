@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Comment, Task } from "@/api/client";
+import { avatarUrl } from "@/lib/avatar-version";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { CommentBody, CommentComposer } from "./Mentions";
@@ -204,6 +205,7 @@ function CommentRow({
         <Avatar
           name={comment.author.display_name}
           size={parent ? "sm" : "xs"}
+          src={avatarUrl(comment.author.id)}
           title={hoverTitle(comment.author.id, comment.author.display_name)}
         />
         <span className={parent ? "text-[13px] font-semibold" : "text-[13px] font-normal"}>

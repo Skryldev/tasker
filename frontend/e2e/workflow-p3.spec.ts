@@ -5,9 +5,9 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
  * Runs after the Phase 1/2 suites against a freshly bootstrapped server.
  */
 
-const ADMIN = { email: "admin@tasker.local", password: "admin-pass-12345" };
-const MEMBER = { email: "member@tasker.local", password: "member-pass-12345" };
-const GUEST = { email: "guest@tasker.local", password: "guest-pass-12345" };
+const ADMIN = { email: "admin@tasker.local", password: "Admin-Pass-12345!" };
+const MEMBER = { email: "member@tasker.local", password: "Member-Pass-1234!" };
+const GUEST = { email: "guest@tasker.local", password: "Guest-Pass-1234!" };
 
 test.describe.serial("Phase 3 guests, dependencies, workload, templates", () => {
   let context: BrowserContext;
@@ -41,10 +41,19 @@ test.describe.serial("Phase 3 guests, dependencies, workload, templates", () => 
     teamId = new URL(await page.url()).searchParams.get("team") ?? "";
 
     await page.goto(`/teams/${teamId}/settings?team=${teamId}`);
+    // Bug 2 (ADR-0014): Owner-created account; tolerate "already exists"
+    // from an earlier leg of this serial suite.
+    const __created = await page.request.post("/api/v1/admin/users", {
+      data: { email: MEMBER.email, display_name: "P3 Member", temporary_password: MEMBER.password },
+    });
+    if (__created.status() === 422) {
+      // The account exists already — assignment below is still valid.
+    } else {
+      expect(__created.status()).toBe(201);
+    }
     await page.getByTestId("add-member").click();
-    await page.getByTestId("member-email-input").fill(MEMBER.email);
-    await page.getByLabel("Temporary password (new accounts only)").fill(MEMBER.password);
-    await page.getByTestId("member-submit").click();
+    await page.getByTestId("member-search-input").fill(MEMBER.email);
+    await page.getByTestId("eligible-members-list").getByRole("option").first().click();
     await expect(page.getByTestId("member-list")).toContainText(MEMBER.email);
 
     await page.goto(`/projects?team=${teamId}`);
@@ -70,12 +79,23 @@ test.describe.serial("Phase 3 guests, dependencies, workload, templates", () => 
   });
 
   test("admin grants guest access; guest sees the read-only project", async ({ browser }) => {
-    // Create a guest account via the admin (team settings provisioning).
+    // Bug 2 (ADR-0014): the guest account is Owner-created, then assigned
+    // to the team (membership removed again below — the guest relies purely
+    // on the project grant).
+    // Bug 2 (ADR-0014): Owner-created account; tolerate "already exists"
+    // from an earlier leg of this serial suite.
+    const __created = await page.request.post("/api/v1/admin/users", {
+      data: { email: GUEST.email, display_name: "P3 Guest", temporary_password: GUEST.password },
+    });
+    if (__created.status() === 422) {
+      // The account exists already — assignment below is still valid.
+    } else {
+      expect(__created.status()).toBe(201);
+    }
     await page.goto(`/teams/${teamId}/settings?team=${teamId}`);
     await page.getByTestId("add-member").click();
-    await page.getByTestId("member-email-input").fill(GUEST.email);
-    await page.getByLabel("Temporary password (new accounts only)").fill(GUEST.password);
-    await page.getByTestId("member-submit").click();
+    await page.getByTestId("member-search-input").fill(GUEST.email);
+    await page.getByTestId("eligible-members-list").getByRole("option").first().click();
     await expect(page.getByTestId("member-list")).toContainText(GUEST.email);
     // Remove the team membership so the guest relies purely on the project grant.
     const guestId = await page.evaluate(

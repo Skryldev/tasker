@@ -227,11 +227,6 @@ async fn run_bootstrap(
             Err(_) => return 2,
         },
     };
-    if let Err(message) = password::validate(&password) {
-        eprintln!("invalid password: {message}");
-        return 2;
-    }
-
     let display_name = display_name_arg.unwrap_or_else(|| {
         email
             .split('@')
@@ -239,6 +234,21 @@ async fn run_bootstrap(
             .unwrap_or("Administrator")
             .to_string()
     });
+
+    // Bug 8: the bootstrap password follows the strict policy and must not
+    // match the administrator's own email or display name.
+    if let Err(message) = password::validate_for_identity(
+        &password,
+        &password::PasswordIdentity {
+            email: &email,
+            username: None,
+            display_name: &display_name,
+        },
+    ) {
+        eprintln!("invalid password: {message}");
+        return 2;
+    }
+
 
     let mut conn = match db.begin().await {
         Ok(c) => c,
@@ -283,6 +293,8 @@ async fn run_bootstrap(
             email: &email,
             display_name: &display_name,
             password_hash: &password_hash,
+            username: None,
+            instance_role: users::INSTANCE_ROLE_OWNER,
         },
     )
     .await

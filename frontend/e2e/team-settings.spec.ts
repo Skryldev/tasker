@@ -6,10 +6,10 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
  * typed confirmation, and owner-only delete with typed name + password.
  *
  * Requires a freshly bootstrapped server (see scripts/e2e-server.sh):
- *   admin@tasker.local / admin-pass-12345
+ *   admin@tasker.local / Admin-Pass-12345!
  */
 
-const ADMIN = { email: "admin@tasker.local", password: "admin-pass-12345" };
+const ADMIN = { email: "admin@tasker.local", password: "Admin-Pass-12345!" };
 
 test.describe.serial("Team settings", () => {
   let context: BrowserContext;
@@ -57,8 +57,18 @@ test.describe.serial("Team settings", () => {
   test("members: add, filter by role, search by name, change role", async () => {
     // Provision a member through the API.
     const memberEmail = `p9-e2e-${Date.now().toString(36)}@test.local`;
+      // Bug 2 (ADR-0014): Owner-created account; tolerate "already exists"
+      // from an earlier leg of this serial suite.
+      const __created = await page.request.post("/api/v1/admin/users", {
+        data: { email: memberEmail, display_name: "E2E Member", temporary_password: "Member-Pass-1234!" },
+      });
+      if (__created.status() === 422) {
+        // The account exists already — assignment below is still valid.
+      } else {
+        expect(__created.status()).toBe(201);
+      }
     await page.request.post(`/api/v1/teams/${teamId}/members`, {
-      data: { email: memberEmail, role: "member", temp_password: "member-temp-pw-123" },
+      data: { email: memberEmail, role: "member" },
     });
     await page.goto(`/teams/${teamId}/settings?team=${teamId}`);
 

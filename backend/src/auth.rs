@@ -101,6 +101,7 @@ async fn find_valid_session(
                 username: r.try_get("username")?,
                 bio: r.try_get("bio")?,
                 timezone: r.try_get("timezone")?,
+                instance_role: r.try_get("instance_role").ok(),
                 capacity_limit: Some(
                     r.try_get::<i64, _>("capacity_limit")
                         .unwrap_or(crate::users::CAPACITY_DEFAULT),
@@ -254,6 +255,9 @@ pub struct UserResponse {
     /// Forward-looking capacity unit (Phase 10.5). Unset storage = default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capacity_limit: Option<i64>,
+    /// `owner` | `member` (Phase 12.5 Bug 2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance_role: Option<String>,
     pub created_at: i64,
     /// Whether TOTP two-factor authentication is enabled for this account.
     pub mfa_enabled: bool,
@@ -280,6 +284,7 @@ impl UserResponse {
                 user.capacity_limit
                     .unwrap_or(crate::users::CAPACITY_DEFAULT),
             ),
+            instance_role: user.instance_role,
             created_at: user.created_at,
             mfa_enabled,
             notification_prefs,
@@ -297,6 +302,7 @@ impl From<User> for UserResponse {
             bio: u.bio,
             timezone: u.timezone,
             capacity_limit: Some(u.capacity_limit.unwrap_or(crate::users::CAPACITY_DEFAULT)),
+            instance_role: u.instance_role,
             created_at: u.created_at,
             mfa_enabled: false,
             notification_prefs: crate::notifications::NotificationPrefs::default(),
@@ -422,8 +428,15 @@ async fn register(
         ));
     }
     let mut conn = state.db.conn();
-    let user =
-        users::create_validated(&mut conn, &body.email, &body.display_name, &body.password).await?;
+    let user = users::create_validated(
+        &mut conn,
+        &body.email,
+        &body.display_name,
+        None,
+        &body.password,
+        users::INSTANCE_ROLE_MEMBER,
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(UserResponse::from(user))))
 }
 
@@ -452,11 +465,17 @@ async fn change_password(
     user: AuthedUser,
     Json(body): Json<ChangePasswordRequest>,
 ) -> Result<StatusCode, AppError> {
-    crate::security::password::validate(&body.new_password)
-        .map_err(|m| AppError::validation("new_password", m))?;
+    // Bug 8: the new password must differ from the current one (specific
+    // message) and satisfy the strict policy including the identity rule.
+    if body.new_password == body.current_password {
+        return Err(AppError::validation(
+            "new_password",
+            "the new password must be different from the current password",
+        ));
+    }
     let mut conn = state.db.conn();
     let found = users::find_active_by_email(&mut conn, &user.email).await?;
-    let Some((_, password_hash)) = found else {
+    let Some((found_user, password_hash)) = found else {
         return Err(AppError::Unauthenticated);
     };
     if !crate::security::password::verify(&body.current_password, &password_hash) {
@@ -465,6 +484,15 @@ async fn change_password(
             "current password is incorrect",
         ));
     }
+    crate::security::password::validate_for_identity(
+        &body.new_password,
+        &crate::security::password::PasswordIdentity {
+            email: &found_user.email,
+            username: found_user.username.as_deref(),
+            display_name: &found_user.display_name,
+        },
+    )
+    .map_err(|m| AppError::validation("new_password", m))?;
     let new_hash =
         crate::security::password::hash(&body.new_password).map_err(AppError::internal)?;
     users::update_password(&mut conn, &user.id, &new_hash).await?;

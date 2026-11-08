@@ -62,9 +62,24 @@ and what remains out of scope.
 ## Authentication
 
 - **Passwords**: Argon2id (OWASP-recommended baseline: 19 MiB memory, t=2,
-  p=1) with per-password random salts. Minimum length 10, maximum 128
-  (hashing DoS guard). Verification is constant-time; unknown users run a
-  dummy verification to equalize response timing.
+  p=1) with per-password random salts. Verification is constant-time;
+  unknown users run a dummy verification to equalize response timing.
+- **Password policy (Phase 12.5, ADR-0016)** — enforced server-side at every
+  password-set path (change password, public registration, bootstrap-admin,
+  Owner-created accounts):
+  - at least **12** characters (max 128 as a hashing-DoS guard);
+  - at least one lowercase, one uppercase, one digit and one special
+    character, each with a specific error message;
+  - rejected when present in a bundled blocklist of common leaked
+    passwords (~120 curated entries; matching is exact on the lowercased
+    password — the character-class rules remain the primary defense
+    against variants);
+  - rejected when equal (case-insensitively) to the account's email, the
+    email local part, the username, or the display name;
+  - the change-password flow additionally rejects a new password equal to
+    the current one.
+  The UI strength meter (weak → very strong) is advisory only; the server
+  is the enforcement point.
 - **Sessions**: opaque 256-bit OS-random tokens, base64url-encoded, delivered
   in a `tasker_session` cookie: `HttpOnly; SameSite=Lax; Path=/` plus
   `Secure` when `TASKER_ENV=production`. Tokens are never stored in

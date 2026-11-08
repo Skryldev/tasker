@@ -445,6 +445,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         current_password: string;
+                        /** @description Strict policy (ADR-0016): >= 12 characters with lower/upper/digit/special, not blocklisted, not equal to email/username/display name, and different from the current password. */
                         new_password: string;
                     };
                 };
@@ -688,12 +689,8 @@ export interface paths {
         };
         put?: never;
         /**
-         * Add a member (Owner/Admin)
-         * @description Administrator-assisted provisioning: if no user exists with the
-         *     email, one is created using `temp_password` (min 10 chars), which
-         *     the administrator hands to the member out-of-band. If the user
-         *     exists, only the membership is added. Granting the `owner` role
-         *     requires the caller to be Owner.
+         * Assign an existing instance user to the team (Owner/Admin)
+         * @description Bug 2 (ADR-0014): team membership no longer creates accounts. Unknown email → 422 with an actionable message.
          */
         post: {
             parameters: {
@@ -707,11 +704,13 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
+                        /**
+                         * Format: email
+                         * @description An existing instance user (Bug 2). Unknown emails get 422 — accounts are created by an Owner via /admin/users.
+                         */
                         email: string;
-                        display_name?: string;
                         /** @enum {string} */
-                        role: "owner" | "admin" | "manager" | "member";
-                        temp_password?: string;
+                        role: "owner" | "admin" | "manager" | "member" | "guest";
                     };
                 };
             };
@@ -4570,6 +4569,253 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List instance users (Owner-only) */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Match email, display name or username. */
+                    q?: string;
+                    page?: number;
+                    page_size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Instance users, newest first. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminUserList"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+            };
+        };
+        put?: never;
+        /**
+         * Create an instance user (Owner-only)
+         * @description Creates a Tasker account WITHOUT team membership (ADR-0014); assignment to teams is a separate action.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateAdminUserRequest"];
+                };
+            };
+            responses: {
+                /** @description Created. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminUser"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Deactivate, or guarded hard delete (Owner-only)
+         * @description Without a body the account is deactivated. With `confirm_email` + `current_password` a hard delete is attempted; it is refused (409) while the account has team memberships, created tasks or comments.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    user_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["DeleteAdminUserRequest"];
+                };
+            };
+            responses: {
+                /** @description Deactivated or deleted. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Update an instance user (Owner-only) */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    user_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateAdminUserRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminUser"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        trace?: never;
+    };
+    "/teams/{team_id}/members/eligible": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search users eligible to join the team (Owner/Admin)
+         * @description Existing instance users only; current members are excluded (Bug 2: assignment never creates accounts).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    q?: string;
+                    page?: number;
+                    page_size?: number;
+                };
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Eligible users by display name. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EligibleMemberList"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Team-wide task search (membership) */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Title substring. */
+                    q?: string;
+                    page?: number;
+                    page_size?: number;
+                };
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Team tasks, newest update first. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamTaskSearchList"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4608,6 +4854,11 @@ export interface components {
             /** @description IANA timezone. */
             timezone: string | null;
             notification_prefs: components["schemas"]["NotificationPrefs"];
+            /**
+             * @description Instance-wide role (Bug 2). `owner` manages every Tasker account.
+             * @enum {string|null}
+             */
+            instance_role?: "owner" | "member" | null;
         };
         MfaRequired: {
             /** @description Always true in this response shape. */
@@ -5407,6 +5658,79 @@ export interface components {
         };
         AttachmentList: {
             items: components["schemas"]["Attachment"][];
+        };
+        AdminUserTeamRef: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        AdminUser: {
+            /** Format: uuid */
+            id: string;
+            email: string;
+            display_name: string;
+            username?: string | null;
+            /** @enum {string} */
+            instance_role: "owner" | "member";
+            /** @description Deactivated accounts cannot sign in. */
+            active: boolean;
+            created_at: number;
+            teams: components["schemas"]["AdminUserTeamRef"][];
+        };
+        AdminUserList: {
+            items: components["schemas"]["AdminUser"][];
+            page: number;
+            page_size: number;
+            total: number;
+        };
+        CreateAdminUserRequest: {
+            /** Format: email */
+            email: string;
+            display_name: string;
+            username?: string;
+            /** @description Must satisfy the strict password policy (ADR-0016): >= 12 chars with lower/upper/digit/special, not blocklisted, not derived from the account identity. */
+            temporary_password: string;
+        };
+        UpdateAdminUserRequest: {
+            display_name?: string;
+            username?: string | null;
+            /** @description false deactivates (sessions revoked); true reactivates. */
+            active?: boolean;
+        };
+        /** @description Required for a guarded hard delete; absent body soft-deactivates. */
+        DeleteAdminUserRequest: {
+            /** @description The target account's email, typed verbatim. */
+            confirm_email?: string;
+            /** @description The requesting owner's password. */
+            current_password?: string;
+        };
+        EligibleMember: {
+            /** Format: uuid */
+            id: string;
+            email: string;
+            display_name: string;
+            username?: string | null;
+        };
+        EligibleMemberList: {
+            items: components["schemas"]["EligibleMember"][];
+            page: number;
+            page_size: number;
+            total: number;
+        };
+        TeamTaskSearchItem: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            status: string;
+            /** Format: uuid */
+            project_id: string;
+            project_name: string;
+        };
+        TeamTaskSearchList: {
+            items: components["schemas"]["TeamTaskSearchItem"][];
+            page: number;
+            page_size: number;
+            total: number;
         };
     };
     responses: {

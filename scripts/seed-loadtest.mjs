@@ -24,14 +24,14 @@ async function jf(method, path, body, cookie, attempt = 0) {
 
 const login = await jf("POST", "/api/v1/auth/login", {
   email: "load@tasker.local",
-  password: "load-admin-pass-1",
+  password: "Load-Admin-Pass-1!",
 });
 const cookie = login.headers?.get?.("set-cookie");
 // Node fetch cannot read Set-Cookie from .json(); do a raw login instead:
 const raw = await fetch(base + "/api/v1/auth/login", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ email: "load@tasker.local", password: "load-admin-pass-1" }),
+  body: JSON.stringify({ email: "load@tasker.local", password: "Load-Admin-Pass-1!" }),
 });
 const setCookie = raw.headers.get("set-cookie") ?? "";
 const session = setCookie.split(";")[0];

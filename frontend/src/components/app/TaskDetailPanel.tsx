@@ -1,4 +1,5 @@
 import { lazy, Suspense, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   CalendarDays,
   Check,
@@ -7,6 +8,7 @@ import {
   History,
   Link2,
   Lock,
+  Maximize2,
   MessageSquare,
   MoreHorizontal,
   Paperclip,
@@ -18,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { api, type Task } from "@/api/client";
+import { avatarUrl } from "@/lib/avatar-version";
 import { useTemplates } from "@/api/hooks";
 import { cn, PRIORITY_LABELS, PRIORITIES, type Priority } from "@/lib/utils";
 import {
@@ -103,61 +106,14 @@ export function TaskDetailPanel({
 }) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [commentDraft, setCommentDraft] = useState("");
-  const [editingComment, setEditingComment] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState("");
-  // Parent-with-replies delete confirmation (Phase 11 threading).
-  const [deleteReplies, setDeleteReplies] = useState<{ id: string; count: number } | null>(null);
+  const navigate = useNavigate();
   const { push } = useToast();
   const qc = useQueryClient();
   // Phase 12 WS10: closed tasks are immutable; the panel switches to a
   // read-only presentation (no field chips edits, no editor, no composer).
   const isClosed = task?.status === "closed";
-
-  const taskId = task?.id;
-  const comments = useComments(taskId);
-  const activity = useActivity(taskId);
-  const createComment = useCreateComment(taskId ?? "");
-  const updateComment = useUpdateComment(taskId ?? "");
-  const deleteComment = useDeleteComment(taskId ?? "");
   const deleteTask = useDeleteTask();
-  const updateTask = useUpdateTask();
-  // Phase 12 WS4/WS11: checklist, progress, and attachments ride along with
-  // the panel; every mutation invalidates its own slice.
-  const checklist = useChecklist(taskId);
-  const progress = useTaskProgress(taskId);
-  const attachments = useAttachments(taskId);
-  const createItem = useCreateChecklistItem(taskId ?? "");
-  const updateItem = useUpdateChecklistItem(taskId ?? "");
-  const deleteItem = useDeleteChecklistItem(taskId ?? "");
-  const uploadAttachment = useUploadAttachment(taskId ?? "");
-  const deleteAttachment = useDeleteAttachment(taskId ?? "");
-
-  // Hover-card identities (username/bio) for every avatar in the panel,
-  // resolved with one batched request.
-  const hoverIds = useMemo(() => {
-    if (!task) return [];
-    const ids = [
-      task.assignee?.id,
-      task.reporter?.id,
-      task.resolved_by?.id,
-      ...(comments.data?.items.map((c) => c.author.id) ?? []),
-      ...(activity.data?.items.map((a) => a.actor?.id) ?? []),
-    ];
-    return [...new Set(ids.filter((id): id is string => Boolean(id)))];
-  }, [task, comments.data, activity.data]);
-  const hoverInfo = useUserInfo(hoverIds);
-  const templates = useTemplates(task?.project_id);
-  const templateName = (id: string) =>
-    templates.data?.items.find((t) => t.id === id)?.name ?? "template";
-  const hoverTitle = (id: string | undefined, name: string): string | undefined => {
-    if (!id) return undefined;
-    const info = hoverInfo.data?.items.find((i) => i.id === id);
-    if (!info) return undefined;
-    return [name, info.username ? `@${info.username}` : null, info.bio ?? null]
-      .filter(Boolean)
-      .join("\n");
-  };
+  const updateTaskBody = useUpdateTaskBody();
 
   if (!task) {
     return (
@@ -167,16 +123,6 @@ export function TaskDetailPanel({
       </div>
     );
   }
-
-  const submitComment = async () => {
-    if (!commentDraft.trim() || createComment.isPending) return;
-    try {
-      await createComment.mutateAsync({ body: commentDraft.trim() });
-      setCommentDraft("");
-    } catch (error) {
-      push("error", "Could not add comment", error instanceof Error ? error.message : undefined);
-    }
-  };
 
   const confirmDeleteTask = () => {
     deleteTask.mutate(task.id, {
@@ -191,7 +137,7 @@ export function TaskDetailPanel({
   };
 
   const copyLink = () => {
-    const url = `${window.location.origin}/tasks/${task.id}`;
+    const url = `${window.location.origin}/teams/${task.team_id}/projects/${task.project_id}/tasks/${task.id}`;
     void navigator.clipboard
       ?.writeText(url)
       .then(() => push("success", "Link copied"))
@@ -226,6 +172,14 @@ export function TaskDetailPanel({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem
+                onSelect={() =>
+                  navigate(`/teams/${task.team_id}/projects/${task.project_id}/tasks/${task.id}`)
+                }
+                data-testid="open-full-page"
+              >
+                <Maximize2 /> Open full page
+              </DropdownMenuItem>
               {isClosed ? null : (
                 <DropdownMenuItem onSelect={() => setEditOpen(true)} data-testid="edit-task">
                   <Pencil /> Edit fields…
@@ -248,235 +202,22 @@ export function TaskDetailPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin p-4">
-        <MetadataBand task={task} readOnly={isClosed} onChange={(body, label) => updateTask.mutate(
-          { taskId: task.id, body },
-          {
-            onSuccess: (updated) => {
-              void qc.setQueryData(["task", updated.id], updated);
-              push("success", label);
-            },
-            onError: (error) =>
-              push("error", "Could not update task", error instanceof Error ? error.message : undefined),
-          },
-        )} />
-
-        {task.from_template_id ? (
-          <p
-            className="mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-2xs text-muted-foreground"
-            data-testid="from-template-badge"
-          >
-            <Stamp className="h-3 w-3" aria-hidden />
-            From template: {templateName(task.from_template_id)}
-          </p>
-        ) : null}
-
-        <DescriptionBlock
-          value={task.description ?? ""}
+        <MetadataBand
+          task={task}
           readOnly={isClosed}
-          onCommit={(description) => updateTask.mutate(
-            { taskId: task.id, body: { description } },
-            {
-              onSuccess: (updated) => {
-                void qc.setQueryData(["task", updated.id], updated);
-              },
-              onError: (error) =>
-                push("error", "Could not update task", error instanceof Error ? error.message : undefined),
-            },
-          )}
+          onChange={(body, label) => updateTaskBody(task.id, body, label)}
         />
-
-        {task.resolution ? (
-          <div
-            className={cn(
-              "mt-3 rounded-md border px-3 py-2 text-xs",
-              task.resolution === "accepted"
-                ? "border-success/30 bg-success/5 text-success"
-                : "border-destructive/30 bg-destructive/5 text-destructive",
-            )}
-            data-testid="resolution-banner"
-          >
-            {task.resolution === "accepted" ? (
-              <>
-                Accepted{task.resolved_by ? ` by ${task.resolved_by.display_name}` : ""}
-                {task.resolved_at ? (
-                  <> · <Timestamp value={task.resolved_at} /></>
-                ) : (
-                  ""
-                )}
-              </>
-            ) : (
-              <>
-                Rejected
-                {task.resolution_note ? ` — "${task.resolution_note}"` : ""}
-              </>
-            )}
-          </div>
-        ) : null}
-
-        {task.subtasks && task.subtasks.length > 0 ? (
-          <section className="mt-5" aria-label="Subtasks">
-            <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
-              <ListTree className="h-3.5 w-3.5" /> Subtasks ({task.subtasks.length})
-            </h3>
-            <ul className="flex flex-col gap-1">
-              {task.subtasks.map((sub) => (
-                <li key={sub.id} className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
-                  <StatusBadge status={sub.status} />
-                  <span className={cn("truncate", sub.status === "closed" && "text-muted-foreground line-through")}>
-                    {sub.title}
-                  </span>
-                  <PriorityBadgeInline priority={sub.priority} className="ml-auto" />
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-
-        <DependenciesPanel task={task} />
-
-        <ChecklistSection
+        <TaskDetailBody
+          task={task}
           readOnly={isClosed}
-          checklist={checklist}
-          progress={progress.data}
-          onCreate={(title) => createItem.mutate(title, {
-            onError: (error) =>
-              push("error", "Could not add checklist item", error instanceof Error ? error.message : undefined),
-          })}
-          onToggle={(itemId, checked) => updateItem.mutate({ itemId, body: { is_checked: checked } }, {
-            onError: (error) =>
-              push("error", "Could not update checklist item", error instanceof Error ? error.message : undefined),
-          })}
-          onDelete={(itemId) => deleteItem.mutate(itemId, {
-            onError: (error) =>
-              push("error", "Could not delete checklist item", error instanceof Error ? error.message : undefined),
-          })}
+          onChange={(body, label) => updateTaskBody(task.id, body, label)}
         />
-
-        <AttachmentsSection
-          readOnly={isClosed}
-          attachments={attachments}
-          onUpload={(file) => uploadAttachment.mutate(file, {
-            onSuccess: () => push("success", "File attached"),
-            onError: (error: unknown) =>
-              push("error", "Could not upload file", error instanceof Error ? error.message : undefined),
-          })}
-          onDelete={(attachmentId) => deleteAttachment.mutate(attachmentId, {
-            onError: (error) =>
-              push("error", "Could not delete attachment", error instanceof Error ? error.message : undefined),
-          })}
-        />
-
-        <Separator className="my-5" />
-
-        <section aria-label="Comments" className="mt-1">
-          <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
-            <MessageSquare className="h-3.5 w-3.5" /> Comments ({comments.data?.total ?? 0})
-          </h3>
-          {isClosed ? (
-            <p
-              className="mb-4 flex items-center gap-1.5 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
-              data-testid="comments-locked"
-            >
-              <Lock className="h-3 w-3" aria-hidden />
-              This task is closed; commenting is disabled.
-            </p>
-          ) : (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void submitComment();
-              }}
-              className="mb-4"
-            >
-              <CommentComposer
-                teamId={task.team_id}
-                value={commentDraft}
-                onChange={setCommentDraft}
-                onSubmit={() => void submitComment()}
-                pending={createComment.isPending}
-              />
-            </form>
-          )}
-          <div className="flex flex-col" data-testid="comment-threads">
-            {comments.isLoading ? (
-              <>
-                <Skeleton className="h-14 w-full" />
-                <Skeleton className="h-14 w-full" />
-              </>
-            ) : (
-              buildThreads(comments.data?.items ?? []).map((thread) => (
-                <CommentThread
-                  key={thread.parent.id}
-                  thread={thread}
-                  task={task}
-                  hoverTitle={hoverTitle}
-                  onReply={(body) =>
-                    createComment
-                      .mutateAsync({ body, parentId: thread.parent.id })
-                      .then(() => push("success", "Reply posted"))
-                      .catch((error) =>
-                        push("error", "Could not reply", error instanceof Error ? error.message : undefined),
-                      )
-                  }
-                  replyPending={createComment.isPending}
-                  onEdit={(commentId, body) =>
-                    updateComment
-                      .mutateAsync({ commentId, body })
-                      .then(() => setEditingComment(null))
-                      .catch((error) =>
-                        push("error", "Could not update comment", error instanceof Error ? error.message : undefined),
-                      )
-                  }
-                  editingComment={editingComment}
-                  setEditingComment={setEditingComment}
-                  editDraft={editDraft}
-                  setEditDraft={setEditDraft}
-                  onDelete={(comment) => {
-                    const replyCount = comment.id === thread.parent.id ? thread.replies.length : 0;
-                    if (replyCount > 0) {
-                      setDeleteReplies({ id: comment.id, count: replyCount });
-                    } else {
-                      deleteComment.mutate(comment.id, {
-                        onError: (error) =>
-                          push("error", "Could not delete comment", error instanceof Error ? error.message : undefined),
-                      });
-                    }
-                  }}
-                />
-              ))
-            )}
-          </div>
-        </section>
-
-        <Separator className="my-5" />
-
-        <ActivitySection activity={activity.data?.items ?? []} isLoading={activity.isLoading} hoverTitle={hoverTitle} />
       </div>
 
       {/* Sticky footer: the status control is always within reach. */}
       <footer className="shrink-0 border-t bg-card p-3" data-testid="task-detail-footer">
         <StatusControl task={task} />
       </footer>
-
-      <ConfirmDialog
-        open={deleteReplies !== null}
-        onOpenChange={(v) => {
-          if (!v) setDeleteReplies(null);
-        }}
-        title={`Delete this comment and its ${deleteReplies?.count ?? 0} repl${deleteReplies?.count === 1 ? "y" : "ies"}?`}
-        description="Deleting the parent removes its replies too. This cannot be undone."
-        confirmLabel="Delete all"
-        pending={deleteComment.isPending}
-        onConfirm={() => {
-          if (deleteReplies) {
-            deleteComment.mutate(deleteReplies.id, {
-              onSuccess: () => setDeleteReplies(null),
-              onError: (error) =>
-                push("error", "Could not delete comment", error instanceof Error ? error.message : undefined),
-            });
-          }
-        }}
-      />
 
       <ConfirmDialog
         open={deleteOpen}
@@ -504,6 +245,312 @@ export function TaskDetailPanel({
     </div>
   );
 }
+
+/**
+ * Bug 4: the task update helper shared by every surface. Mutates the task
+ * and reflects the result into the task cache with a toast.
+ */
+export function useUpdateTaskBody() {
+  const updateTask = useUpdateTask();
+  const { push } = useToast();
+  const qc = useQueryClient();
+  return (taskId: string, body: Record<string, unknown>, label?: string) =>
+    updateTask.mutate(
+      { taskId, body },
+      {
+        onSuccess: (updated) => {
+          void qc.setQueryData(["task", updated.id], updated);
+          if (label) push("success", label);
+        },
+        onError: (error) =>
+          push("error", "Could not update task", error instanceof Error ? error.message : undefined),
+      },
+    );
+}
+
+/**
+ * Bug 4: the shared detail body — description, resolution, subtasks,
+ * dependencies, checklist, attachments, comments, activity. Both the
+ * quick-view panel and the full task page render exactly this component, so
+ * behavior and markup cannot drift between the two surfaces.
+ */
+export function TaskDetailBody({
+  task,
+  readOnly,
+  onChange,
+}: {
+  task: Task;
+  readOnly: boolean;
+  /** Shared field-update helper (metadata chips live outside the body). */
+  onChange: (body: Record<string, unknown>, label?: string) => void;
+}) {
+  const [commentDraft, setCommentDraft] = useState("");
+  const [editingComment, setEditingComment] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  // Parent-with-replies delete confirmation (Phase 11 threading).
+  const [deleteReplies, setDeleteReplies] = useState<{ id: string; count: number } | null>(null);
+  const { push } = useToast();
+
+  const taskId = task.id;
+  const comments = useComments(taskId);
+  const activity = useActivity(taskId);
+  const createComment = useCreateComment(taskId);
+  const updateComment = useUpdateComment(taskId);
+  const deleteComment = useDeleteComment(taskId);
+  // Phase 12 WS4/WS11: checklist, progress, and attachments ride along with
+  // the body; every mutation invalidates its own slice.
+  const checklist = useChecklist(taskId);
+  const progress = useTaskProgress(taskId);
+  const attachments = useAttachments(taskId);
+  const createItem = useCreateChecklistItem(taskId);
+  const updateItem = useUpdateChecklistItem(taskId);
+  const deleteItem = useDeleteChecklistItem(taskId);
+  const uploadAttachment = useUploadAttachment(taskId);
+  const deleteAttachment = useDeleteAttachment(taskId);
+
+  // Hover-card identities (username/bio) for every avatar in the body,
+  // resolved with one batched request.
+  const hoverIds = useMemo(() => {
+    const ids = [
+      task.assignee?.id,
+      task.reporter?.id,
+      task.resolved_by?.id,
+      ...(comments.data?.items.map((c) => c.author.id) ?? []),
+      ...(activity.data?.items.map((a) => a.actor?.id) ?? []),
+    ];
+    return [...new Set(ids.filter((id): id is string => Boolean(id)))];
+  }, [task, comments.data, activity.data]);
+  const hoverInfo = useUserInfo(hoverIds);
+  const templates = useTemplates(task.project_id);
+  const templateName = (id: string) =>
+    templates.data?.items.find((t) => t.id === id)?.name ?? "template";
+  const hoverTitle = (id: string | undefined, name: string): string | undefined => {
+    if (!id) return undefined;
+    const info = hoverInfo.data?.items.find((i) => i.id === id);
+    if (!info) return undefined;
+    return [name, info.username ? `@${info.username}` : null, info.bio ?? null]
+      .filter(Boolean)
+      .join("\n");
+  };
+
+  const submitComment = async () => {
+    if (!commentDraft.trim() || createComment.isPending) return;
+    try {
+      await createComment.mutateAsync({ body: commentDraft.trim() });
+      setCommentDraft("");
+    } catch (error) {
+      push("error", "Could not add comment", error instanceof Error ? error.message : undefined);
+    }
+  };
+
+  return (
+    <>
+      {task.from_template_id ? (
+        <p
+          className="mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-2xs text-muted-foreground"
+          data-testid="from-template-badge"
+        >
+          <Stamp className="h-3 w-3" aria-hidden />
+          From template: {templateName(task.from_template_id)}
+        </p>
+      ) : null}
+
+      <DescriptionBlock
+        value={task.description ?? ""}
+        readOnly={readOnly}
+        onCommit={(description) => onChange({ description })}
+      />
+
+      {task.resolution ? (
+        <div
+          className={cn(
+            "mt-3 rounded-md border px-3 py-2 text-xs",
+            task.resolution === "accepted"
+              ? "border-success/30 bg-success/5 text-success"
+              : "border-destructive/30 bg-destructive/5 text-destructive",
+          )}
+          data-testid="resolution-banner"
+        >
+          {task.resolution === "accepted" ? (
+            <>
+              Accepted{task.resolved_by ? ` by ${task.resolved_by.display_name}` : ""}
+              {task.resolved_at ? (
+                <> · <Timestamp value={task.resolved_at} /></>
+              ) : (
+                ""
+              )}
+            </>
+          ) : (
+            <>
+              Rejected
+              {task.resolution_note ? ` — "${task.resolution_note}"` : ""}
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {task.subtasks && task.subtasks.length > 0 ? (
+        <section className="mt-5" aria-label="Subtasks">
+          <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
+            <ListTree className="h-3.5 w-3.5" /> Subtasks ({task.subtasks.length})
+          </h3>
+          <ul className="flex flex-col gap-1">
+            {task.subtasks.map((sub) => (
+              <li key={sub.id} className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
+                <StatusBadge status={sub.status} />
+                <span className={cn("truncate", sub.status === "closed" && "text-muted-foreground line-through")}>
+                  {sub.title}
+                </span>
+                <PriorityBadgeInline priority={sub.priority} className="ml-auto" />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      <DependenciesPanel task={task} />
+
+      <ChecklistSection
+        readOnly={readOnly}
+        checklist={checklist}
+        progress={progress.data}
+        onCreate={(title) => createItem.mutate(title, {
+          onError: (error) =>
+            push("error", "Could not add checklist item", error instanceof Error ? error.message : undefined),
+        })}
+        onToggle={(itemId, checked) => updateItem.mutate({ itemId, body: { is_checked: checked } }, {
+          onError: (error) =>
+            push("error", "Could not update checklist item", error instanceof Error ? error.message : undefined),
+        })}
+        onDelete={(itemId) => deleteItem.mutate(itemId, {
+          onError: (error) =>
+            push("error", "Could not delete checklist item", error instanceof Error ? error.message : undefined),
+        })}
+      />
+
+      <AttachmentsSection
+        readOnly={readOnly}
+        attachments={attachments}
+        onUpload={(file) => uploadAttachment.mutate(file, {
+          onSuccess: () => push("success", "File attached"),
+          onError: (error: unknown) =>
+            push("error", "Could not upload file", error instanceof Error ? error.message : undefined),
+        })}
+        onDelete={(attachmentId) => deleteAttachment.mutate(attachmentId, {
+          onError: (error) =>
+            push("error", "Could not delete attachment", error instanceof Error ? error.message : undefined),
+        })}
+      />
+
+      <Separator className="my-5" />
+
+      <section aria-label="Comments" className="mt-1">
+        <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
+          <MessageSquare className="h-3.5 w-3.5" /> Comments ({comments.data?.total ?? 0})
+        </h3>
+        {readOnly ? (
+          <p
+            className="mb-4 flex items-center gap-1.5 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+            data-testid="comments-locked"
+          >
+            <Lock className="h-3 w-3" aria-hidden />
+            This task is closed; commenting is disabled.
+          </p>
+        ) : (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitComment();
+            }}
+            className="mb-4"
+          >
+            <CommentComposer
+              teamId={task.team_id}
+              value={commentDraft}
+              onChange={setCommentDraft}
+              onSubmit={() => void submitComment()}
+              pending={createComment.isPending}
+            />
+          </form>
+        )}
+        <div className="flex flex-col" data-testid="comment-threads">
+          {comments.isLoading ? (
+            <>
+              <Skeleton className="h-14 w-full" />
+              <Skeleton className="h-14 w-full" />
+            </>
+          ) : (
+            buildThreads(comments.data?.items ?? []).map((thread) => (
+              <CommentThread
+                key={thread.parent.id}
+                thread={thread}
+                task={task}
+                hoverTitle={hoverTitle}
+                onReply={(body) =>
+                  createComment
+                    .mutateAsync({ body, parentId: thread.parent.id })
+                    .then(() => push("success", "Reply posted"))
+                    .catch((error) =>
+                      push("error", "Could not reply", error instanceof Error ? error.message : undefined),
+                    )
+                }
+                replyPending={createComment.isPending}
+                onEdit={(commentId, body) =>
+                  updateComment
+                    .mutateAsync({ commentId, body })
+                    .then(() => setEditingComment(null))
+                    .catch((error) =>
+                      push("error", "Could not update comment", error instanceof Error ? error.message : undefined),
+                    )
+                }
+                editingComment={editingComment}
+                setEditingComment={setEditingComment}
+                editDraft={editDraft}
+                setEditDraft={setEditDraft}
+                onDelete={(comment) => {
+                  const replyCount = comment.id === thread.parent.id ? thread.replies.length : 0;
+                  if (replyCount > 0) {
+                    setDeleteReplies({ id: comment.id, count: replyCount });
+                  } else {
+                    deleteComment.mutate(comment.id, {
+                      onError: (error) =>
+                        push("error", "Could not delete comment", error instanceof Error ? error.message : undefined),
+                    });
+                  }
+                }}
+              />
+            ))
+          )}
+        </div>
+      </section>
+
+      <Separator className="my-5" />
+
+      <ActivitySection activity={activity.data?.items ?? []} isLoading={activity.isLoading} hoverTitle={hoverTitle} />
+
+      <ConfirmDialog
+        open={deleteReplies !== null}
+        onOpenChange={(v) => {
+          if (!v) setDeleteReplies(null);
+        }}
+        title={`Delete this comment and its ${deleteReplies?.count ?? 0} repl${deleteReplies?.count === 1 ? "y" : "ies"}?`}
+        description="Deleting the parent removes its replies too. This cannot be undone."
+        confirmLabel="Delete all"
+        pending={deleteComment.isPending}
+        onConfirm={() => {
+          if (deleteReplies) {
+            deleteComment.mutate(deleteReplies.id, {
+              onSuccess: () => setDeleteReplies(null),
+              onError: (error) =>
+                push("error", "Could not delete comment", error instanceof Error ? error.message : undefined),
+            });
+          }
+        }}
+      />
+    </>
+  );
+}
+
 
 /** The edit dialog needs the project context; refetch it from the task. */
 function TaskDialogResolver({
@@ -539,7 +586,7 @@ function TaskDialogResolver({
 // with click-to-edit (dropdowns inline; no modal for simple fields).
 // ---------------------------------------------------------------------------
 
-function MetadataBand({
+export function MetadataBand({
   task,
   readOnly,
   onChange,
@@ -588,7 +635,7 @@ function MetadataBand({
         <span className={staticChipClass} data-testid="chip-reporter">
           {task.reporter ? (
             <>
-              <Avatar name={task.reporter.display_name} size="xs" />
+              <Avatar name={task.reporter.display_name} size="xs" src={avatarUrl(task.reporter.id)} />
               <span className="truncate">{task.reporter.display_name}</span>
             </>
           ) : (
@@ -601,7 +648,7 @@ function MetadataBand({
           <button type="button" className={chipClass} data-testid="chip-reporter">
             {task.reporter ? (
               <>
-                <Avatar name={task.reporter.display_name} size="xs" />
+                <Avatar name={task.reporter.display_name} size="xs" src={avatarUrl(task.reporter.id)} />
                 <span className="truncate">{task.reporter.display_name}</span>
               </>
             ) : (
@@ -618,7 +665,7 @@ function MetadataBand({
               className="justify-between"
             >
               <span className="flex min-w-0 items-center gap-2">
-                <Avatar name={m.user.display_name} size="xs" />
+                <Avatar name={m.user.display_name} size="xs" src={avatarUrl(m.user.id)} />
                 <span className="truncate">{m.user.display_name}</span>
               </span>
               {task.reporter?.id === m.user.id ? <Check className="h-3.5 w-3.5" /> : null}
@@ -633,7 +680,7 @@ function MetadataBand({
         <span className={staticChipClass} data-testid="chip-assignee">
           {task.assignee ? (
             <>
-              <Avatar name={task.assignee.display_name} size="xs" />
+              <Avatar name={task.assignee.display_name} size="xs" src={avatarUrl(task.assignee.id)} />
               <span className="truncate">{task.assignee.display_name}</span>
             </>
           ) : (
@@ -646,7 +693,7 @@ function MetadataBand({
           <button type="button" className={chipClass} data-testid="chip-assignee">
             {task.assignee ? (
               <>
-                <Avatar name={task.assignee.display_name} size="xs" />
+                <Avatar name={task.assignee.display_name} size="xs" src={avatarUrl(task.assignee.id)} />
                 <span className="truncate">{task.assignee.display_name}</span>
               </>
             ) : (
@@ -671,7 +718,7 @@ function MetadataBand({
               className="justify-between"
             >
               <span className="flex min-w-0 items-center gap-2">
-                <Avatar name={m.user.display_name} size="xs" />
+                <Avatar name={m.user.display_name} size="xs" src={avatarUrl(m.user.id)} />
                 <span className="truncate">{m.user.display_name}</span>
               </span>
               {task.assignee?.id === m.user.id ? <Check className="h-3.5 w-3.5" /> : null}
@@ -1050,6 +1097,7 @@ function ActivitySection({
                       <Avatar
                         name={event.actor.display_name}
                         size="xs"
+                        src={avatarUrl(event.actor.id)}
                         title={hoverTitle(event.actor.id, event.actor.display_name)}
                       />
                     ) : (

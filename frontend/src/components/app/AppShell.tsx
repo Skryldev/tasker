@@ -1,7 +1,12 @@
-import { Fragment, Suspense, useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+
+// Bundle offset (Phase 12.5): the 16-theme picker content is code-split —
+// the eager shell keeps only the trigger button + preview wiring.
+const ThemeSwitcherContent = lazy(() =>
+  import("./ThemeSwitcherContent").then((m) => ({ default: m.ThemeSwitcherContent })),
+);
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  Check,
   ClipboardList,
   FolderKanban,
   Gauge,
@@ -13,6 +18,7 @@ import {
   Settings,
   Target,
   UserRound,
+  Users,
 } from "lucide-react";
 import { NotificationBell } from "@/components/app/NotificationBell";
 import { Button } from "@/components/ui/button";
@@ -27,15 +33,30 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Avatar, Separator } from "@/components/ui/avatar";
-import { useTheme, THEMES } from "@/lib/theme";
-import { ShortcutsManager } from "@/components/app/shortcuts";
+import { useTheme, type ThemeId } from "@/lib/theme";
+// Bundle offset (Phase 12.5): the shortcuts manager (global listener +
+// cheatsheet trigger) is code-split; the eager shell renders a placeholder
+// button that becomes interactive when the chunk arrives.
+const LazyShortcutsManager = lazy(() =>
+  import("@/components/app/shortcuts").then((m) => ({ default: m.ShortcutsManager })),
+);
+function ShortcutsManagerSlot() {
+  return (
+    <Suspense
+      fallback={<span className="inline-block h-8 w-8" aria-hidden />}
+    >
+      <LazyShortcutsManager />
+    </Suspense>
+  );
+}
 import { useAuth, useLogout } from "@/lib/auth";
-import { WorkspaceProvider, useWorkspace } from "@/lib/workspace";
+import { switchTeamLocation, teamLink, WorkspaceProvider, useWorkspace } from "@/lib/workspace";
 import { roleLabel } from "@/lib/utils";
 
 function TeamSwitcher({ onNavigate }: { onNavigate?: () => void }) {
   const { teams, teamId } = useWorkspace();
   const navigate = useNavigate();
+  const location = useLocation();
   const [open, setOpen] = useState(false);
   const active = teams.data?.items.find((t) => t.id === teamId);
 
@@ -55,7 +76,10 @@ function TeamSwitcher({ onNavigate }: { onNavigate?: () => void }) {
           <DropdownMenuItem
             key={team.id}
             onSelect={() => {
-              navigate(`/?team=${team.id}`);
+              // Bug 3: preserve the current section — rewrite the `:teamId`
+              // path segment on team-scoped routes, else replace `?team=`.
+              const next = switchTeamLocation(location.pathname, location.search, team.id);
+              navigate(next);
               onNavigate?.();
             }}
             className="justify-between"
@@ -122,12 +146,24 @@ function SidebarLink({
 
 function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const { teamId } = useWorkspace();
+  const { user } = useAuth();
+  // Bug 2: instance user administration is Owner-only.
+  const isInstanceOwner = user?.instance_role === "owner";
   return (
     <>
       <TeamSwitcher onNavigate={onNavigate} />
       <Separator className="my-2" />
       <nav className="flex flex-col gap-0.5" aria-label="Main">
-        <SidebarLink to="/" icon={<ListTodo className="h-4 w-4" />} label="My Tasks" end onNavigate={onNavigate} />
+        <SidebarLink to={teamLink(teamId, "tasks")} icon={<ListTodo className="h-4 w-4" />} label="My Tasks" end onNavigate={onNavigate} />
+        {isInstanceOwner ? (
+          <SidebarLink
+            to="/users"
+            icon={<Users className="h-4 w-4" />}
+            label="Users"
+            matchPrefix="/users"
+            onNavigate={onNavigate}
+          />
+        ) : null}
         {teamId ? (
           <>
             <SidebarLink
@@ -209,16 +245,18 @@ function MobileNav({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
 function ThemeSwitcher() {
   const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
+  const [opened, setOpened] = useState(false);
   // Hover preview: temporarily apply the hovered theme's tokens on <html>
   // without touching provider state or localStorage. Closing the menu (or
   // leaving an item) restores the committed theme.
-  const [preview, setPreview] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ThemeId | null>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute(
       "data-theme",
       preview ?? theme,
     );
+    return () => document.documentElement.removeAttribute("data-theme");
   }, [preview, theme]);
 
   return (
@@ -226,6 +264,7 @@ function ThemeSwitcher() {
       open={open}
       onOpenChange={(v) => {
         setOpen(v);
+        if (v) setOpened(true);
         if (!v) setPreview(null);
       }}
     >
@@ -234,47 +273,18 @@ function ThemeSwitcher() {
           <Palette />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuLabel>Theme — hover to preview</DropdownMenuLabel>
-        {/* WS1: themes grouped by appearance, light first. */}
-        {(["light", "dark"] as const).map((group) => (
-          <Fragment key={group}>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-2xs uppercase tracking-wide text-muted-foreground">
-              {group === "light" ? "Light" : "Dark"}
-            </DropdownMenuLabel>
-            {THEMES.filter((d) => d.appearance === group).map((definition) => (
-              <DropdownMenuItem
-                key={definition.id}
-                onSelect={() => setTheme(definition.id)}
-                onMouseEnter={() => setPreview(definition.id)}
-                onMouseLeave={() => setPreview(null)}
-                onFocus={() => setPreview(definition.id)}
-                onBlur={() => setPreview(null)}
-                className="justify-between"
-                data-testid={`theme-option-${definition.id}`}
-              >
-                <span className="flex items-center gap-2">
-                  {/* Preview swatch: background, primary, accent. */}
-                  <span className="flex -space-x-0.5" aria-hidden>
-                    {definition.swatch.map((color) => (
-                      <span
-                        key={color}
-                        className="h-3.5 w-3.5 rounded-full border border-border"
-                        style={{ backgroundColor: color }}
-                      />
-                    ))}
-                  </span>
-                  {definition.label}
-                </span>
-                {theme === definition.id ? (
-                  <Check className="h-3.5 w-3.5" aria-label="Active theme" />
-                ) : null}
-              </DropdownMenuItem>
-            ))}
-          </Fragment>
-        ))}
-      </DropdownMenuContent>
+      {opened ? (
+        <Suspense fallback={null}>
+          <ThemeSwitcherContent
+            theme={theme}
+            onPreview={setPreview}
+            onSelect={(id) => {
+              setTheme(id);
+              setOpen(false);
+            }}
+          />
+        </Suspense>
+      ) : null}
     </DropdownMenu>
   );
 }
@@ -305,7 +315,7 @@ function Topbar() {
       </div>
       <div className="flex items-center gap-1.5">
         <NotificationBell />
-        <ShortcutsManager />
+        <ShortcutsManagerSlot />
         <ThemeSwitcher />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

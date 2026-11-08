@@ -39,6 +39,7 @@ export type TeamGuest = components["schemas"]["TeamGuest"];
 export type CapacityResponse = components["schemas"]["CapacityResponse"];
 export type CapacityMember = components["schemas"]["CapacityMember"];
 export type TrashProject = components["schemas"]["TrashProject"];
+export type AdminUser = components["schemas"]["AdminUser"];
 export type ChecklistItem = components["schemas"]["ChecklistItem"];
 export type TaskProgress = components["schemas"]["TaskProgress"];
 export type Attachment = components["schemas"]["Attachment"];
@@ -77,7 +78,7 @@ export class ApiError extends Error {
 
 const BASE = "/api/v1";
 
-async function request(
+export async function request(
   method: string,
   path: string,
   options: { body?: unknown; query?: Record<string, string | number | boolean | undefined> } = {},

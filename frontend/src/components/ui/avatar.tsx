@@ -1,5 +1,6 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { useAvatarSrc } from "@/lib/avatar-version";
 
 export function Avatar({
   name,
@@ -17,9 +18,13 @@ export function Avatar({
   title?: string;
 }) {
   const [failed, setFailed] = React.useState(false);
+  // Bug 1: user-avatar URLs are cache-busted reactively (?v=version) so an
+  // upload is visible on every mounted avatar immediately, same tab and —
+  // via the storage event — in other tabs.
+  const effectiveSrc = useAvatarSrc(src);
   React.useEffect(() => {
     setFailed(false);
-  }, [src]);
+  }, [effectiveSrc]);
   const { initials, tone } = React.useMemo(() => {
     const parts = name.trim().split(/\s+/).slice(0, 2);
     const chars = parts.map((p) => p.charAt(0).toUpperCase()).join("") || "?";
@@ -48,9 +53,9 @@ export function Avatar({
           adjacent label). Rendered via CSS content rather than a text node so
           they never enter textContent — they would otherwise break
           Label-in-Name on ancestor widgets (axe 2.5.3). */}
-      {src && !failed ? (
+      {effectiveSrc && !failed ? (
         <img
-          src={src}
+          src={effectiveSrc}
           alt=""
           className="h-full w-full object-cover"
           onError={() => setFailed(true)}

@@ -6,11 +6,11 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
  * -> reload -> verify persistence, plus negative authorization checks.
  *
  * Requires a freshly bootstrapped server (see scripts/e2e-server.sh):
- *   admin@tasker.local / admin-pass-12345
+ *   admin@tasker.local / Admin-Pass-12345!
  */
 
-const ADMIN = { email: "admin@tasker.local", password: "admin-pass-12345" };
-const MEMBER = { email: "member@tasker.local", password: "member-pass-12345" };
+const ADMIN = { email: "admin@tasker.local", password: "Admin-Pass-12345!" };
+const MEMBER = { email: "member@tasker.local", password: "Member-Pass-1234!" };
 
 test.describe.serial("Tasker core workflow", () => {
   let teamId = "";
@@ -62,14 +62,23 @@ test.describe.serial("Tasker core workflow", () => {
     expect(teamId).not.toBe("");
   });
 
-  test("add a member with a temporary password", async () => {
+  test("assign an existing instance user as a member (Bug 2 picker)", async () => {
+    // ADR-0014: accounts are Owner-created on the Users page; team settings
+    // only assign them.
+    // Bug 2 (ADR-0014): Owner-created account; tolerate "already exists"
+    // from an earlier leg of this serial suite.
+    const __created = await page.request.post("/api/v1/admin/users", {
+      data: { email: MEMBER.email, display_name: "E2E Member", temporary_password: MEMBER.password },
+    });
+    if (__created.status() === 422) {
+      // The account exists already — assignment below is still valid.
+    } else {
+      expect(__created.status()).toBe(201);
+    }
     await page.goto(`/teams/${teamId}/settings?team=${teamId}`);
     await page.getByTestId("add-member").click();
-    await page.getByTestId("member-email-input").fill(MEMBER.email);
-    await page.getByLabel("Role", { exact: true }).click();
-    await page.getByRole("option", { name: "Member" }).click();
-    await page.getByLabel("Temporary password (new accounts only)").fill(MEMBER.password);
-    await page.getByTestId("member-submit").click();
+    await page.getByTestId("member-search-input").fill(MEMBER.email);
+    await page.getByTestId("eligible-members-list").getByRole("option").first().click();
     await expect(page.getByTestId("member-list")).toContainText(MEMBER.email);
   });
 

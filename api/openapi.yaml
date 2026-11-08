@@ -320,6 +320,10 @@ paths:
                   type: string
                   minLength: 10
                   maxLength: 128
+                  description: >-
+                    Strict policy (ADR-0016): >= 12 characters with lower/upper/digit/special, not
+                    blocklisted, not equal to email/username/display name, and different from the
+                    current password.
       responses:
         '204':
           description: Password changed.
@@ -475,13 +479,10 @@ paths:
     post:
       tags:
         - teams
-      summary: Add a member (Owner/Admin)
-      description: |
-        Administrator-assisted provisioning: if no user exists with the
-        email, one is created using `temp_password` (min 10 chars), which
-        the administrator hands to the member out-of-band. If the user
-        exists, only the membership is added. Granting the `owner` role
-        requires the caller to be Owner.
+      summary: Assign an existing instance user to the team (Owner/Admin)
+      description: >-
+        Bug 2 (ADR-0014): team membership no longer creates accounts. Unknown email → 422 with an
+        actionable message.
       parameters:
         - $ref: '#/components/parameters/TeamId'
       requestBody:
@@ -496,10 +497,10 @@ paths:
               properties:
                 email:
                   type: string
-                  maxLength: 255
-                display_name:
-                  type: string
-                  maxLength: 120
+                  format: email
+                  description: >-
+                    An existing instance user (Bug 2). Unknown emails get 422 — accounts are created
+                    by an Owner via /admin/users.
                 role:
                   type: string
                   enum:
@@ -507,10 +508,7 @@ paths:
                     - admin
                     - manager
                     - member
-                temp_password:
-                  type: string
-                  minLength: 10
-                  maxLength: 128
+                    - guest
       responses:
         '201':
           description: Membership created.
@@ -3001,6 +2999,208 @@ paths:
           $ref: '#/components/responses/Problem404'
         '409':
           $ref: '#/components/responses/Problem409'
+  /admin/users:
+    get:
+      tags:
+        - admin
+      summary: List instance users (Owner-only)
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Match email, display name or username.
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Instance users, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserList'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+    post:
+      tags:
+        - admin
+      summary: Create an instance user (Owner-only)
+      description: >-
+        Creates a Tasker account WITHOUT team membership (ADR-0014); assignment to teams is a
+        separate action.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAdminUserRequest'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '422':
+          $ref: '#/components/responses/Problem422'
+  /admin/users/{user_id}:
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags:
+        - admin
+      summary: Update an instance user (Owner-only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAdminUserRequest'
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
+    delete:
+      tags:
+        - admin
+      summary: Deactivate, or guarded hard delete (Owner-only)
+      description: >-
+        Without a body the account is deactivated. With `confirm_email` + `current_password` a hard
+        delete is attempted; it is refused (409) while the account has team memberships, created
+        tasks or comments.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteAdminUserRequest'
+      responses:
+        '204':
+          description: Deactivated or deleted.
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
+  /teams/{team_id}/members/eligible:
+    get:
+      tags:
+        - teams
+      summary: Search users eligible to join the team (Owner/Admin)
+      description: >-
+        Existing instance users only; current members are excluded (Bug 2: assignment never creates
+        accounts).
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Eligible users by display name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EligibleMemberList'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /teams/{team_id}/tasks:
+    get:
+      tags:
+        - tasks
+      summary: Team-wide task search (membership)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Title substring.
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Team tasks, newest update first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamTaskSearchList'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
 components:
   securitySchemes:
     cookieAuth:
@@ -3257,6 +3457,15 @@ components:
           description: IANA timezone.
         notification_prefs:
           $ref: '#/components/schemas/NotificationPrefs'
+        instance_role:
+          type:
+            - string
+            - 'null'
+          enum:
+            - owner
+            - member
+            - null
+          description: Instance-wide role (Bug 2). `owner` manages every Tasker account.
     MfaRequired:
       type: object
       required:
@@ -5400,3 +5609,190 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Attachment'
+    AdminUserTeamRef:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    AdminUser:
+      type: object
+      required:
+        - id
+        - email
+        - display_name
+        - instance_role
+        - active
+        - created_at
+        - teams
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        display_name:
+          type: string
+        username:
+          type:
+            - string
+            - 'null'
+        instance_role:
+          type: string
+          enum:
+            - owner
+            - member
+        active:
+          type: boolean
+          description: Deactivated accounts cannot sign in.
+        created_at:
+          type: integer
+        teams:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminUserTeamRef'
+    AdminUserList:
+      type: object
+      required:
+        - items
+        - page
+        - page_size
+        - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminUser'
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+    CreateAdminUserRequest:
+      type: object
+      required:
+        - email
+        - display_name
+        - temporary_password
+      properties:
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        username:
+          type: string
+          pattern: ^[a-z0-9_]{3,32}$
+        temporary_password:
+          type: string
+          description: >-
+            Must satisfy the strict password policy (ADR-0016): >= 12 chars with
+            lower/upper/digit/special, not blocklisted, not derived from the account identity.
+    UpdateAdminUserRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        username:
+          oneOf:
+            - type: string
+              pattern: ^[a-z0-9_]{3,32}$
+            - type: 'null'
+        active:
+          type: boolean
+          description: false deactivates (sessions revoked); true reactivates.
+    DeleteAdminUserRequest:
+      type: object
+      description: Required for a guarded hard delete; absent body soft-deactivates.
+      properties:
+        confirm_email:
+          type: string
+          description: The target account's email, typed verbatim.
+        current_password:
+          type: string
+          description: The requesting owner's password.
+    EligibleMember:
+      type: object
+      required:
+        - id
+        - email
+        - display_name
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        display_name:
+          type: string
+        username:
+          type:
+            - string
+            - 'null'
+    EligibleMemberList:
+      type: object
+      required:
+        - items
+        - page
+        - page_size
+        - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EligibleMember'
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+    TeamTaskSearchItem:
+      type: object
+      required:
+        - id
+        - title
+        - status
+        - project_id
+        - project_name
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        status:
+          type: string
+        project_id:
+          type: string
+          format: uuid
+        project_name:
+          type: string
+    TeamTaskSearchList:
+      type: object
+      required:
+        - items
+        - page
+        - page_size
+        - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamTaskSearchItem'
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer

@@ -23,7 +23,7 @@ use tracing::Instrument;
 use crate::error::AppError;
 use crate::state::AppState;
 use crate::{
-    activity, attachments, auth, checklists, comments, dashboard, profile, projects, tasks, teams,
+    activity, admin, attachments, auth, checklists, comments, dashboard, profile, projects, tasks, teams,
 };
 
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -34,6 +34,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
         .route("/openapi.json", get(openapi))
+        .merge(admin::routes())
         .merge(auth::routes())
         .merge(profile::routes())
         .merge(teams::routes())

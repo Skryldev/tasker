@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
  * preview hover, notification-prefs auto-save, and the 375px mobile audit.
  */
 
-const ADMIN = { email: "admin@tasker.local", password: "admin-pass-12345" };
+const ADMIN = { email: "admin@tasker.local", password: "Admin-Pass-12345!" };
 
 // Dedicated fixtures: never assume teams.items[0] has a project (other
 // specs create teams without one).
@@ -57,8 +57,18 @@ test("command palette: task search hits the server", async ({ page, browser }) =
   // The palette searches the caller's tasks (server-side, assignee-scoped),
   // so a teammate must create the marker task with the admin as assignee.
   const memberEmail = `palette-${Date.now().toString(36)}@test.local`;
+    // Bug 2 (ADR-0014): Owner-created account; tolerate "already exists"
+    // from an earlier leg of this serial suite.
+    const __created = await page.request.post("/api/v1/admin/users", {
+      data: { email: memberEmail, display_name: "E2E Member", temporary_password: "Member-Pass-1234!" },
+    });
+    if (__created.status() === 422) {
+      // The account exists already — assignment below is still valid.
+    } else {
+      expect(__created.status()).toBe(201);
+    }
   await page.request.post(`/api/v1/teams/${teamId}/members`, {
-    data: { email: memberEmail, role: "member", temp_password: "member-temp-pw-123" },
+    data: { email: memberEmail, role: "member" },
   });
   const members = await page.request.get(`/api/v1/teams/${teamId}/members`);
   const adminId = (
@@ -70,7 +80,7 @@ test("command palette: task search hits the server", async ({ page, browser }) =
   const mp = await memberContext.newPage();
   await mp.goto("/login");
   await mp.getByLabel("Email").fill(memberEmail);
-  await mp.getByLabel("Password").fill("member-temp-pw-123");
+  await mp.getByLabel("Password").fill("Member-Pass-1234!");
   await mp.getByTestId("login-submit").click();
   await expect(mp.getByRole("heading", { name: "My Tasks" })).toBeVisible();
   const marker = `palette ${Date.now().toString(36)}`;
@@ -88,8 +98,11 @@ test("command palette: task search hits the server", async ({ page, browser }) =
 });
 
 test("keyboard shortcuts: C, /, G+T, ?", async ({ page }) => {
-  // "C" on a project page opens the create-task dialog.
+  // "C" on a project page opens the create-task dialog. The shortcuts
+  // manager is code-split (Phase 12.5 bundle gate): wait for its trigger to
+  // replace the placeholder before sending keys.
   await page.goto(`/projects/${projectId}?team=${teamId}`);
+  await expect(page.getByRole("button", { name: "Keyboard shortcuts" })).toBeEnabled();
   await page.keyboard.press("c");
   await expect(page.getByTestId("task-title-input")).toBeVisible();
   await page.keyboard.press("Escape");
@@ -103,8 +116,10 @@ test("keyboard shortcuts: C, /, G+T, ?", async ({ page }) => {
   // "G then T" navigates to My Tasks from anywhere (workspace defaults the
   // team once the shell mounts).
   await page.goto("/account");
-  // Wait for the shell (and its key listener) to mount before the sequence.
+  // Wait for the shell (and its lazy key listener) to mount before the
+  // sequence.
   await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Keyboard shortcuts" })).toBeEnabled();
   await page.keyboard.press("g");
   await page.keyboard.press("t");
   await expect(page).toHaveURL(/\/$|\/\?team=/);

@@ -5,11 +5,11 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
  * delete (undo / restore / purge), and the capacity view.
  *
  * Requires a freshly bootstrapped server (scripts/e2e-server.sh):
- *   admin@tasker.local / admin-pass-12345
+ *   admin@tasker.local / Admin-Pass-12345!
  */
 
-const ADMIN = { email: "admin@tasker.local", password: "admin-pass-12345" };
-const MEMBER = { email: "member105@tasker.local", password: "member-pass-12345" };
+const ADMIN = { email: "admin@tasker.local", password: "Admin-Pass-12345!" };
+const MEMBER = { email: "member105@tasker.local", password: "Member-Pass-1234!" };
 
 test.describe.serial("Phase 10.5 features", () => {
   let context: BrowserContext;
@@ -29,8 +29,18 @@ test.describe.serial("Phase 10.5 features", () => {
       data: { name: `P105 Team ${suffix}` },
     });
     teamId = (await team.json()).id as string;
+      // Bug 2 (ADR-0014): Owner-created account; tolerate "already exists"
+      // from an earlier leg of this serial suite.
+      const __created = await page.request.post("/api/v1/admin/users", {
+        data: { email: MEMBER.email, display_name: "E2E Member", temporary_password: "Member-Pass-1234!" },
+      });
+      if (__created.status() === 422) {
+        // The account exists already — assignment below is still valid.
+      } else {
+        expect(__created.status()).toBe(201);
+      }
     await page.request.post(`/api/v1/teams/${teamId}/members`, {
-      data: { email: MEMBER.email, role: "member", temp_password: MEMBER.password },
+      data: { email: MEMBER.email, role: "member" },
     });
     const members = await page.request.get(`/api/v1/teams/${teamId}/members`);
     memberId = (

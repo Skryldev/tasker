@@ -33,6 +33,8 @@ pub fn routes() -> Router<AppState> {
         // Workload
         .route("/teams/{team_id}/workload", get(workload))
         .route("/teams/{team_id}/capacity", get(capacity))
+        // Team-wide task search (Phase 12.5 Bug 6 pickers)
+        .route("/teams/{team_id}/tasks", get(search_team_tasks))
         // Templates
         .route(
             "/projects/{project_id}/templates",
@@ -1002,6 +1004,103 @@ fn capacity_window_days(window: Option<&str>) -> Result<i64, AppError> {
             format!("unknown window `{other}`; expected week or month"),
         )),
     }
+}
+
+/// Team-wide task search (Phase 12.5 Bug 6): server-paginated picker source
+/// for goal associations and any future cross-project surface. Membership
+/// only — results carry id/title/status plus the project for disambiguation.
+#[derive(Deserialize)]
+pub struct TeamTaskSearchQuery {
+    #[serde(default)]
+    pub q: Option<String>,
+    #[serde(default)]
+    pub page: Option<i64>,
+    #[serde(default)]
+    pub page_size: Option<i64>,
+}
+
+async fn search_team_tasks(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(team_id): Path<String>,
+    Query(query): Query<TeamTaskSearchQuery>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let mut conn = state.db.conn();
+    crate::teams::require_membership(&mut conn, &team_id, &user.id).await?;
+    let page = query.page.unwrap_or(1).max(1);
+    let page_size = query.page_size.unwrap_or(25).clamp(1, 100);
+    let offset = (page - 1) * page_size;
+    let like = query
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+        .map(crate::util::escape_like)
+        .map(|q| format!("%{q}%"));
+
+    let total: i64 = match &like {
+        Some(pattern) => {
+            let mut args = Args::new();
+            args.s(&team_id).s(pattern.clone());
+            conn.fetch_optional(
+                "SELECT COUNT(*) AS n FROM tasks t                  JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL                  WHERE t.team_id = ? AND t.title LIKE ? ESCAPE '|'                    AND t.parent_task_id IS NULL",
+                args,
+            )
+            .await?
+            .map_or(0, |r| r.try_get("n").unwrap_or(0))
+        }
+        None => {
+            let mut args = Args::new();
+            args.s(&team_id);
+            conn.fetch_optional(
+                "SELECT COUNT(*) AS n FROM tasks t                  JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL                  WHERE t.team_id = ? AND t.parent_task_id IS NULL",
+                args,
+            )
+            .await?
+            .map_or(0, |r| r.try_get("n").unwrap_or(0))
+        }
+    };
+
+    let rows = match &like {
+        Some(pattern) => {
+            let mut args = Args::new();
+            args.s(&team_id).s(pattern.clone()).i(page_size).i(offset);
+            conn.fetch_all(
+                "SELECT t.id, t.title, t.status, t.project_id, p.name AS project_name                  FROM tasks t                  JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL                  WHERE t.team_id = ? AND t.title LIKE ? ESCAPE '|'                    AND t.parent_task_id IS NULL                  ORDER BY t.updated_at DESC LIMIT ? OFFSET ?",
+                args,
+            )
+            .await?
+        }
+        None => {
+            let mut args = Args::new();
+            args.s(&team_id).i(page_size).i(offset);
+            conn.fetch_all(
+                "SELECT t.id, t.title, t.status, t.project_id, p.name AS project_name                  FROM tasks t                  JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL                  WHERE t.team_id = ? AND t.parent_task_id IS NULL                  ORDER BY t.updated_at DESC LIMIT ? OFFSET ?",
+                args,
+            )
+            .await?
+        }
+    };
+
+    let items: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            Ok(serde_json::json!({
+                "id": row.try_get::<String, _>("id")?,
+                "title": row.try_get::<String, _>("title")?,
+                "status": row.try_get::<String, _>("status")?,
+                "project_id": row.try_get::<String, _>("project_id")?,
+                "project_name": row.try_get::<String, _>("project_name")?,
+            }))
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+
+    Ok(Json(serde_json::json!({
+        "items": items,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+    })))
 }
 
 async fn capacity(

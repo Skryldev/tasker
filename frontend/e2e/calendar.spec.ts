@@ -9,7 +9,7 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
  *   Aban 15, 1405 = 2026-11-06
  */
 
-const ADMIN = { email: "admin@tasker.local", password: "admin-pass-12345" };
+const ADMIN = { email: "admin@tasker.local", password: "Admin-Pass-12345!" };
 
 test.describe.serial("Phase 6 Persian calendar", () => {
   let context: BrowserContext;

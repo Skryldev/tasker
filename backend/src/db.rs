@@ -250,6 +250,10 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
         "0014_phase12_expansion",
         include_str!("../migrations/postgres/0014_phase12_expansion.sql"),
     ),
+    (
+        "0015_instance_users_timezone",
+        include_str!("../migrations/postgres/0015_instance_users_timezone.sql"),
+    ),
 ];
 const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -304,6 +308,10 @@ const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
         "0014_phase12_expansion",
         include_str!("../migrations/mysql/0014_phase12_expansion.sql"),
     ),
+    (
+        "0015_instance_users_timezone",
+        include_str!("../migrations/mysql/0015_instance_users_timezone.sql"),
+    ),
 ];
 const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -353,6 +361,10 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
         "0014_phase12_expansion",
         include_str!("../migrations/sqlite/0014_phase12_expansion.sql"),
+    ),
+    (
+        "0015_instance_users_timezone",
+        include_str!("../migrations/sqlite/0015_instance_users_timezone.sql"),
     ),
 ];
 
@@ -921,7 +933,7 @@ mod tests {
         .await
         .unwrap();
         let migrations = migrations_for(Driver::Sqlite);
-        assert_eq!(migrations.len(), 12, "expected migrations 0001..0014");
+        assert_eq!(migrations.len(), 13, "expected migrations 0001..0015");
         // Build the PRE-0005 schema: 0001..0004 only.
         for (version, sql) in &migrations[..4] {
             for statement in split_statements(sql) {

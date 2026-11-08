@@ -5,10 +5,10 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
  * persistence, the My Work Summary, and the active-sessions list.
  *
  * Requires a freshly bootstrapped server (see scripts/e2e-server.sh):
- *   admin@tasker.local / admin-pass-12345
+ *   admin@tasker.local / Admin-Pass-12345!
  */
 
-const ADMIN = { email: "admin@tasker.local", password: "admin-pass-12345" };
+const ADMIN = { email: "admin@tasker.local", password: "Admin-Pass-12345!" };
 const USERNAME = `e2e_${Date.now().toString(36)}`.slice(0, 32);
 
 test.describe.serial("Profile", () => {

@@ -40,6 +40,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { cn, timeAgo } from "@/lib/utils";
 import { formatJalaliDate } from "@/lib/jalali";
 import { GoalFormDialog, GoalStatusBadge, ProgressBar } from "@/pages/GoalsPage";
+import { ContributionPicker } from "@/components/app/ContributionPicker";
 
 type KrMetricType = "increase" | "decrease" | "boolean";
 
@@ -113,6 +114,25 @@ export function GoalDetailPage() {
     },
     onError: (err) =>
       push("error", "Could not delete key result", err instanceof Error ? err.message : undefined),
+  });
+
+  // Bug 6: association mutations — the API existed but had no UI. Success
+  // feedback comes from the picker/list wiring; errors toast here.
+  const associateProject = useMutation({
+    mutationFn: (projectId: string) => api.associateProjectWithGoal(goalId!, projectId),
+    onSuccess: invalidate,
+  });
+  const removeProject = useMutation({
+    mutationFn: (projectId: string) => api.removeProjectFromGoal(goalId!, projectId),
+    onSuccess: invalidate,
+  });
+  const associateTask = useMutation({
+    mutationFn: (taskId: string) => api.associateTaskWithGoal(goalId!, taskId),
+    onSuccess: invalidate,
+  });
+  const removeTask = useMutation({
+    mutationFn: (taskId: string) => api.removeTaskFromGoal(goalId!, taskId),
+    onSuccess: invalidate,
   });
 
   if (detail.isLoading) {
@@ -376,17 +396,37 @@ export function GoalDetailPage() {
 
       {/* ---------------- Associations + execution ---------------- */}
       <section aria-label="Contributing work" className="mb-8">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Contributing projects &amp; tasks</h2>
           {canManage ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate(`/projects?team=${goal.team_id}`)}
-              data-testid="browse-projects"
-            >
-              Browse projects
-            </Button>
+            <div className="flex items-center gap-2">
+              <ContributionPicker
+                teamId={goal.team_id}
+                kind="projects"
+                excludedIds={new Set(data.projects.map((p) => p.id))}
+                label="Add contributing project"
+                onPick={(projectId) =>
+                  associateProject.mutateAsync(projectId).then(
+                    () => push("success", "Project linked to goal"),
+                    (error) =>
+                      push("error", "Could not link project", error instanceof Error ? error.message : undefined),
+                  )
+                }
+              />
+              <ContributionPicker
+                teamId={goal.team_id}
+                kind="tasks"
+                excludedIds={new Set(data.tasks.map((t) => t.id))}
+                label="Add contributing task"
+                onPick={(taskId) =>
+                  associateTask.mutateAsync(taskId).then(
+                    () => push("success", "Task linked to goal"),
+                    (error) =>
+                      push("error", "Could not link task", error instanceof Error ? error.message : undefined),
+                  )
+                }
+              />
+            </div>
           ) : null}
         </div>
 
@@ -429,14 +469,37 @@ export function GoalDetailPage() {
             </h3>
             <ul className="mb-4 flex flex-col gap-1.5" data-testid="goal-project-list">
               {data.projects.map((p) => (
-                <li key={p.id}>
+                <li key={p.id} className="group flex items-center gap-2">
                   <Link
                     to={`/projects/${p.id}`}
-                    className="flex items-center justify-between rounded-md border px-3 py-2 text-sm hover:bg-accent"
+                    className="flex min-w-0 flex-1 items-center justify-between rounded-md border px-3 py-2 text-sm hover:bg-accent"
                   >
                     <span className="truncate">{p.name}</span>
-                    <span className="text-2xs text-muted-foreground">{p.status}</span>
+                    <span
+                      className="rounded-full border bg-muted/50 px-2 py-0.5 text-2xs text-muted-foreground"
+                      data-status={p.status}
+                    >
+                      {p.status.replaceAll("_", " ")}
+                    </span>
                   </Link>
+                  {canManage ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Remove ${p.name} from goal`}
+                      onClick={() =>
+                        removeProject.mutateAsync(p.id).then(
+                          () => push("success", "Project removed from goal"),
+                          (error) =>
+                            push("error", "Could not remove project", error instanceof Error ? error.message : undefined),
+                        )
+                      }
+                      data-testid={`remove-goal-project-${p.id}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                    </Button>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -449,16 +512,37 @@ export function GoalDetailPage() {
             </h3>
             <ul className="flex flex-col gap-1.5" data-testid="goal-task-list">
               {data.tasks.map((t) => (
-                <li key={t.id}>
+                <li key={t.id} className="group flex items-center gap-2">
                   <Link
                     to={`/tasks/${t.id}`}
-                    className="flex items-center justify-between rounded-md border px-3 py-2 text-sm hover:bg-accent"
+                    className="flex min-w-0 flex-1 items-center justify-between rounded-md border px-3 py-2 text-sm hover:bg-accent"
                   >
                     <span className="truncate">{t.title}</span>
-                    <span className="text-2xs text-muted-foreground">
+                    <span
+                      className="rounded-full border bg-muted/50 px-2 py-0.5 text-2xs text-muted-foreground"
+                      data-status={t.status}
+                    >
                       {t.status.replaceAll("_", " ")}
                     </span>
                   </Link>
+                  {canManage ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Remove ${t.title} from goal`}
+                      onClick={() =>
+                        removeTask.mutateAsync(t.id).then(
+                          () => push("success", "Task removed from goal"),
+                          (error) =>
+                            push("error", "Could not remove task", error instanceof Error ? error.message : undefined),
+                        )
+                      }
+                      data-testid={`remove-goal-task-${t.id}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                    </Button>
+                  ) : null}
                 </li>
               ))}
             </ul>

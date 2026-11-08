@@ -15,7 +15,7 @@ import { currentStep, totpAtStep, totpNow, waitMsForFreshStep } from "./totp";
  * one). Replay protection and enrollment semantics are not weakened.
  */
 
-const ADMIN = { email: "admin@tasker.local", password: "admin-pass-12345" };
+const ADMIN = { email: "admin@tasker.local", password: "Admin-Pass-12345!" };
 
 test.describe.serial("Phase 7 two-factor authentication", () => {
   let context: BrowserContext;

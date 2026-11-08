@@ -262,7 +262,7 @@ function TeamDetailsForm({
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="team-timezone">Default timezone</Label>
-          <div className="max-w-sm">
+          <div className="max-w-sm" data-testid="team-timezone-select">
             <TimezoneSelect
               id="team-timezone"
               value={timezone}
@@ -457,134 +457,9 @@ function MemberRowMenu({
   );
 }
 
-function AddMemberDialog({
-  open,
-  onOpenChange,
-  teamId,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  teamId: string;
-}) {
-  const { push } = useToast();
-  const qc = useQueryClient();
-  const [email, setEmail] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [role, setRole] = useState("member");
-  const [tempPassword, setTempPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const add = useMutation({
-    mutationFn: () =>
-      api.addMember(teamId, {
-        email,
-        display_name: displayName || undefined,
-        role,
-        temp_password: tempPassword || undefined,
-      }),
-    onSuccess: () => {
-      push("success", "Member added", email);
-      void qc.invalidateQueries({ queryKey: ["members", teamId] });
-      setEmail("");
-      setDisplayName("");
-      setTempPassword("");
-      setError(null);
-      onOpenChange(false);
-    },
-    onError: (err) => setError(err instanceof ApiError ? err.message : "Could not add the member."),
-  });
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add member</DialogTitle>
-          <DialogDescription>
-            If the person has no account yet, a temporary password creates one — hand it to them
-            securely; they should change it after signing in.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!email.trim()) {
-              setError("Email is required.");
-              return;
-            }
-            if (!tempPassword.trim() && tempPassword !== "") {
-              setError("Temporary password must be at least 10 characters.");
-              return;
-            }
-            setError(null);
-            add.mutate();
-          }}
-          noValidate
-          data-testid="add-member-form"
-        >
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="member-email">Email</Label>
-            <Input
-              id="member-email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="teammate@company.com"
-              autoFocus
-              data-testid="member-email-input"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="member-name">Display name</Label>
-              <Input
-                id="member-name"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="Optional"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="member-role">Role</Label>
-              <Select value={role} onValueChange={setRole}>
-                <SelectTrigger id="member-role">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ROLES.map((r) => (
-                    <SelectItem key={r} value={r}>
-                      {roleLabel(r)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="member-password">Temporary password (new accounts only)</Label>
-            <Input
-              id="member-password"
-              type="text"
-              value={tempPassword}
-              onChange={(e) => setTempPassword(e.target.value)}
-              placeholder="Min. 10 characters — leave empty for existing users"
-              autoComplete="off"
-            />
-          </div>
-          {error ? <p className="text-2xs text-destructive" role="alert">{error}</p> : null}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={add.isPending} data-testid="member-submit">
-              {add.isPending ? "Adding…" : "Add member"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
+// Bug 2 (ADR-0014): the add-member flow picks an EXISTING instance user —
+// account creation moved to the Owner-only Users page.
+import { AddMemberDialog } from "@/pages/AddMemberDialog";
 
 // ---------------------------------------------------------------------------
 // Guests (team-wide project viewers)

@@ -6,7 +6,7 @@ import { expect, test } from "@playwright/test";
  * the legacy dark/light pair keeps working.
  */
 
-const ADMIN = { email: "admin@tasker.local", password: "admin-pass-12345" };
+const ADMIN = { email: "admin@tasker.local", password: "Admin-Pass-12345!" };
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/login");
