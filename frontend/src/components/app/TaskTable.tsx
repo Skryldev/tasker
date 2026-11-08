@@ -1,23 +1,20 @@
-import { useMemo, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { ChevronDown, Flag, ListChecks } from "lucide-react";
 import type { Task } from "@/api/client";
 import { useUserInfo } from "@/api/hooks";
 import { Avatar } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
-import { PriorityBadge } from "./TaskBadges";
-import { cn } from "@/lib/utils";
+import { LabelIcon, PriorityBadge, StatusBadge } from "./TaskBadges";
+import { cn, STATUS_LABELS, TASK_STATUSES, type TaskStatus } from "@/lib/utils";
 import { formatJalaliDate } from "@/lib/jalali";
 
 /**
- * Phase 10: hand-rolled table. The previous implementation routed a static,
- * single-selection six-column table through @tanstack/table-core — a ~109 kB
- * (raw) runtime for zero derived behavior (no sorting, filtering, or grouped
- * row models were used). The markup, test ids, and interaction surface are
- * unchanged; the library is gone from the bundle.
- *
- * Visual spec (§5.1): 36px rows, status as dot + text, priority as icon,
- * avatar + truncated assignee with hover identity, relative due date with
- * the absolute Jalali date on hover, 100ms hover shift, 2px left-border
- * selection accent.
+ * Phase 10: hand-rolled table (the @tanstack/table-core runtime was dropped
+ * for zero derived behavior). Phase 12 (WS8): rows group by status in
+ * lifecycle order, each group collapsible; labels render as pastel chips,
+ * deadlines as red flag chips, and subtask progress as a compact pill.
+ * The markup contract (`task-row-{id}` test ids, selection, reorder) is
+ * unchanged.
  */
 
 const STATUS_DOT: Record<string, string> = {
@@ -82,6 +79,25 @@ function DueCell({ value }: { value: string | null | undefined }) {
   );
 }
 
+/** WS3: red-tinted deadline flag with the Jalali date on hover. */
+function DeadlineCell({ value }: { value: string | null | undefined }) {
+  if (!value) return null;
+  const overdue = dayDiff(value, tehranTodayISO()) < 0;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-0.5 rounded-full border px-1.5 py-px text-2xs font-medium",
+        overdue ? "border-destructive/60 bg-destructive/15 text-destructive" : "border-destructive/40 bg-destructive/10 text-destructive",
+      )}
+      title={`Deadline ${formatJalaliDate(value)}`}
+      data-testid={`deadline-${value}`}
+    >
+      <Flag className="h-2.5 w-2.5" aria-hidden />
+      {value.slice(5)}
+    </span>
+  );
+}
+
 export function TaskTable({
   tasks,
   total,
@@ -108,6 +124,25 @@ export function TaskTable({
   );
   const identities = useUserInfo(assigneeIds);
 
+  // WS8: group rows by status in lifecycle order; groups collapse locally.
+  const groups = useMemo(
+    () =>
+      TASK_STATUSES.map((status) => ({
+        status,
+        items: tasks.filter((t) => t.status === status),
+      })).filter((g) => g.items.length > 0),
+    [tasks],
+  );
+  const [collapsed, setCollapsed] = useState<Set<TaskStatus>>(new Set());
+  const toggleGroup = (status: TaskStatus) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
+  };
+
   const hoverTitle = (task: Task): string | undefined => {
     const id = task.assignee?.id;
     if (!id) return undefined;
@@ -124,6 +159,127 @@ export function TaskTable({
 
   const columns = ["Selected", "Task", "Status", "Priority", "Assignee", "Due"] as const;
   const skeletonRows = [0, 1, 2, 3];
+
+  const renderRow = (task: Task, groupTasks: Task[]) => {
+    const selected = task.id === selectedId;
+    return (
+      <tr
+        key={task.id}
+        tabIndex={0}
+        onClick={() => onSelect(task)}
+        draggable={Boolean(onReorder)}
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/task-id", task.id);
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("text/task-id")) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          const draggedId = e.dataTransfer.getData("text/task-id");
+          const dragged = groupTasks.find((t) => t.id === draggedId);
+          if (dragged && dragged.id !== task.id && onReorder) {
+            onReorder(dragged, task.id);
+          }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onSelect(task);
+          // Keyboard reordering (Phase 11): Alt+Up/Down moves the task above
+          // or below its neighbor within the same status group.
+          if (onReorder && e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+            e.preventDefault();
+            const idx = groupTasks.findIndex((t) => t.id === task.id);
+            const neighbor = groupTasks[idx + (e.key === "ArrowUp" ? -1 : 1)];
+            if (neighbor) {
+              if (e.key === "ArrowUp") {
+                onReorder(task, neighbor.id);
+              } else {
+                onReorder(neighbor, task.id);
+              }
+            }
+          }
+        }}
+        className={cn(
+          "h-9 cursor-pointer border-b transition-colors duration-100 last:border-0 hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-none",
+          selected &&
+            "border-l-2 border-l-primary bg-primary/5 hover:bg-primary/5 focus-visible:bg-primary/5",
+        )}
+        data-testid={`task-row-${task.id}`}
+        aria-selected={selected}
+      >
+        <td className="px-3">
+          <Checkbox checked={selected} aria-label="Selected task" />
+        </td>
+        <td className="max-w-[24rem] px-3">
+          <span className="flex items-center gap-2">
+            <span className="min-w-0">
+              <span className="block truncate font-medium leading-tight">
+                {task.title}
+              </span>
+              {renderContext ? (
+                <span className="block truncate text-2xs text-muted-foreground">
+                  {renderContext(task)}
+                </span>
+              ) : null}
+            </span>
+            {/* WS4: compact subtask progress pill. */}
+            {task.subtasks && task.subtasks.length > 0 ? (
+              <span
+                className="hidden shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-px text-2xs tabular-nums text-muted-foreground md:inline-flex"
+                title={`${task.subtasks.filter((s) => s.status === "closed").length} of ${task.subtasks.length} subtasks closed`}
+              >
+                <ListChecks className="h-2.5 w-2.5" aria-hidden />
+                {task.subtasks.filter((s) => s.status === "closed").length}/{task.subtasks.length}
+              </span>
+            ) : null}
+            {/* WS5: pastel label chips tinted with the label color. */}
+            {task.labels.slice(0, 2).map((l) => (
+              <span
+                key={l.id}
+                className="hidden shrink-0 items-center gap-1 rounded-full border px-1.5 py-px text-2xs md:inline-flex"
+                style={{ backgroundColor: `${l.color}1f`, borderColor: `${l.color}55` }}
+              >
+                {l.icon ? <LabelIcon icon={l.icon} /> : null}
+                <span className="max-w-[6rem] truncate">{l.name}</span>
+              </span>
+            ))}
+          </span>
+        </td>
+        <td className="px-3">
+          <StatusBadge status={task.status} />
+        </td>
+        <td className="px-3">
+          <PriorityBadge priority={task.priority} />
+        </td>
+        <td className="px-3">
+          {task.assignee ? (
+            <span
+              className="flex items-center gap-1.5 text-xs"
+              title={hoverTitle(task)}
+            >
+              <Avatar
+                name={task.assignee.display_name}
+                size="xs"
+                className="h-5 w-5"
+              />
+              <span className="hidden truncate lg:inline">
+                {task.assignee.display_name}
+              </span>
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          )}
+        </td>
+        <td className="px-3">
+          <span className="flex items-center gap-1.5">
+            <DueCell value={task.due_date} />
+            <DeadlineCell value={task.deadline} />
+          </span>
+        </td>
+      </tr>
+    );
+  };
 
   return (
     <div className="overflow-hidden rounded-lg border" data-testid="task-table">
@@ -154,120 +310,33 @@ export function TaskTable({
                   ))}
                 </tr>
               ))
-            : tasks.map((task) => {
-                const selected = task.id === selectedId;
-                return (
-                  <tr
-                    key={task.id}
-                    tabIndex={0}
-                    onClick={() => onSelect(task)}
-                    draggable={Boolean(onReorder)}
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData("text/task-id", task.id);
-                      e.dataTransfer.effectAllowed = "move";
-                    }}
-                    onDragOver={(e) => {
-                      if (e.dataTransfer.types.includes("text/task-id")) e.preventDefault();
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const draggedId = e.dataTransfer.getData("text/task-id");
-                      const dragged = tasks.find((t) => t.id === draggedId);
-                      if (dragged && dragged.id !== task.id && onReorder) {
-                        onReorder(dragged, task.id);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") onSelect(task);
-                      // Keyboard reordering (Phase 11): Alt+Up/Down moves the
-                      // task above/below its neighbor in the filtered list.
-                      if (onReorder && e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-                        e.preventDefault();
-                        const idx = tasks.findIndex((t) => t.id === task.id);
-                        const neighbor = tasks[idx + (e.key === "ArrowUp" ? -1 : 1)];
-                        if (neighbor) {
-                          if (e.key === "ArrowUp") {
-                            onReorder(task, neighbor.id);
-                          } else {
-                            onReorder(neighbor, task.id);
-                          }
-                        }
-                      }
-                    }}
-                    className={cn(
-                      "h-9 cursor-pointer border-b transition-colors duration-100 last:border-0 hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-none",
-                      selected &&
-                        "border-l-2 border-l-primary bg-primary/5 hover:bg-primary/5 focus-visible:bg-primary/5",
-                    )}
-                    data-testid={`task-row-${task.id}`}
-                    aria-selected={selected}
-                  >
-                    <td className="px-3">
-                      <Checkbox checked={selected} aria-label="Selected task" />
-                    </td>
-                    <td className="max-w-[24rem] px-3">
-                      <span className="flex items-center gap-2">
-                        <span
-                          className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[task.status])}
+            : groups.map(({ status, items }) => (
+                <Fragment key={`group-${status}`}>
+                  <tr className="border-b bg-muted/30">
+                    <td colSpan={columns.length} className="px-3 py-1">
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(status)}
+                        aria-expanded={!collapsed.has(status)}
+                        className="flex items-center gap-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        data-testid={`task-group-${status}`}
+                      >
+                        <ChevronDown
+                          className={cn(
+                            "h-3 w-3 transition-transform",
+                            collapsed.has(status) && "-rotate-90",
+                          )}
                           aria-hidden
                         />
-                        <span className="min-w-0">
-                          <span className="block truncate font-medium leading-tight">
-                            {task.title}
-                          </span>
-                          {renderContext ? (
-                            <span className="block truncate text-2xs text-muted-foreground">
-                              {renderContext(task)}
-                            </span>
-                          ) : null}
-                        </span>
-                        {task.labels.slice(0, 2).map((l) => (
-                          <span
-                            key={l.id}
-                            className="hidden shrink-0 rounded-full border px-1.5 py-px text-2xs text-muted-foreground md:inline"
-                          >
-                            {l.name}
-                          </span>
-                        ))}
-                      </span>
-                    </td>
-                    <td className="px-3">
-                      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <span
-                          className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[task.status])}
-                          aria-hidden
-                        />
-                        {task.status.replaceAll("_", " ")}
-                      </span>
-                    </td>
-                    <td className="px-3">
-                      <PriorityBadge priority={task.priority} />
-                    </td>
-                    <td className="px-3">
-                      {task.assignee ? (
-                        <span
-                          className="flex items-center gap-1.5 text-xs"
-                          title={hoverTitle(task)}
-                        >
-                          <Avatar
-                            name={task.assignee.display_name}
-                            size="xs"
-                            className="h-5 w-5"
-                          />
-                          <span className="hidden truncate lg:inline">
-                            {task.assignee.display_name}
-                          </span>
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-3">
-                      <DueCell value={task.due_date} />
+                        <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT[status])} aria-hidden />
+                        {STATUS_LABELS[status]}
+                        <span className="tabular-nums">({items.length})</span>
+                      </button>
                     </td>
                   </tr>
-                );
-              })}
+                  {!collapsed.has(status) ? items.map((t) => renderRow(t, items)) : null}
+                </Fragment>
+              ))}
         </tbody>
       </table>
       {total !== undefined && total > tasks.length ? (

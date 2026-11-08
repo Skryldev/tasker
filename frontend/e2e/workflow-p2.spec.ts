@@ -210,7 +210,17 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
     }
     expect(beforeResponse.status()).toBe(200);
 
-    await page.goto(`/tasks/${taskId}`);
+    // Phase 12 (WS10): closed tasks reject comments — the accepted task above
+    // is locked, so the mention lands on a fresh open task instead.
+    const members = await (await page.request.get(`/api/v1/teams/${teamId}/members`)).json();
+    const memberId = members.items.find((m) => m.user.email === MEMBER.email).user.id;
+    const created = await (
+      await page.request.post(`/api/v1/projects/${projectId}/tasks`, {
+        data: { title: "Mention flow task", assignee_id: memberId },
+      })
+    ).json();
+    const mentionTaskId = created.id as string;
+    await page.goto(`/tasks/${mentionTaskId}`);
     await page.getByTestId("comment-input").click();
     // Type an @ mention through the autocomplete.
     await page.getByTestId("comment-input").pressSequentially("@mem");

@@ -419,33 +419,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Update the session user's profile */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["UpdateProfileRequest"];
-                };
-            };
-            responses: {
-                /** @description The updated profile. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["User"];
-                    };
-                };
-                401: components["responses"]["Problem401"];
-                422: components["responses"]["Problem422"];
-            };
-        };
+        patch?: never;
         trace?: never;
     };
     "/me/password": {
@@ -513,10 +487,6 @@ export interface paths {
                     order?: components["parameters"]["Order"];
                     page?: components["parameters"]["Page"];
                     page_size?: components["parameters"]["PageSize"];
-                    /** @description Restrict to open tasks whose due date has passed. */
-                    overdue?: boolean;
-                    /** @description `unread` restricts to tasks with an unread mention in the trailing 7 days. */
-                    mentioned?: "unread";
                 };
                 header?: never;
                 path?: never;
@@ -645,38 +615,7 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        /**
-         * Delete the team permanently (Owner only)
-         * @description Irreversible. Requires the exact team name and the caller's current password. Removes all projects, tasks, labels, and automation history of the team.
-         */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    team_id: components["parameters"]["TeamId"];
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["DeleteTeamRequest"];
-                };
-            };
-            responses: {
-                /** @description No content. */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                401: components["responses"]["Problem401"];
-                403: components["responses"]["Problem403"];
-                404: components["responses"]["Problem404"];
-                422: components["responses"]["Problem422"];
-            };
-        };
+        delete?: never;
         options?: never;
         head?: never;
         /** Update team details (Owner/Admin) */
@@ -694,10 +633,6 @@ export interface paths {
                     "application/json": {
                         name?: string;
                         description?: string;
-                        /** @description IANA timezone name. */
-                        timezone?: string;
-                        /** @description null clears the team avatar. */
-                        avatar?: string | null;
                     };
                 };
             };
@@ -934,6 +869,8 @@ export interface paths {
                     "application/json": {
                         name: string;
                         color?: string;
+                        /** @description Optional whitelisted Lucide icon name. */
+                        icon?: string;
                     };
                 };
             };
@@ -1068,34 +1005,7 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        /**
-         * Soft-delete a project (Owner/Admin)
-         * @description Hides the project and its tasks from all users; recoverable within the 30-day retention window via POST /projects/{project_id}/restore. Managers archive, they do not delete. See docs/adr-0013-project-delete.md.
-         */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    project_id: components["parameters"]["ProjectId"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description No content. */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                401: components["responses"]["Problem401"];
-                403: components["responses"]["Problem403"];
-                404: components["responses"]["Problem404"];
-                409: components["responses"]["Problem409"];
-            };
-        };
+        delete?: never;
         options?: never;
         head?: never;
         /** Update project (Owner/Admin/Manager; archived projects are read-only) */
@@ -3173,6 +3083,367 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/teams/{team_id}/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List team rules (Owner/Admin) */
+        get: {
+            parameters: {
+                query?: {
+                    page?: components["parameters"]["Page"];
+                    page_size?: components["parameters"]["PageSize"];
+                    trigger_type?: "task_status_changed" | "task_priority_changed" | "task_assigned";
+                    enabled?: boolean;
+                };
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Paginated live (non-archived) rules. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RulePage"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /**
+         * Create an automation rule (Owner/Admin)
+         * @description Condition and action payloads are validated against the typed DSL. Rule names are unique per team; archived rules keep their names reserved. Creating a rule writes immutable version 1.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RuleUpsert"];
+                };
+            };
+            responses: {
+                /** @description Rule created (version 1). */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Rule"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rule details (Owner/Admin) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    rule_id: components["parameters"]["RuleId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The current rule aggregate. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Rule"];
+                    };
+                };
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update a rule (Owner/Admin, optimistic CAS)
+         * @description Writes a new immutable version and bumps `current_version` atomically. A stale `expected_version` yields 409. Archived rules are read-only.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    rule_id: components["parameters"]["RuleId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RuleUpdate"];
+                };
+            };
+            responses: {
+                /** @description Updated rule (new current version). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Rule"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        trace?: never;
+    };
+    "/rules/{rule_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable a rule (Owner/Admin) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    rule_id: components["parameters"]["RuleId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Rule enabled. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Rule"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rules/{rule_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable a rule (Owner/Admin) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    rule_id: components["parameters"]["RuleId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Rule disabled. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Rule"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rules/{rule_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive a rule (Owner/Admin)
+         * @description Archiving stops future evaluation, keeps the name reserved, and preserves all history. Irreversible in this phase.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    rule_id: components["parameters"]["RuleId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Rule archived. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Rule"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rules/{rule_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Immutable version history (Owner/Admin) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    rule_id: components["parameters"]["RuleId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description All immutable versions, newest first. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["RuleVersion"][];
+                        };
+                    };
+                };
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rules/{rule_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Execution history (Owner/Admin/Manager)
+         * @description Paginated per-event execution records with action-level outcomes. Survives task deletion by design.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    page?: components["parameters"]["Page"];
+                    page_size?: components["parameters"]["PageSize"];
+                };
+                header?: never;
+                path: {
+                    rule_id: components["parameters"]["RuleId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Paginated execution history. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RuleHistoryPage"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me/summary": {
         parameters: {
             query?: never;
@@ -3849,6 +4120,456 @@ export interface paths {
         };
         trace?: never;
     };
+    "/tasks/{task_id}/checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List checklist items */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    task_id: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Checklist items. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChecklistItemList"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /** Add a checklist item */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    task_id: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateChecklistItemRequest"];
+                };
+            };
+            responses: {
+                /** @description Created. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChecklistItem"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/checklist/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a checklist item */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    item_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No content. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Update a checklist item (toggle/edit) */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    item_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateChecklistItemRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChecklistItem"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        trace?: never;
+    };
+    "/tasks/{task_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Combined progress from subtasks + checklist */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    task_id: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Progress counters. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskProgress"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Team dashboard KPIs (Manager+) */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Aggregation window for throughput/cycle/lead. */
+                    window?: "7d" | "30d" | "90d";
+                };
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description KPI snapshot. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DashboardResponse"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/labels/{label_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: components["parameters"]["TeamId"];
+                label_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a team label (Owner/Admin/Manager) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    label_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No content. Task-label rows cascade; tasks are untouched. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Update a team label (Owner/Admin/Manager) */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    label_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateLabelRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated label. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Label"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        trace?: never;
+    };
+    "/tasks/{task_id}/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List task attachments */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    task_id: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Attachments oldest-first; soft-deleted excluded. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AttachmentList"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /**
+         * Upload an attachment (multipart)
+         * @description Multipart form with exactly one `file` part. Task editors only; closed tasks and archived projects reject with 409.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    task_id: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /**
+                         * Format: binary
+                         * @description At most TASKER_ATTACHMENTS_MAX_MB (default 25 MB); empty files are rejected.
+                         */
+                        file: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Created. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Attachment"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                /** @description Payload too large (exceeds the configured attachment limit). */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/attachments/{attachment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        /** Download an attachment */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    attachment_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Raw bytes with the stored MIME type, `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "*/*": string;
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        /** Soft-delete an attachment (task editors only) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    attachment_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No content. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3878,18 +4599,15 @@ export interface components {
             created_at: number;
             /** @description Whether TOTP two-factor authentication is enabled for this account. */
             mfa_enabled: boolean;
-            /** @description Unique @mention handle; null until the user sets one. */
-            username?: string | null;
-            /** @description Short bio shown on avatar hover cards. */
-            bio?: string | null;
-            /** @description IANA timezone used to display dates (e.g. Europe/Berlin). */
-            timezone?: string | null;
-            notification_prefs?: components["schemas"]["NotificationPrefs"];
-            /**
-             * @description Forward-looking capacity unit used by the Capacity view.
-             * @default 10
-             */
+            /** @default 10 */
             capacity_limit: number;
+            /** @description Unique @mention handle. */
+            username: string | null;
+            /** @description Short bio. */
+            bio: string | null;
+            /** @description IANA timezone. */
+            timezone: string | null;
+            notification_prefs: components["schemas"]["NotificationPrefs"];
         };
         MfaRequired: {
             /** @description Always true in this response shape. */
@@ -3943,10 +4661,10 @@ export interface components {
             updated_at: number;
             /** @enum {string|null} */
             my_role?: "owner" | "admin" | "manager" | "member" | null;
-            /** @description Default timezone for the team. */
-            timezone?: string | null;
-            /** @description Set when the team is archived; null while active. */
+            /** @description Archive timestamp. */
             archived_at?: number | null;
+            /** @description Default timezone. */
+            timezone?: string | null;
         };
         Member: {
             user: components["schemas"]["UserBrief"];
@@ -3962,12 +4680,16 @@ export interface components {
             name: string;
             color: string;
             created_at: number;
+            /** @description Optional Lucide icon name from the app whitelist (see `LABEL_ICONS` in the API); null = no icon. */
+            icon: string | null;
         };
         LabelBrief: {
             /** Format: uuid */
             id: string;
             name: string;
             color: string;
+            /** @description Optional Lucide icon name from the app whitelist. */
+            icon: string | null;
         };
         Project: {
             /** Format: uuid */
@@ -3989,8 +4711,6 @@ export interface components {
             my_role?: "owner" | "admin" | "manager" | "member" | null;
             /** @description True when the caller reaches this project through a guest grant (read-only). */
             is_guest?: boolean;
-            /** @description Soft-delete timestamp (epoch ms). Present only on soft-deleted projects (trash view); live payloads omit the field. */
-            deleted_at?: number | null;
         };
         TaskCreate: {
             title: string;
@@ -4008,7 +4728,7 @@ export interface components {
              */
             reporter_id?: string | null;
             /** @enum {string} */
-            priority?: "low" | "medium" | "high" | "urgent";
+            priority?: "none" | "low" | "medium" | "high" | "urgent" | "critical";
             /** @description Must be a team member. */
             assignee_id?: string | null;
             /** Format: date */
@@ -4016,6 +4736,11 @@ export interface components {
             /** @description Subtask parent; must be a root task in the same project. */
             parent_task_id?: string | null;
             label_ids?: string[];
+            /**
+             * Format: date
+             * @description Hard cutoff; must be >= due_date when both set.
+             */
+            deadline?: string;
         };
         /**
          * @description Field edits only. Status changes are rejected with 400 — lifecycle
@@ -4027,7 +4752,7 @@ export interface components {
             title?: string;
             description?: string | null;
             /** @enum {string} */
-            priority?: "low" | "medium" | "high" | "urgent";
+            priority?: "none" | "low" | "medium" | "high" | "urgent" | "critical";
             /** @description Team member id; empty string clears the assignment. */
             assignee_id?: string | null;
             /**
@@ -4039,6 +4764,7 @@ export interface components {
             /** Format: date */
             due_date?: string | null;
             label_ids?: string[];
+            deadline?: string | null;
         };
         Task: {
             /** Format: uuid */
@@ -4053,7 +4779,7 @@ export interface components {
             /** @enum {string} */
             status: "backlog" | "todo" | "in_progress" | "resolved" | "in_review" | "closed";
             /** @enum {string} */
-            priority: "low" | "medium" | "high" | "urgent";
+            priority: "none" | "low" | "medium" | "high" | "urgent" | "critical";
             assignee?: components["schemas"]["UserBrief"] | null;
             /** @description User responsible for accepting or rejecting the work. */
             reporter?: components["schemas"]["UserBrief"] | null;
@@ -4069,7 +4795,6 @@ export interface components {
             resolved_at?: number | null;
             /** Format: date */
             due_date?: string | null;
-            /** @description Manual ordering position within (project, status). Midpoint-computed. */
             position: number;
             /** @description epoch ms; set when the reporter accepts the task (status closed) */
             completed_at?: number | null;
@@ -4078,7 +4803,9 @@ export interface components {
             updated_at: number;
             /** @description Present in task detail responses (one nesting level). */
             subtasks?: components["schemas"]["Task"][];
-            /** @description Template provenance; absent for directly created tasks. */
+            /** @description Hard cutoff; app enforces deadline >= due_date. */
+            deadline?: string | null;
+            /** @description Template provenance. */
             from_template_id?: string | null;
         };
         PaginatedTasks: {
@@ -4186,20 +4913,18 @@ export interface components {
             default_title: string;
             default_description?: string | null;
             /** @enum {string} */
-            default_priority: "low" | "medium" | "high" | "urgent";
+            default_priority: "none" | "low" | "medium" | "high" | "urgent" | "critical";
             label_ids: string[];
             created_by?: components["schemas"]["UserBrief"] | null;
             created_at: number;
             updated_at: number;
-            /** @description Subtask titles applied when creating a task from this template. */
-            default_subtasks?: string[];
         };
         TemplateUpsert: {
             name: string;
             default_title: string;
             default_description?: string;
             /** @enum {string} */
-            default_priority?: "low" | "medium" | "high" | "urgent";
+            default_priority?: "none" | "low" | "medium" | "high" | "urgent" | "critical";
             label_ids?: string[];
         };
         ProjectGuest: {
@@ -4320,7 +5045,7 @@ export interface components {
             body: string;
             created_at: number;
             updated_at: number;
-            /** @description Parent comment id for replies (depth 2). Absent for top-level comments. */
+            /** @description Parent comment id for replies. */
             parent_comment_id?: string | null;
         };
         Activity: {
@@ -4334,6 +5059,106 @@ export interface components {
             new_value?: string | null;
             actor?: components["schemas"]["UserBrief"] | null;
             created_at: number;
+        };
+        Rule: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            team_id: string;
+            name: string;
+            description?: string | null;
+            /** @enum {string} */
+            trigger_type: "task_status_changed" | "task_priority_changed" | "task_assigned";
+            enabled: boolean;
+            current_version: number;
+            /** @description Typed condition DSL tree (see docs/rules-engine.md). */
+            condition: Record<string, never>;
+            /** @description 1-5 typed action objects in execution order. */
+            actions: Record<string, never>[];
+            /** Format: uuid */
+            created_by: string;
+            created_at: number;
+            updated_at: number;
+            archived_at?: number | null;
+        };
+        RuleUpsert: {
+            name: string;
+            description?: string;
+            /** @enum {string} */
+            trigger_type: "task_status_changed" | "task_priority_changed" | "task_assigned";
+            /** @description Typed condition DSL tree (strictly validated; unknown fields rejected). */
+            condition: Record<string, never>;
+            /** @description 1-5 typed actions (add_comment / send_notification / send_message). */
+            actions: Record<string, never>[];
+            /** @default false */
+            enabled: boolean;
+        };
+        RuleUpdate: {
+            name?: string;
+            description?: string | null;
+            /** @enum {string} */
+            trigger_type?: "task_status_changed" | "task_priority_changed" | "task_assigned";
+            condition?: Record<string, never>;
+            actions?: Record<string, never>[];
+            enabled?: boolean;
+            /** @description Optimistic concurrency guard (current_version seen by the caller). */
+            expected_version: number;
+        };
+        RuleVersion: {
+            version: number;
+            /** @enum {string} */
+            trigger_type: "task_status_changed" | "task_priority_changed" | "task_assigned";
+            condition: Record<string, never>;
+            actions: Record<string, never>[];
+            /** Format: uuid */
+            created_by: string;
+            created_at: number;
+        };
+        RulePage: {
+            items: components["schemas"]["Rule"][];
+            page: number;
+            page_size: number;
+            total: number;
+        };
+        RuleHistoryPage: {
+            items: components["schemas"]["RuleExecution"][];
+            page: number;
+            page_size: number;
+            total: number;
+        };
+        RuleExecution: {
+            /** Format: uuid */
+            id: string;
+            rule_version: number;
+            /** Format: uuid */
+            event_id: string;
+            /** @enum {string} */
+            event_type: "task_status_changed" | "task_priority_changed" | "task_assigned";
+            /** @enum {string} */
+            event_origin: "user" | "automation";
+            occurred_at?: number;
+            /** Format: uuid */
+            actor_id?: string | null;
+            /** @enum {string} */
+            trigger_type: "task_status_changed" | "task_priority_changed" | "task_assigned";
+            /** @enum {string} */
+            condition_result: "matched" | "not_matched";
+            /** @enum {string} */
+            status: "planned" | "completed" | "failed";
+            planned_actions?: string | null;
+            error_category?: string | null;
+            error_detail?: string | null;
+            created_at: number;
+            completed_at?: number | null;
+            /** @description Action-level outcomes recorded in the idempotency ledger. */
+            actions: {
+                /** @enum {string} */
+                action_type: "send_notification" | "add_comment" | "send_message";
+                /** @enum {string} */
+                outcome: "completed" | "skipped";
+                outbox_status: string;
+                detail?: string | null;
+            }[];
         };
         /** @description Per-event notification toggles. Unset storage resolves to all-enabled. */
         NotificationPrefs: {
@@ -4480,7 +5305,7 @@ export interface components {
             title?: string;
             default_description?: string;
             /** @enum {string} */
-            priority?: "low" | "medium" | "high" | "urgent";
+            priority?: "none" | "low" | "medium" | "high" | "urgent" | "critical";
             /** Format: uuid */
             assignee_id?: string;
             /** Format: date */
@@ -4496,6 +5321,93 @@ export interface components {
         };
         /** @description The created task (Task shape) with from_template_id provenance. */
         FromTemplateTask: components["schemas"]["Task"];
+        ChecklistItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            task_id: string;
+            title: string;
+            is_checked: boolean;
+            position: number;
+            created_at: number;
+            updated_at: number;
+        };
+        ChecklistItemList: {
+            items: components["schemas"]["ChecklistItem"][];
+        };
+        CreateChecklistItemRequest: {
+            title: string;
+            position?: number;
+        };
+        UpdateChecklistItemRequest: {
+            title?: string;
+            is_checked?: boolean;
+        };
+        TaskProgress: {
+            subtasks_total: number;
+            subtasks_closed: number;
+            checklist_total: number;
+            checklist_checked: number;
+            /** @description 0-100; null when nothing to track. */
+            progress_pct?: number | null;
+        };
+        DashboardKpis: {
+            /** @description Tasks closed in the window. */
+            throughput: number;
+            /** @description Tasks closed in the previous window. */
+            throughput_prev: number;
+            /** @description Avg days from first in_progress to close (null when no matches). */
+            cycle_time_days: number | null;
+            /** @description Avg days from creation to close (null when no matches). */
+            lead_time_days: number | null;
+            /** @description Open tasks currently in_progress or in_review. */
+            wip: number;
+            /** @description Open tasks past their due date. */
+            overdue: number;
+            /** @description Open tasks with a deadline within the next 7 days. */
+            deadline_risk: number;
+            /** @description Tasks currently in review. */
+            review_load: number;
+            /** @description Open task count per priority level. */
+            priority_mix: {
+                [key: string]: number;
+            };
+            /** @description Team-wide assigned-open / capacity, clamped to 2.0; null when no member sets capacity. */
+            capacity_utilization?: number | null;
+        };
+        DashboardReviewRow: {
+            /** Format: uuid */
+            reporter_id: string;
+            display_name: string;
+            count: number;
+        };
+        DashboardResponse: {
+            /** @enum {integer} */
+            window_days: 7 | 30 | 90;
+            kpis: components["schemas"]["DashboardKpis"];
+            review_by_reporter: components["schemas"]["DashboardReviewRow"][];
+        };
+        /** @description Label fields to change. Absent fields are untouched. */
+        UpdateLabelRequest: {
+            name?: string;
+            color?: string;
+            icon?: string | null;
+        };
+        Attachment: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            task_id: string;
+            filename: string;
+            mime_type: string;
+            /** @description Stored byte size. */
+            size_bytes: number;
+            uploaded_by?: components["schemas"]["UserBrief"] | null;
+            created_at: number;
+        };
+        AttachmentList: {
+            items: components["schemas"]["Attachment"][];
+        };
     };
     responses: {
         /** @description Authentication required. */
@@ -4575,11 +5487,13 @@ export interface components {
         TeamId: string;
         ProjectId: string;
         TaskId: string;
+        RuleId: string;
         TemplateId: string;
         GoalId: string;
         KeyResultId: string;
         CommentId: string;
         UserId: string;
+        SessionId: string;
         Page: number;
         PageSize: number;
         Sort: "created_at" | "updated_at" | "due_date" | "priority" | "title";
@@ -4588,7 +5502,6 @@ export interface components {
         TaskStatusFilter: string;
         /** @description Comma-separated priority values. */
         TaskPriorityFilter: string;
-        SessionId: string;
     };
     requestBodies: never;
     headers: never;

@@ -246,6 +246,10 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
         "0012_comment_threads_templates",
         include_str!("../migrations/postgres/0012_comment_threads_templates.sql"),
     ),
+    (
+        "0014_phase12_expansion",
+        include_str!("../migrations/postgres/0014_phase12_expansion.sql"),
+    ),
 ];
 const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -296,6 +300,10 @@ const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
         "0012_comment_threads_templates",
         include_str!("../migrations/mysql/0012_comment_threads_templates.sql"),
     ),
+    (
+        "0014_phase12_expansion",
+        include_str!("../migrations/mysql/0014_phase12_expansion.sql"),
+    ),
 ];
 const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -341,6 +349,10 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
         "0012_comment_threads_templates",
         include_str!("../migrations/sqlite/0012_comment_threads_templates.sql"),
+    ),
+    (
+        "0014_phase12_expansion",
+        include_str!("../migrations/sqlite/0014_phase12_expansion.sql"),
     ),
 ];
 
@@ -884,6 +896,17 @@ mod tests {
             static_dir: None,
             log_format_json: false,
             rules_worker: crate::config::RulesWorkerConfig::default(),
+            attachments: crate::config::AttachmentsConfig {
+                mode: crate::config::AttachmentsMode::Disabled,
+                local_dir: "data/attachments".into(),
+                max_bytes: 25 * 1024 * 1024,
+                max_per_task: 50,
+                s3_endpoint: None,
+                s3_bucket: None,
+                s3_access_key: None,
+                s3_secret_key: None,
+                s3_region: "us-east-1".into(),
+            },
         };
         let pool = Database::connect(&config).await.unwrap().pool;
         let mut conn = pool.acquire().await.unwrap();
@@ -898,7 +921,7 @@ mod tests {
         .await
         .unwrap();
         let migrations = migrations_for(Driver::Sqlite);
-        assert_eq!(migrations.len(), 11, "expected migrations 0001..0012");
+        assert_eq!(migrations.len(), 12, "expected migrations 0001..0014");
         // Build the PRE-0005 schema: 0001..0004 only.
         for (version, sql) in &migrations[..4] {
             for statement in split_statements(sql) {

@@ -36,6 +36,13 @@ export const THEMES: ThemeDefinition[] = [
   { id: "solarized-dark", label: "Solarized Dark", appearance: "dark", swatch: ["#002b36", "#1d76ae", "#073642"] },
   { id: "rose-pine", label: "Rosé Pine", appearance: "dark", swatch: ["#191724", "#ebbcba", "#f6c177"] },
   { id: "catppuccin-mocha", label: "Catppuccin Mocha", appearance: "dark", swatch: ["#1e1e2e", "#cba6f7", "#f5c2e7"] },
+  { id: "github-dark", label: "GitHub Dark", appearance: "dark", swatch: ["#0d1117", "#238636", "#30363d"] },
+  { id: "github-light", label: "GitHub Light", appearance: "light", swatch: ["#ffffff", "#1f883d", "#d0d7de"] },
+  { id: "one-dark", label: "One Dark", appearance: "dark", swatch: ["#282c34", "#61afef", "#3e4451"] },
+  { id: "gruvbox-dark", label: "Gruvbox Dark", appearance: "dark", swatch: ["#282828", "#fabd2f", "#3c3836"] },
+  { id: "gruvbox-light", label: "Gruvbox Light", appearance: "light", swatch: ["#fbf1c7", "#b57614", "#ebdbb2"] },
+  { id: "tokyo-night", label: "Tokyo Night", appearance: "dark", swatch: ["#1a1b26", "#7aa2f7", "#24283b"] },
+  { id: "kanagawa", label: "Kanagawa", appearance: "dark", swatch: ["#1f1f28", "#7e9cd8", "#2a2a3a"] },
 ];
 
 const THEME_BY_ID = new Map(THEMES.map((t) => [t.id, t]));

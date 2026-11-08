@@ -1026,6 +1026,17 @@ mod tests {
             static_dir: None,
             log_format_json: false,
             rules_worker: crate::config::RulesWorkerConfig::default(),
+            attachments: crate::config::AttachmentsConfig {
+                mode: crate::config::AttachmentsMode::Disabled,
+                local_dir: "data/attachments".into(),
+                max_bytes: 25 * 1024 * 1024,
+                max_per_task: 50,
+                s3_endpoint: None,
+                s3_bucket: None,
+                s3_access_key: None,
+                s3_secret_key: None,
+                s3_region: "us-east-1".into(),
+            },
         };
         let state = AppState::new(
             crate::db::Database::connect(&config).await.expect("db"),

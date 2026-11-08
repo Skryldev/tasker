@@ -39,6 +39,11 @@ export type TeamGuest = components["schemas"]["TeamGuest"];
 export type CapacityResponse = components["schemas"]["CapacityResponse"];
 export type CapacityMember = components["schemas"]["CapacityMember"];
 export type TrashProject = components["schemas"]["TrashProject"];
+export type ChecklistItem = components["schemas"]["ChecklistItem"];
+export type TaskProgress = components["schemas"]["TaskProgress"];
+export type Attachment = components["schemas"]["Attachment"];
+export type DashboardResponse = components["schemas"]["DashboardResponse"];
+export type DashboardWindow = "7d" | "30d" | "90d";
 
 /** RFC 9457 problem details, as returned by every non-2xx response. */
 export interface Problem {
@@ -88,6 +93,24 @@ async function request(
     credentials: "same-origin",
   });
   if (response.status === 204) return undefined;
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!response.ok) {
+    const problem = contentType.includes("json")
+      ? ((await response.json()) as Problem)
+      : { status: response.status, title: response.statusText };
+    throw new ApiError(response.status, problem);
+  }
+  if (contentType.includes("json")) return (await response.json()) as unknown;
+  return undefined;
+}
+
+/** Multipart upload path (attachments). Errors use the same Problem shape. */
+async function requestForm(path: string, form: FormData): Promise<unknown> {
+  const response = await fetch(BASE + path, {
+    method: "POST",
+    body: form,
+    credentials: "same-origin",
+  });
   const contentType = response.headers.get("content-type") ?? "";
   if (!response.ok) {
     const problem = contentType.includes("json")
@@ -251,10 +274,20 @@ export const api = {
       items: Label[];
     }>;
   },
-  createLabel(teamId: string, name: string, color?: string): Promise<Label> {
+  createLabel(teamId: string, name: string, color?: string, icon?: string): Promise<Label> {
     return request("post", "/teams/{team_id}/labels".replace("{team_id}", teamId), {
-      body: { name, color },
+      body: { name, color, icon },
     }) as Promise<Label>;
+  },
+  updateLabel(
+    teamId: string,
+    labelId: string,
+    body: { name?: string; color?: string; icon?: string | null },
+  ): Promise<Label> {
+    return request("patch", `/teams/${teamId}/labels/${labelId}`, { body }) as Promise<Label>;
+  },
+  deleteLabel(teamId: string, labelId: string): Promise<void> {
+    return request("delete", `/teams/${teamId}/labels/${labelId}`) as Promise<void>;
   },
 
   // projects -------------------------------------------------------------
@@ -571,6 +604,56 @@ export const api = {
     return request("patch", `/tasks/${taskId}/position`, {
       body: { before_task_id: beforeTaskId || undefined },
     }) as Promise<void>;
+  },
+
+  // checklists (Phase 12 WS4) -------------------------------------------
+  listChecklist(taskId: string): Promise<{ items: ChecklistItem[] }> {
+    return request("get", `/tasks/${taskId}/checklist`) as Promise<{
+      items: ChecklistItem[];
+    }>;
+  },
+  createChecklistItem(taskId: string, title: string): Promise<ChecklistItem> {
+    return request("post", `/tasks/${taskId}/checklist`, {
+      body: { title },
+    }) as Promise<ChecklistItem>;
+  },
+  updateChecklistItem(
+    itemId: string,
+    body: { title?: string; is_checked?: boolean },
+  ): Promise<ChecklistItem> {
+    return request("patch", `/checklist/${itemId}`, { body }) as Promise<ChecklistItem>;
+  },
+  deleteChecklistItem(itemId: string): Promise<void> {
+    return request("delete", `/checklist/${itemId}`) as Promise<void>;
+  },
+  taskProgress(taskId: string): Promise<TaskProgress> {
+    return request("get", `/tasks/${taskId}/progress`) as Promise<TaskProgress>;
+  },
+
+  // attachments (Phase 12 WS11) ------------------------------------------
+  listAttachments(taskId: string): Promise<{ items: Attachment[] }> {
+    return request("get", `/tasks/${taskId}/attachments`) as Promise<{
+      items: Attachment[];
+    }>;
+  },
+  uploadAttachment(taskId: string, file: File): Promise<Attachment> {
+    const form = new FormData();
+    form.append("file", file);
+    return requestForm(`/tasks/${taskId}/attachments`, form) as Promise<Attachment>;
+  },
+  /** Direct browser navigation link (cookie-authenticated download). */
+  attachmentUrl(attachmentId: string): string {
+    return `${BASE}/attachments/${attachmentId}`;
+  },
+  deleteAttachment(attachmentId: string): Promise<void> {
+    return request("delete", `/attachments/${attachmentId}`) as Promise<void>;
+  },
+
+  // team dashboard (Phase 12 WS14) ----------------------------------------
+  teamDashboard(teamId: string, window: DashboardWindow = "7d"): Promise<DashboardResponse> {
+    return request("get", `/teams/${teamId}/dashboard`, { query: { window } }) as Promise<
+      DashboardResponse
+    >;
   },
   createTaskFromTemplate(
     templateId: string,

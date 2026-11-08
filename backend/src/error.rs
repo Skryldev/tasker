@@ -48,6 +48,15 @@ pub enum AppError {
     Internal(String),
 }
 
+impl From<crate::rules::RuleError> for AppError {
+    fn from(err: crate::rules::RuleError) -> Self {
+        // Rule validation failures are client-input problems: surfaced as
+        // 422 with the field-error extension, consistent with other
+        // validation paths.
+        Self::Validation(err.0)
+    }
+}
+
 impl From<sqlx::Error> for AppError {
     fn from(err: sqlx::Error) -> Self {
         tracing::error!(error = %err, "database error");

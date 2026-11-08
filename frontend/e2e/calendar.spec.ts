@@ -107,7 +107,13 @@ test.describe.serial("Phase 6 Persian calendar", () => {
     await expect(
       page.getByTestId("task-table").getByTitle("Due ۱۴۰۵/۰۸/۱۵"),
     ).toBeVisible();
-    await page.getByTestId("task-table").getByRole("row").nth(1).click();
+    // Phase 12 (WS8): rows group by status; click the task's row, not a
+    // fixed index (group header rows now occupy the first body rows).
+    await page
+      .getByTestId("task-table")
+      .getByRole("row")
+      .filter({ hasText: "Calendar task" })
+      .click();
     await expect(page.getByTestId("task-detail")).toContainText("۱۴۰۵/۰۸/۱۵");
   });
 });

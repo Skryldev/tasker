@@ -80,6 +80,99 @@ pub struct Config {
     pub log_format_json: bool,
     /// Rules Engine outbox dispatcher (Phase 8A, Task 5).
     pub rules_worker: RulesWorkerConfig,
+    /// File attachment storage (Phase 12 WS11).
+    pub attachments: AttachmentsConfig,
+}
+
+/// Attachment storage mode (Phase 12 WS11).
+///
+/// - `Disabled` (default): upload/download endpoints fail closed with a clear
+///   message; deployments opt in explicitly.
+/// - `Local`: bytes stored under `local_dir` on the server filesystem.
+/// - `S3`: MinIO/S3-compatible object storage. Configuration is validated at
+///   boot; the driver itself is not implemented in this build and every
+///   storage operation fails fast with an explicit "not available" error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachmentsMode {
+    Disabled,
+    Local,
+    S3,
+}
+
+/// Attachment storage settings (Phase 12 WS11).
+#[derive(Debug, Clone)]
+pub struct AttachmentsConfig {
+    pub mode: AttachmentsMode,
+    /// Root directory for `local` mode (created lazily on first upload).
+    pub local_dir: String,
+    /// Maximum accepted upload size in bytes (per file).
+    pub max_bytes: usize,
+    /// Maximum number of attachments per task.
+    pub max_per_task: u32,
+    // S3/MinIO settings — required when `mode == S3`.
+    pub s3_endpoint: Option<String>,
+    pub s3_bucket: Option<String>,
+    pub s3_access_key: Option<String>,
+    pub s3_secret_key: Option<String>,
+    pub s3_region: String,
+}
+
+impl AttachmentsConfig {
+    fn from_env() -> Result<Self, ConfigError> {
+        let mode = match env_or("TASKER_ATTACHMENTS", "disabled".to_string())?
+            .to_lowercase()
+            .as_str()
+        {
+            "disabled" => AttachmentsMode::Disabled,
+            "local" => AttachmentsMode::Local,
+            "s3" => AttachmentsMode::S3,
+            other => {
+                return Err(ConfigError(format!(
+                    "TASKER_ATTACHMENTS must be `disabled`, `local` or `s3`, got `{other}`"
+                )));
+            }
+        };
+        let max_mb: usize = env_parsed("TASKER_ATTACHMENTS_MAX_MB", 25usize)?;
+        let max_per_task: u32 = env_parsed("TASKER_ATTACHMENTS_MAX_PER_TASK", 50u32)?;
+        let config = Self {
+            mode,
+            local_dir: env_or("TASKER_ATTACHMENTS_DIR", "data/attachments".to_string())?,
+            max_bytes: max_mb.saturating_mul(1024 * 1024).max(1),
+            max_per_task: max_per_task.clamp(1, 1000),
+            s3_endpoint: env::var(format!("{ENV_PREFIX}S3_ENDPOINT"))
+                .ok()
+                .filter(|s| !s.is_empty()),
+            s3_bucket: env::var(format!("{ENV_PREFIX}S3_BUCKET"))
+                .ok()
+                .filter(|s| !s.is_empty()),
+            s3_access_key: env::var(format!("{ENV_PREFIX}S3_ACCESS_KEY"))
+                .ok()
+                .filter(|s| !s.is_empty()),
+            s3_secret_key: env::var(format!("{ENV_PREFIX}S3_SECRET_KEY"))
+                .ok()
+                .filter(|s| !s.is_empty()),
+            s3_region: env_or("TASKER_S3_REGION", "us-east-1".to_string())?,
+        };
+        if config.mode == AttachmentsMode::S3 {
+            let missing = [
+                ("TASKER_S3_ENDPOINT", &config.s3_endpoint),
+                ("TASKER_S3_BUCKET", &config.s3_bucket),
+                ("TASKER_S3_ACCESS_KEY", &config.s3_access_key),
+                ("TASKER_S3_SECRET_KEY", &config.s3_secret_key),
+            ]
+            .into_iter()
+            .filter(|(_, v)| v.is_none())
+            .map(|(k, _)| k)
+            .collect::<Vec<_>>()
+            .join(", ");
+            if !missing.is_empty() {
+                return Err(ConfigError(format!(
+                    "TASKER_ATTACHMENTS=s3 requires these settings: {missing}"
+                )));
+            }
+        }
+        Ok(config)
+    }
 }
 
 /// Outbox dispatcher operational parameters. Defaults follow the Task 5
@@ -217,6 +310,8 @@ impl Config {
             backoff_max_ms: env_parsed("TASKER_RULES_WORKER_BACKOFF_MAX_MS", 60_000u64)?.max(1),
         };
 
+        let attachments = AttachmentsConfig::from_env()?;
+
         Ok(Self {
             environment,
             http_host: env_or("TASKER_HTTP_HOST", "0.0.0.0".to_string())?,
@@ -239,6 +334,7 @@ impl Config {
             static_dir,
             log_format_json,
             rules_worker,
+            attachments,
         })
     }
 

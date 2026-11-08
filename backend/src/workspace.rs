@@ -1137,6 +1137,9 @@ pub struct FromTemplateRequest {
     pub assignee_id: Option<String>,
     #[serde(default)]
     pub due_date: Option<String>,
+    /// Overrides the template deadline (must be >= due_date when both set).
+    #[serde(default)]
+    pub deadline: Option<String>,
     /// Overrides the creation status (backlog/todo/in_progress only).
     #[serde(default)]
     pub status: Option<String>,
@@ -1179,6 +1182,7 @@ async fn create_task_from_template(
         assignee_id: overrides.assignee_id.clone(),
         reporter_id: None,
         due_date: overrides.due_date.clone(),
+        deadline: overrides.deadline.clone(),
         parent_task_id: None,
         label_ids: template.label_ids.clone(),
     };
@@ -1218,6 +1222,7 @@ async fn create_task_from_template(
                 assignee_id: overrides.assignee_id.clone(),
                 reporter_id: None,
                 due_date: None,
+                deadline: None,
                 parent_task_id: Some(task.id.clone()),
                 label_ids: Vec::new(),
             },

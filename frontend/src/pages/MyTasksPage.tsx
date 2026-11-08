@@ -23,6 +23,7 @@ const TaskDetailPanel = lazy(() =>
   import("@/components/app/TaskDetailPanel").then((m) => ({ default: m.TaskDetailPanel })),
 );
 import { TaskTable } from "@/components/app/TaskTable";
+import { DetailSidebar } from "@/components/app/DetailSidebar";
 import { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES, STATUS_LABELS } from "@/lib/utils";
 
 export function MyTasksPage() {
@@ -239,7 +240,7 @@ export function MyTasksPage() {
       </div>
 
       {selectedTaskId ? (
-        <aside className="hidden w-[480px] shrink-0 border-l lg:block">
+        <DetailSidebar>
           {detail.isLoading ? (
             <div className="flex h-full flex-col gap-3 p-4" aria-busy="true" data-testid="task-detail-loading">
               <Skeleton className="h-6 w-3/4" />
@@ -261,7 +262,7 @@ export function MyTasksPage() {
               <TaskDetailPanel task={detail.data} onClose={() => setSelectedTaskId(null)} />
             </Suspense>
           )}
-        </aside>
+        </DetailSidebar>
       ) : null}
     </div>
   );

@@ -27,7 +27,7 @@ const USER_COLUMNS: &str =
 /// The default and bounds for the per-user capacity limit.
 pub const CAPACITY_DEFAULT: i64 = 10;
 pub const CAPACITY_MIN: i64 = 1;
-pub const CAPACITY_MAX: i64 = 100;
+pub const CAPACITY_MAX: i64 = 1000;
 
 /// Clamp a requested capacity limit into the allowed range.
 #[must_use]

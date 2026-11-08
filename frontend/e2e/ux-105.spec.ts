@@ -103,6 +103,8 @@ test("keyboard shortcuts: C, /, G+T, ?", async ({ page }) => {
   // "G then T" navigates to My Tasks from anywhere (workspace defaults the
   // team once the shell mounts).
   await page.goto("/account");
+  // Wait for the shell (and its key listener) to mount before the sequence.
+  await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
   await page.keyboard.press("g");
   await page.keyboard.press("t");
   await expect(page).toHaveURL(/\/$|\/\?team=/);

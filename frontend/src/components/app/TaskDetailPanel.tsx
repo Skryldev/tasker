@@ -1,12 +1,15 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
   Check,
   ChevronDown,
+  Flag,
   History,
   Link2,
+  Lock,
   MessageSquare,
   MoreHorizontal,
+  Paperclip,
   Pencil,
   Plus,
   Stamp,
@@ -19,14 +22,22 @@ import { useTemplates } from "@/api/hooks";
 import { cn, PRIORITY_LABELS, PRIORITIES, type Priority } from "@/lib/utils";
 import {
   useActivity,
+  useAttachments,
+  useChecklist,
   useComments,
+  useCreateChecklistItem,
   useCreateComment,
+  useDeleteAttachment,
+  useDeleteChecklistItem,
   useDeleteComment,
   useDeleteTask,
   useLabels,
   useMembers,
+  useTaskProgress,
+  useUpdateChecklistItem,
   useUpdateComment,
   useUpdateTask,
+  useUploadAttachment,
   useUserInfo,
 } from "@/api/hooks";
 import { Avatar, Separator } from "@/components/ui/avatar";
@@ -40,7 +51,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { StatusBadge } from "./TaskBadges";
+import { LabelIcon, StatusBadge } from "./TaskBadges";
 // Phase 10: the edit dialog pulls the Doran calendar stack; it is loaded on
 // first open so the eager task views do not carry it.
 const TaskDialog = lazy(() => import("./TaskDialog").then((m) => ({ default: m.TaskDialog })));
@@ -99,6 +110,9 @@ export function TaskDetailPanel({
   const [deleteReplies, setDeleteReplies] = useState<{ id: string; count: number } | null>(null);
   const { push } = useToast();
   const qc = useQueryClient();
+  // Phase 12 WS10: closed tasks are immutable; the panel switches to a
+  // read-only presentation (no field chips edits, no editor, no composer).
+  const isClosed = task?.status === "closed";
 
   const taskId = task?.id;
   const comments = useComments(taskId);
@@ -108,6 +122,16 @@ export function TaskDetailPanel({
   const deleteComment = useDeleteComment(taskId ?? "");
   const deleteTask = useDeleteTask();
   const updateTask = useUpdateTask();
+  // Phase 12 WS4/WS11: checklist, progress, and attachments ride along with
+  // the panel; every mutation invalidates its own slice.
+  const checklist = useChecklist(taskId);
+  const progress = useTaskProgress(taskId);
+  const attachments = useAttachments(taskId);
+  const createItem = useCreateChecklistItem(taskId ?? "");
+  const updateItem = useUpdateChecklistItem(taskId ?? "");
+  const deleteItem = useDeleteChecklistItem(taskId ?? "");
+  const uploadAttachment = useUploadAttachment(taskId ?? "");
+  const deleteAttachment = useDeleteAttachment(taskId ?? "");
 
   // Hover-card identities (username/bio) for every avatar in the panel,
   // resolved with one batched request.
@@ -180,8 +204,16 @@ export function TaskDetailPanel({
       <header className="shrink-0 border-b p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="font-mono text-2xs text-muted-foreground">
+            <p className="flex items-center gap-1.5 font-mono text-2xs text-muted-foreground">
               Task · {task.id.slice(0, 8)}
+              {isClosed ? (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full border border-muted-foreground/30 bg-muted px-1.5 py-0.5 font-sans text-2xs font-medium"
+                  data-testid="task-locked"
+                >
+                  <Lock className="h-2.5 w-2.5" aria-hidden /> Locked
+                </span>
+              ) : null}
             </p>
             <h2 className="mt-0.5 line-clamp-3 text-lg font-semibold leading-snug">
               {task.title}
@@ -194,9 +226,11 @@ export function TaskDetailPanel({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuItem onSelect={() => setEditOpen(true)} data-testid="edit-task">
-                <Pencil /> Edit fields…
-              </DropdownMenuItem>
+              {isClosed ? null : (
+                <DropdownMenuItem onSelect={() => setEditOpen(true)} data-testid="edit-task">
+                  <Pencil /> Edit fields…
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onSelect={copyLink} data-testid="copy-link">
                 <Link2 /> Copy link
               </DropdownMenuItem>
@@ -214,7 +248,7 @@ export function TaskDetailPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin p-4">
-        <MetadataBand task={task} onChange={(body, label) => updateTask.mutate(
+        <MetadataBand task={task} readOnly={isClosed} onChange={(body, label) => updateTask.mutate(
           { taskId: task.id, body },
           {
             onSuccess: (updated) => {
@@ -238,6 +272,7 @@ export function TaskDetailPanel({
 
         <DescriptionBlock
           value={task.description ?? ""}
+          readOnly={isClosed}
           onCommit={(description) => updateTask.mutate(
             { taskId: task.id, body: { description } },
             {
@@ -299,27 +334,69 @@ export function TaskDetailPanel({
 
         <DependenciesPanel task={task} />
 
+        <ChecklistSection
+          readOnly={isClosed}
+          checklist={checklist}
+          progress={progress.data}
+          onCreate={(title) => createItem.mutate(title, {
+            onError: (error) =>
+              push("error", "Could not add checklist item", error instanceof Error ? error.message : undefined),
+          })}
+          onToggle={(itemId, checked) => updateItem.mutate({ itemId, body: { is_checked: checked } }, {
+            onError: (error) =>
+              push("error", "Could not update checklist item", error instanceof Error ? error.message : undefined),
+          })}
+          onDelete={(itemId) => deleteItem.mutate(itemId, {
+            onError: (error) =>
+              push("error", "Could not delete checklist item", error instanceof Error ? error.message : undefined),
+          })}
+        />
+
+        <AttachmentsSection
+          readOnly={isClosed}
+          attachments={attachments}
+          onUpload={(file) => uploadAttachment.mutate(file, {
+            onSuccess: () => push("success", "File attached"),
+            onError: (error: unknown) =>
+              push("error", "Could not upload file", error instanceof Error ? error.message : undefined),
+          })}
+          onDelete={(attachmentId) => deleteAttachment.mutate(attachmentId, {
+            onError: (error) =>
+              push("error", "Could not delete attachment", error instanceof Error ? error.message : undefined),
+          })}
+        />
+
         <Separator className="my-5" />
 
         <section aria-label="Comments" className="mt-1">
           <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
             <MessageSquare className="h-3.5 w-3.5" /> Comments ({comments.data?.total ?? 0})
           </h3>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void submitComment();
-            }}
-            className="mb-4"
-          >
-            <CommentComposer
-              teamId={task.team_id}
-              value={commentDraft}
-              onChange={setCommentDraft}
-              onSubmit={() => void submitComment()}
-              pending={createComment.isPending}
-            />
-          </form>
+          {isClosed ? (
+            <p
+              className="mb-4 flex items-center gap-1.5 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+              data-testid="comments-locked"
+            >
+              <Lock className="h-3 w-3" aria-hidden />
+              This task is closed; commenting is disabled.
+            </p>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void submitComment();
+              }}
+              className="mb-4"
+            >
+              <CommentComposer
+                teamId={task.team_id}
+                value={commentDraft}
+                onChange={setCommentDraft}
+                onSubmit={() => void submitComment()}
+                pending={createComment.isPending}
+              />
+            </form>
+          )}
           <div className="flex flex-col" data-testid="comment-threads">
             {comments.isLoading ? (
               <>
@@ -464,18 +541,24 @@ function TaskDialogResolver({
 
 function MetadataBand({
   task,
+  readOnly,
   onChange,
 }: {
   task: Task;
+  /** WS10: closed tasks render chips as static text, no editors. */
+  readOnly: boolean;
   onChange: (body: Record<string, unknown>, label: string) => void;
 }) {
   const members = useMembers(task.team_id);
   const labels = useLabels(task.team_id);
   const [dueEditing, setDueEditing] = useState(false);
+  const [deadlineEditing, setDeadlineEditing] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
 
   const chipClass =
     "inline-flex max-w-[14rem] items-center gap-1.5 rounded-full border px-2 py-1 text-2xs transition-colors duration-100 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  const staticChipClass =
+    "inline-flex max-w-[14rem] items-center gap-1.5 rounded-full border px-2 py-1 text-2xs";
 
   const selectedLabelIds = new Set(task.labels.map((l) => l.id));
   const toggleLabel = (id: string) => {
@@ -485,9 +568,34 @@ function MetadataBand({
     onChange({ label_ids: next }, "Labels updated");
   };
 
+  // WS3: the deadline chip is red-tinted and flags the hard cutoff; when the
+  // deadline has passed it turns fully destructive.
+  const today = new Date().toISOString().slice(0, 10);
+  const deadlinePassed =
+    Boolean(task.deadline && task.due_date && task.deadline < task.due_date) ||
+    Boolean(task.deadline && task.deadline < today);
+  const deadlineChipClass = cn(
+    readOnly ? staticChipClass : chipClass,
+    task.deadline &&
+      "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15",
+    deadlinePassed && "border-destructive/60 bg-destructive/20",
+  );
+
   return (
     <div className="flex flex-wrap items-center gap-1.5" data-testid="task-metadata">
       {/* Reporter */}
+      {readOnly ? (
+        <span className={staticChipClass} data-testid="chip-reporter">
+          {task.reporter ? (
+            <>
+              <Avatar name={task.reporter.display_name} size="xs" />
+              <span className="truncate">{task.reporter.display_name}</span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">No reporter</span>
+          )}
+        </span>
+      ) : (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button type="button" className={chipClass} data-testid="chip-reporter">
@@ -518,8 +626,21 @@ function MetadataBand({
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+      )}
 
       {/* Assignee */}
+      {readOnly ? (
+        <span className={staticChipClass} data-testid="chip-assignee">
+          {task.assignee ? (
+            <>
+              <Avatar name={task.assignee.display_name} size="xs" />
+              <span className="truncate">{task.assignee.display_name}</span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">Unassigned</span>
+          )}
+        </span>
+      ) : (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button type="button" className={chipClass} data-testid="chip-assignee">
@@ -558,8 +679,15 @@ function MetadataBand({
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+      )}
 
       {/* Priority */}
+      {readOnly ? (
+        <span className={staticChipClass} data-testid="chip-priority">
+          <PriorityBars priority={task.priority} />
+          {PRIORITY_LABELS[task.priority as Priority] ?? task.priority}
+        </span>
+      ) : (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button type="button" className={chipClass} data-testid="chip-priority">
@@ -582,9 +710,17 @@ function MetadataBand({
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+      )}
 
       {/* Due date: chip swaps to an inline Doran picker. */}
-      {dueEditing ? (
+      {readOnly ? (
+        task.due_date ? (
+          <span className={staticChipClass}>
+            <CalendarDays className="h-3 w-3 text-muted-foreground" aria-hidden />
+            {formatJalaliDate(task.due_date)}
+          </span>
+        ) : null
+      ) : dueEditing ? (
         <span className="inline-flex items-center gap-1">
           <Suspense fallback={<Skeleton className="h-8 w-36" />}>
             <DateField
@@ -619,13 +755,78 @@ function MetadataBand({
         </button>
       )}
 
+      {/* Deadline (WS3): hard cutoff, red-tinted; editable like the due date. */}
+      {task.deadline || !readOnly ? (
+        readOnly ? (
+          task.deadline ? (
+            <span className={deadlineChipClass} data-testid="chip-deadline">
+              <Flag className="h-3 w-3" aria-hidden />
+              {formatJalaliDate(task.deadline)}
+            </span>
+          ) : null
+        ) : deadlineEditing ? (
+          <span className="inline-flex items-center gap-1">
+            <Suspense fallback={<Skeleton className="h-8 w-36" />}>
+              <DateField
+                id="chip-deadline-edit"
+                value={task.deadline}
+                onChange={(value) => {
+                  onChange({ deadline: value || null }, value ? "Deadline updated" : "Deadline cleared");
+                  setDeadlineEditing(false);
+                }}
+                ariaLabel="Edit deadline"
+              />
+            </Suspense>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Cancel deadline edit"
+              onClick={() => setDeadlineEditing(false)}
+            >
+              <X />
+            </Button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            className={deadlineChipClass}
+            onClick={() => setDeadlineEditing(true)}
+            title={task.deadline ? `Deadline ${formatJalaliDate(task.deadline)}` : "Set a deadline"}
+            data-testid="chip-deadline"
+          >
+            <Flag className="h-3 w-3" aria-hidden />
+            {task.deadline ? formatJalaliDate(task.deadline) : <span>Deadline</span>}
+          </button>
+        )
+      ) : null}
+
       {/* Labels: toggle membership from the team label set. */}
+      {readOnly ? (
+        task.labels.length > 0 ? (
+          <span className="inline-flex items-center gap-1">
+            {task.labels.map((l) => (
+              <span
+                key={l.id}
+                className={staticChipClass}
+                style={{ backgroundColor: `${l.color}1f`, borderColor: `${l.color}55` }}
+              >
+                {l.icon ? <LabelIcon icon={l.icon} /> : <span className="h-2 w-2 rounded-full" style={{ backgroundColor: l.color }} aria-hidden />}
+                {l.name}
+              </span>
+            ))}
+          </span>
+        ) : null
+      ) : (
       <DropdownMenu open={labelsOpen} onOpenChange={setLabelsOpen}>
         <DropdownMenuTrigger asChild>
           <button type="button" className={chipClass} data-testid="chip-labels">
             {task.labels.length > 0 ? (
               <>
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: task.labels[0]?.color }} aria-hidden />
+                {task.labels[0]?.icon ? (
+                  <LabelIcon icon={task.labels[0].icon} />
+                ) : (
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: task.labels[0]?.color }} aria-hidden />
+                )}
                 <span className="truncate">
                   {task.labels[0]?.name}
                   {task.labels.length > 1 ? ` +${task.labels.length - 1}` : ""}
@@ -655,22 +856,28 @@ function MetadataBand({
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+      )}
     </div>
   );
 }
 
 function PriorityBars({ priority }: { priority: string }) {
-  const level: Record<string, number> = { low: 1, medium: 2, high: 3, urgent: 3 };
+  const level: Record<string, number> = { none: 0, low: 1, medium: 2, high: 3, urgent: 3, critical: 3 };
   const color: Record<string, string> = {
+    none: "text-muted-foreground",
     low: "text-priority-low",
     medium: "text-priority-medium",
     high: "text-priority-high",
     urgent: "text-priority-urgent",
+    critical: "text-priority-urgent",
   };
   const filled = level[priority] ?? 1;
   const tone = color[priority] ?? "text-muted-foreground";
   return (
-    <span className="flex items-end gap-px" aria-hidden>
+    <span
+      className={cn("flex items-end gap-px", priority === "critical" && "animate-pulse")}
+      aria-hidden
+    >
       {[3, 5, 7].map((h, i) => (
         <span
           key={h}
@@ -697,9 +904,11 @@ function PriorityBadgeInline({ priority, className }: { priority: string; classN
 
 function DescriptionBlock({
   value,
+  readOnly,
   onCommit,
 }: {
   value: string;
+  readOnly: boolean;
   onCommit: (description: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -729,6 +938,19 @@ function DescriptionBlock({
           autoFocus
           testId="description-markdown"
         />
+      </div>
+    );
+  }
+
+  // WS10: closed tasks render the description as plain text.
+  if (readOnly) {
+    return (
+      <div className="mt-3" data-testid="task-description">
+        {value ? (
+          <div className="px-2 py-1.5 text-sm leading-relaxed text-foreground/90">
+            {renderMarkdown(value, "desc")}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -861,6 +1083,234 @@ function ActivitySection({
             </Button>
           ) : null}
         </>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Checklist (Phase 12 WS4): lightweight checkbox items with a combined
+// progress bar (closed subtasks + checked items). Read-only on closed tasks.
+// ---------------------------------------------------------------------------
+
+function ChecklistSection({
+  readOnly,
+  checklist,
+  progress,
+  onCreate,
+  onToggle,
+  onDelete,
+}: {
+  readOnly: boolean;
+  checklist: { data?: { items: { id: string; title: string; is_checked: boolean }[] }; isLoading: boolean };
+  progress?: {
+    subtasks_total: number;
+    subtasks_closed: number;
+    checklist_total: number;
+    checklist_checked: number;
+    progress_pct?: number | null;
+  } | null;
+  onCreate: (title: string) => void;
+  onToggle: (itemId: string, checked: boolean) => void;
+  onDelete: (itemId: string) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const items = checklist.data?.items ?? [];
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const title = draft.trim();
+    if (!title) return;
+    onCreate(title);
+    setDraft("");
+  };
+
+  const total = (progress?.subtasks_total ?? 0) + (progress?.checklist_total ?? 0);
+  const done = (progress?.subtasks_closed ?? 0) + (progress?.checklist_checked ?? 0);
+  const pct = progress?.progress_pct ?? null;
+
+  return (
+    <section className="mt-5" aria-label="Checklist" data-testid="task-checklist">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-1.5 text-xs font-semibold">
+          Check
+          <span className="text-muted-foreground">
+            ({done}/{total})
+          </span>
+        </h3>
+        {pct !== null && pct !== undefined ? (
+          <span className="text-2xs tabular-nums text-muted-foreground" data-testid="checklist-progress">
+            {pct}%
+          </span>
+        ) : null}
+      </div>
+      {total > 0 ? (
+        <div
+          className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-muted"
+          role="progressbar"
+          aria-valuenow={pct ?? 0}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Task progress"
+        >
+          <div
+            className="h-full rounded-full bg-success transition-[width] duration-200"
+            style={{ width: `${pct ?? 0}%` }}
+          />
+        </div>
+      ) : null}
+      <ul className="flex flex-col gap-0.5">
+        {items.map((item) => (
+          <li key={item.id} className="group flex items-center gap-2 rounded-md px-1 py-1 text-sm hover:bg-accent/40">
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={item.is_checked}
+              aria-label={`Toggle ${item.title}`}
+              disabled={readOnly}
+              onClick={() => onToggle(item.id, !item.is_checked)}
+              className={cn(
+                "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
+                item.is_checked
+                  ? "border-success bg-success text-background"
+                  : "border-muted-foreground/40 hover:border-foreground/60",
+                readOnly && "opacity-70",
+              )}
+              data-testid={`checklist-toggle-${item.id}`}
+            >
+              {item.is_checked ? <Check className="h-3 w-3" /> : null}
+            </button>
+            <span className={cn("min-w-0 flex-1 truncate", item.is_checked && "text-muted-foreground line-through")}>
+              {item.title}
+            </span>
+            {!readOnly ? (
+              <button
+                type="button"
+                aria-label={`Delete ${item.title}`}
+                onClick={() => onDelete(item.id)}
+                className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+                data-testid={`checklist-delete-${item.id}`}
+              >
+                <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+              </button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {!readOnly ? (
+        <form onSubmit={submit} className="mt-1.5 flex items-center gap-1.5">
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Add checklist item…"
+            maxLength={200}
+            aria-label="New checklist item"
+            className="h-7 w-full rounded-md border bg-transparent px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            data-testid="checklist-input"
+          />
+          <Button type="submit" variant="ghost" size="icon-sm" aria-label="Add checklist item" disabled={!draft.trim()}>
+            <Plus />
+          </Button>
+        </form>
+      ) : null}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Attachments (Phase 12 WS11): file list with upload; read-only on closed
+// tasks. Downloads open the cookie-authenticated endpoint directly.
+// ---------------------------------------------------------------------------
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function AttachmentsSection({
+  readOnly,
+  attachments,
+  onUpload,
+  onDelete,
+}: {
+  readOnly: boolean;
+  attachments: { data?: { items: { id: string; filename: string; mime_type: string; size_bytes: number; uploaded_by?: { display_name: string } | null }[] } };
+  onUpload: (file: File) => void;
+  onDelete: (attachmentId: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const items = attachments.data?.items ?? [];
+
+  return (
+    <section className="mt-5" aria-label="Attachments" data-testid="task-attachments">
+      <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
+        <Paperclip className="h-3.5 w-3.5" /> Attachments ({items.length})
+        {!readOnly ? (
+          <>
+            <input
+              ref={inputRef}
+              type="file"
+              className="sr-only"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) onUpload(file);
+                e.target.value = "";
+              }}
+              aria-label="Upload attachment"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="ml-auto"
+              aria-label="Upload attachment"
+              onClick={() => inputRef.current?.click()}
+              data-testid="attachment-upload"
+            >
+              <Plus />
+            </Button>
+          </>
+        ) : null}
+      </h3>
+      {items.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {readOnly ? "No files were attached." : "Drop in files via the + button above."}
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-1">
+          {items.map((a) => (
+            <li key={a.id} className="group flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs">
+              <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+              <a
+                href={api.attachmentUrl(a.id)}
+                className="min-w-0 flex-1 truncate font-medium hover:underline"
+                download
+                data-testid={`attachment-${a.id}`}
+              >
+                {a.filename}
+              </a>
+              <span className="shrink-0 text-2xs text-muted-foreground">{formatBytes(a.size_bytes)}</span>
+              {a.uploaded_by ? (
+                <span className="hidden shrink-0 text-2xs text-muted-foreground sm:inline">
+                  {a.uploaded_by.display_name}
+                </span>
+              ) : null}
+              {!readOnly ? (
+                <button
+                  type="button"
+                  aria-label={`Delete ${a.filename}`}
+                  onClick={() => onDelete(a.id)}
+                  className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+                  data-testid={`attachment-delete-${a.id}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

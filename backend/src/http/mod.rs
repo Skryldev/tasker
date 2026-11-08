@@ -22,7 +22,9 @@ use tracing::Instrument;
 
 use crate::error::AppError;
 use crate::state::AppState;
-use crate::{activity, auth, comments, profile, projects, tasks, teams};
+use crate::{
+    activity, attachments, auth, checklists, comments, dashboard, profile, projects, tasks, teams,
+};
 
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -38,9 +40,13 @@ pub fn build_router(state: AppState) -> Router {
         .merge(projects::routes())
         .merge(tasks::routes())
         .merge(comments::routes())
+        .merge(checklists::routes())
+        .merge(dashboard::routes())
+        .merge(attachments::routes(state.config.attachments.max_bytes))
         .merge(activity::routes())
         .merge(crate::notifications::routes())
         .merge(crate::workspace::routes())
+        .merge(crate::rules::api::routes())
         .merge(crate::goals::routes());
 
     let mut app = Router::new()

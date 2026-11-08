@@ -269,6 +269,7 @@ async fn create_comment(
             "guests have read-only access and cannot comment",
         ));
     }
+    crate::tasks::ensure_task_mutable(&task)?;
     // Internal by default; only team members may publish a guest-visible note.
     let guest_visible = payload.guest_visible && !actor.is_guest();
     // Threading (Phase 11): resolve the parent, enforce same-task + depth 2.

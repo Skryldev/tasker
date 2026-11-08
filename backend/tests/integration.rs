@@ -65,6 +65,20 @@ fn test_config(database_url: String) -> Config {
         static_dir: None,
         log_format_json: false,
         rules_worker: tasker::config::RulesWorkerConfig::default(),
+        attachments: tasker::config::AttachmentsConfig {
+            mode: tasker::config::AttachmentsMode::Local,
+            local_dir: std::env::temp_dir()
+                .join(format!("tasker-test-att-{}", std::process::id()))
+                .to_string_lossy()
+                .into_owned(),
+            max_bytes: 2_000_000,
+            max_per_task: 10,
+            s3_endpoint: None,
+            s3_bucket: None,
+            s3_access_key: None,
+            s3_secret_key: None,
+            s3_region: "us-east-1".into(),
+        },
     }
 }
 
@@ -1123,6 +1137,19 @@ async fn workflow_and_notifications_matrix() {
             "[{engine}] foreign mark-read"
         );
 
+        // Phase 12 WS10: closed tasks are immutable — the earlier lifecycle
+        // test closed this task, so comment tests use a fresh open task.
+        let (code, open_task) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "P-open for comments"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] open task created");
+        let open_task_id = open_task["id"].as_str().unwrap().to_string();
+
         // Mention dedup: one comment mentioning the same member twice yields
         // exactly one mention notification; an unknown address notifies nobody.
         let mention_count = |notifs: &Value| {
@@ -1135,10 +1162,14 @@ async fn workflow_and_notifications_matrix() {
         };
         let (_code, n) = get_json(&app.app, "/api/v1/notifications?unread=true", &member).await;
         let before = mention_count(&n);
-        let (code, _) = send_json(&app.app, "POST", &format!("/api/v1/tasks/{task_id}/comments"),
+        let (code, comment_problem) = send_json(&app.app, "POST", &format!("/api/v1/tasks/{open_task_id}/comments"),
             Some(&admin),
             json!({"body": format!("hey @{member_email} and again @{member_email} — ping @ghost@nowhere.example")})).await;
-        assert_eq!(code, StatusCode::CREATED);
+        assert_eq!(
+            code,
+            StatusCode::CREATED,
+            "[{engine}] mention comment: {comment_problem}"
+        );
         let (_code, n) = get_json(&app.app, "/api/v1/notifications?unread=true", &member).await;
         assert_eq!(
             mention_count(&n),
@@ -1149,7 +1180,7 @@ async fn workflow_and_notifications_matrix() {
         // Editing without adding new mentions does not re-notify.
         let (_code, comments) = get_json(
             &app.app,
-            &format!("/api/v1/tasks/{task_id}/comments"),
+            &format!("/api/v1/tasks/{open_task_id}/comments"),
             &admin,
         )
         .await;
@@ -6671,6 +6702,506 @@ async fn rules_dispatcher_email_conflict_dead_letters_immediately() {
     );
 }
 
+/// Task 6: rules management API — CRUD, authorization matrix, CAS updates,
+/// archive semantics, history access.
+#[tokio::test]
+async fn rules_management_api_matrix() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+        let suffix = Uuid::now_v7().simple();
+
+        // ---- Fixtures: owner, admin, manager, member, guest, outsider ----
+        let owner_email = format!("rules-mgr-o-{suffix}@test.local");
+        let admin_email = format!("rules-mgr-a-{suffix}@test.local");
+        let manager_email = format!("rules-mgr-m-{suffix}@test.local");
+        let member_email = format!("rules-mgr-mb-{suffix}@test.local");
+        let guest_email = format!("rules-mgr-g-{suffix}@test.local");
+        let outsider_email = format!("rules-mgr-x-{suffix}@test.local");
+        let owner_id = seed_user(&db, &owner_email, "Owner").await;
+        seed_user(&db, &admin_email, "Admin").await;
+        seed_user(&db, &manager_email, "Manager").await;
+        seed_user(&db, &member_email, "Member").await;
+        seed_user(&db, &guest_email, "Guest").await;
+        seed_user(&db, &outsider_email, "Outsider").await;
+        let owner = login_as(&app.app, &owner_email, "test-password-123").await;
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let manager = login_as(&app.app, &manager_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let guest = login_as(&app.app, &guest_email, "test-password-123").await;
+        let outsider = login_as(&app.app, &outsider_email, "test-password-123").await;
+
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&owner),
+            json!({"name": "MGT"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        for (email, role) in [
+            (&admin_email, "admin"),
+            (&manager_email, "manager"),
+            (&member_email, "member"),
+        ] {
+            let (code, _) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/teams/{team_id}/members"),
+                Some(&owner),
+                json!({"email": email, "role": role, "temp_password": "member-temp-pw"}),
+            )
+            .await;
+            assert_eq!(code, StatusCode::CREATED);
+        }
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&owner),
+            json!({"name": "MGTP"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+
+        // ---- Create (Owner) ----
+        let create_body = json!({
+            "name": "auto-triage",
+            "description": "route work automatically",
+            "trigger_type": "task_status_changed",
+            "condition": {"field": "task.status", "op": "IN",
+                          "values": ["backlog","todo","in_progress","resolved","in_review","closed"]},
+            "actions": [{"body": "automation triage"}],
+            "enabled": true,
+        });
+        let (code, rule) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/rules"),
+            Some(&owner),
+            create_body.clone(),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] owner create");
+        assert_eq!(rule["current_version"], 1);
+        assert_eq!(rule["enabled"], true);
+        assert_eq!(rule["condition"]["op"], "IN");
+        assert_eq!(rule["actions"].as_array().unwrap().len(), 1);
+        let rule_id = rule["id"].as_str().unwrap().to_string();
+
+        // Admin can also create; member cannot; outsider/guest get 404/403.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/rules"),
+            Some(&admin),
+            json!({"name": "admin-rule", "trigger_type": "task_assigned",
+                   "condition": {"field":"task.assignee_id","op":"NEQ","value":null},
+                   "actions": [{"body":"hi"}]}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] admin create");
+        let (code, problem) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/rules"),
+            Some(&member),
+            create_body.clone(),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] member create forbidden"
+        );
+        assert_eq!(problem["status"], 403);
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/rules"),
+            Some(&outsider),
+            create_body.clone(),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] outsider 404");
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/rules"),
+            Some(&guest),
+            create_body.clone(),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] guest 404");
+
+        // Duplicate name → 409; archived name stays reserved (covered below).
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/rules"),
+            Some(&owner),
+            create_body,
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] duplicate name");
+
+        // Invalid condition → 422 with field errors.
+        let (code, problem) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/rules"),
+            Some(&owner),
+            json!({"name": "bad-cond", "trigger_type": "task_status_changed",
+                   "condition": {"field": "task.title", "op": "EQ", "value": "x"},
+                   "actions": [{"body": "x"}]}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] invalid condition"
+        );
+        assert!(
+            problem["errors"].as_array().is_some(),
+            "[{engine}] field errors present"
+        );
+
+        // ---- List + filters ----
+        let (code, list) = send_json(
+            &app.app,
+            "GET",
+            &format!("/api/v1/teams/{team_id}/rules"),
+            Some(&owner),
+            json!(null),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(list["total"], 2, "[{engine}] two live rules");
+        let (code, list) = send_json(
+            &app.app,
+            "GET",
+            &format!("/api/v1/teams/{team_id}/rules?trigger_type=task_assigned"),
+            Some(&admin),
+            json!(null),
+        )
+        .await;
+        assert_eq!(list["total"], 1, "[{engine}] trigger filter");
+        // Member cannot list.
+        let (code, _) = send_json(
+            &app.app,
+            "GET",
+            &format!("/api/v1/teams/{team_id}/rules"),
+            Some(&member),
+            json!(null),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] member list forbidden"
+        );
+
+        // ---- Update with CAS: wrong version → 409; correct → v2 ----
+        let (code, problem) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/rules/{rule_id}"),
+            Some(&owner),
+            json!({"name": "renamed", "expected_version": 99}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] CAS conflict");
+        let (code, updated) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/rules/{rule_id}"),
+            Some(&owner),
+            json!({"name": "renamed", "expected_version": 1}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] CAS update");
+        assert_eq!(updated["current_version"], 2);
+        assert_eq!(updated["name"], "renamed");
+        // Manager cannot update.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/rules/{rule_id}"),
+            Some(&manager),
+            json!({"name": "mgr", "expected_version": 2}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] manager update forbidden"
+        );
+
+        // Version history: two immutable rows, newest first.
+        let (code, versions) = send_json(
+            &app.app,
+            "GET",
+            &format!("/api/v1/rules/{rule_id}/versions"),
+            Some(&admin),
+            json!(null),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let versions = versions["items"].as_array().unwrap();
+        assert_eq!(versions.len(), 2, "[{engine}] two immutable versions");
+        assert_eq!(versions[0]["version"], 2);
+        assert_eq!(versions[1]["version"], 1);
+
+        // ---- History: generate executions, then check access matrix ----
+        let (code, task) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&owner),
+            json!({"title": "History target"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let task_id = task["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/transition"),
+            Some(&owner),
+            json!({"to": "todo"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] backlog->todo needs assignee"
+        );
+        // Owner is the reporter, so the assignee must differ: assign the
+        // manager, who then performs the transition as the assignee.
+        let manager_id = user_id_by_email(&db, &manager_email).await;
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{task_id}"),
+            Some(&owner),
+            json!({"assignee_id": manager_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/transition"),
+            Some(&manager),
+            json!({"to": "todo"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let (code, history) = send_json(
+            &app.app,
+            "GET",
+            &format!("/api/v1/rules/{rule_id}/history"),
+            Some(&manager),
+            json!(null),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] manager reads history");
+        assert_eq!(
+            history["total"], 1,
+            "[{engine}] one execution recorded: {history}"
+        );
+        let entry = &history["items"][0];
+        // The CAS rename to v2 happened before the transition, so the
+        // execution must cite the version current at evaluation time.
+        assert_eq!(
+            entry["rule_version"], 2,
+            "[{engine}] execution cites the evaluated version"
+        );
+        assert_eq!(entry["condition_result"], "matched");
+        // Action-level outcomes exist once the dispatcher executes the
+        // internal intent and records the ledger entry.
+        assert_eq!(
+            entry["actions"].as_array().unwrap().len(),
+            0,
+            "[{engine}] no action results before a dispatcher cycle"
+        );
+        {
+            let metrics = tasker::http::metrics::Metrics::new();
+            let config = tasker::config::RulesWorkerConfig::default();
+            let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(2));
+            tasker::rules::dispatcher::run_once(&db, &config, "worker-a", &metrics, &semaphore)
+                .await
+                .expect("dispatcher cycle");
+        }
+        let (code, history) = send_json(
+            &app.app,
+            "GET",
+            &format!("/api/v1/rules/{rule_id}/history"),
+            Some(&manager),
+            json!(null),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let entry = &history["items"][0];
+        assert_eq!(
+            entry["actions"].as_array().unwrap().len(),
+            1,
+            "[{engine}] action-level outcome recorded: {entry}"
+        );
+        // Member cannot read history.
+        let (code, _) = send_json(
+            &app.app,
+            "GET",
+            &format!("/api/v1/rules/{rule_id}/history"),
+            Some(&member),
+            json!(null),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] member history forbidden"
+        );
+        // Outsider 404.
+        let (code, _) = send_json(
+            &app.app,
+            "GET",
+            &format!("/api/v1/rules/{rule_id}/history"),
+            Some(&outsider),
+            json!(null),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND);
+
+        // ---- Enable / disable ----
+        let (code, disabled) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/rules/{rule_id}/disable"),
+            Some(&admin),
+            json!(null),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(disabled["enabled"], false);
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/rules/{rule_id}/enable"),
+            Some(&admin),
+            json!(null),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+
+        // ---- Archive: stops evaluation, name stays reserved ----
+        let (code, archived) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/rules/{rule_id}/archive"),
+            Some(&owner),
+            json!(null),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert!(
+            archived["archived_at"].is_i64(),
+            "[{engine}] archived_at set"
+        );
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/rules"),
+            Some(&owner),
+            json!({"name": "renamed", "trigger_type": "task_status_changed",
+                   "condition": {"field":"task.status","op":"IN","values":["todo"]},
+                   "actions": [{"body":"x"}]}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::CONFLICT,
+            "[{engine}] archived name reserved"
+        );
+        // Archived rule is read-only.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/rules/{rule_id}"),
+            Some(&owner),
+            json!({"name": "zzz", "expected_version": 2}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::CONFLICT,
+            "[{engine}] archived rule read-only"
+        );
+        // The dispatcher never claims intents for archived rules: no new
+        // executions after archiving.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/tasks/{task_id}"),
+            Some(&owner),
+            json!({"priority": "high"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        // The assignee (manager) performs the transition; the archived rule
+        // must not fire on it.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/transition"),
+            Some(&manager),
+            json!({"to": "in_progress"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let (code, history) = send_json(
+            &app.app,
+            "GET",
+            &format!("/api/v1/rules/{rule_id}/history"),
+            Some(&manager),
+            json!(null),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(
+            history["total"], 1,
+            "[{engine}] archived rule stops evaluating"
+        );
+
+        // History remains available independently of task deletion.
+        {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(&task_id);
+            conn.execute("DELETE FROM tasks WHERE id = ?", args)
+                .await
+                .unwrap();
+        }
+        let (code, history) = send_json(
+            &app.app,
+            "GET",
+            &format!("/api/v1/rules/{rule_id}/history"),
+            Some(&manager),
+            json!(null),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::OK,
+            "[{engine}] history survives task deletion"
+        );
+        assert_eq!(history["total"], 1);
+    }
+}
+
 async fn rules_capture_atomicity_on_failure() {
     for (engine, url) in test_db_urls() {
         let app = spawn_app(&url).await;
@@ -8849,11 +9380,22 @@ async fn profile_and_team_settings_matrix() {
             assert_eq!(code, StatusCode::OK, "[{engine}] transition to {stage}");
         }
 
-        // Unread mention: admin mentions the member by email token.
+        // Unread mention: admin mentions the member by email token on a
+        // fresh open task (Phase 12 WS10: closed tasks reject comments).
+        let (code, open_task2) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "open for mention", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let open_task2_id = open_task2["id"].as_str().unwrap().to_string();
         let (code, _) = send_json(
             &app.app,
             "POST",
-            &format!("/api/v1/tasks/{close_id}/comments"),
+            &format!("/api/v1/tasks/{open_task2_id}/comments"),
             Some(&admin),
             json!({"body": format!("ping @{member_email}")}),
         )
@@ -8863,7 +9405,7 @@ async fn profile_and_team_settings_matrix() {
         let (code, summary) = get_json(&app.app, "/api/v1/me/summary", &member).await;
         assert_eq!(code, StatusCode::OK, "[{engine}] summary");
         assert_eq!(
-            summary["by_status"]["backlog"], 2,
+            summary["by_status"]["backlog"], 3,
             "[{engine}] backlog count"
         );
         assert_eq!(summary["by_status"]["closed"], 1, "[{engine}] closed count");
@@ -9390,7 +9932,10 @@ async fn project_delete_and_capacity_matrix() {
         )
         .await;
         assert_eq!(code, StatusCode::OK);
-        assert_eq!(me_now["capacity_limit"], 100, "[{engine}] clamped to max");
+        assert_eq!(
+            me_now["capacity_limit"], 500,
+            "[{engine}] 500 is within the 1-1000 range"
+        );
 
         // -- Project soft-delete -------------------------------------------
         // Member cannot delete.
@@ -10006,3 +10551,474 @@ async fn threading_templates_position_matrix() {
 }
 
 fn void_task(_: &str) {}
+
+/// Phase 12 WS11: attachment upload/list/download/delete over `local`
+/// storage, including the closed-task lock and the task-edit rule.
+#[tokio::test]
+async fn attachments_local_matrix() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let suffix = Uuid::now_v7();
+        let admin_email = format!("p12-admin-{suffix}@test.local");
+        let member_email = format!("p12-member-{suffix}@test.local");
+        let outsider_email = format!("p12-outsider-{suffix}@test.local");
+        seed_user(&app.db, &admin_email, "P12 Admin").await;
+        seed_user(&app.db, &member_email, "P12 Member").await;
+        seed_user(&app.db, &outsider_email, "P12 Outsider").await;
+
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let outsider = login_as(&app.app, &outsider_email, "test-password-123").await;
+
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name":"P12AT"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role":"member", "temp_password":"member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name":"P12AP"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+        let member_id = {
+            let (code, members) = get_json(
+                &app.app,
+                &format!("/api/v1/teams/{team_id}/members"),
+                &admin,
+            )
+            .await;
+            assert_eq!(code, StatusCode::OK);
+            members["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["role"] == "member")
+                .unwrap()["user"]["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let (code, task) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "P12 attach", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] task create: {task}");
+        let task_id = task["id"].as_str().unwrap().to_string();
+        let boundary = "tasker-test-boundary-42";
+        let body = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"notes v1.txt\"\r\nContent-Type: text/plain\r\n\r\nhello attachments\r\n--{boundary}--\r\n"
+        );
+        let response = app
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&format!("/api/v1/tasks/{task_id}/attachments"))
+                    .header(header::COOKIE, &admin)
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (code, created) = to_response(response).await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] upload: {created}");
+        assert_eq!(created["filename"], "notes v1.txt");
+        assert_eq!(created["mime_type"], "text/plain");
+        let attachment_id = created["id"].as_str().unwrap().to_string();
+        assert!(created["uploaded_by"]["display_name"].is_string());
+
+        // The uploader is a member; assignee (member) may also upload.
+        let boundary2 = "tasker-test-boundary-43";
+        let body2 = format!(
+            "--{boundary2}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"../../evil.bin\"\r\n\r\nxyz\r\n--{boundary2}--\r\n"
+        );
+        let response = app
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&format!("/api/v1/tasks/{task_id}/attachments"))
+                    .header(header::COOKIE, &member)
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary2}"),
+                    )
+                    .body(Body::from(body2))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (code, created2) = to_response(response).await;
+        assert_eq!(
+            code,
+            StatusCode::CREATED,
+            "[{engine}] member upload: {created2}"
+        );
+        // Path traversal is sanitized away in the stored filename.
+        assert_eq!(created2["filename"], "evil.bin");
+
+        // -- List -------------------------------------------------------------
+        let (code, list) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/attachments"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(
+            list["items"].as_array().unwrap().len(),
+            2,
+            "[{engine}] {list}"
+        );
+
+        // -- Download ---------------------------------------------------------
+        let response = app
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(&format!("/api/v1/attachments/{attachment_id}"))
+                    .header(header::COOKIE, &member)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "text/plain");
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(bytes.as_ref(), b"hello attachments");
+
+        // -- Outsider has no access -------------------------------------------
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/attachments"),
+            &outsider,
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] outsider list");
+
+        // -- Delete (soft) on the open task ------------------------------------
+        let (code, err) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/attachments/{attachment_id}"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] delete: {err}");
+        let (code, list) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/attachments"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(
+            list["items"].as_array().unwrap().len(),
+            1,
+            "[{engine}] {list}"
+        );
+
+        // -- Closed-task lock --------------------------------------------------
+        // Legal lifecycle: assignee drives todo -> in_progress -> resolved,
+        // the reporter submits for review and accepts (closed).
+        for (actor, to) in [
+            (&member, "todo"),
+            (&member, "in_progress"),
+            (&member, "resolved"),
+            (&admin, "in_review"),
+            (&admin, "closed"),
+        ] {
+            let (code, body) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/tasks/{task_id}/transition"),
+                Some(actor),
+                json!({"to": to}),
+            )
+            .await;
+            assert_eq!(
+                code,
+                StatusCode::OK,
+                "[{engine}] transition to {to}: {body}"
+            );
+        }
+        let boundary3 = "tasker-test-boundary-44";
+        let body3 = format!(
+            "--{boundary3}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"late.txt\"\r\n\r\nlate\r\n--{boundary3}--\r\n"
+        );
+        let response = app
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&format!("/api/v1/tasks/{task_id}/attachments"))
+                    .header(header::COOKIE, &admin)
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary3}"),
+                    )
+                    .body(Body::from(body3))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (code, err) = to_response(response).await;
+        assert_eq!(
+            code,
+            StatusCode::CONFLICT,
+            "[{engine}] closed upload: {err}"
+        );
+
+        // Download still works on closed tasks (read-only surface).
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/attachments"),
+            &member,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+
+        // Closed tasks reject deletion of the remaining attachment.
+        let other_id = list["items"][0]["id"].as_str().unwrap().to_string();
+        let (code, err) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/attachments/{other_id}"),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::CONFLICT,
+            "[{engine}] closed delete: {err}"
+        );
+
+        // Download of the soft-deleted attachment is a 404.
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/attachments/{attachment_id}"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] deleted download");
+    }
+}
+
+/// Phase 12 WS4: checklist items + combined progress counters, including the
+/// closed-task lock. Guards the four-bind progress aggregate.
+#[tokio::test]
+async fn checklist_progress_matrix() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let suffix = Uuid::now_v7();
+        let admin_email = format!("p12cl-admin-{suffix}@test.local");
+        let member_email = format!("p12cl-member-{suffix}@test.local");
+        seed_user(&app.db, &admin_email, "P12CL Admin").await;
+        seed_user(&app.db, &member_email, "P12CL Member").await;
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
+
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name":"P12CLT"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name":"P12CLP"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/members"),
+            Some(&admin),
+            json!({"email": member_email, "role":"member", "temp_password":"member-temp-pw"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let member_id = {
+            let (code, members) = get_json(
+                &app.app,
+                &format!("/api/v1/teams/{team_id}/members"),
+                &admin,
+            )
+            .await;
+            assert_eq!(code, StatusCode::OK);
+            members["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["role"] == "member")
+                .unwrap()["user"]["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let (code, task) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&admin),
+            json!({"title": "P12CL task", "assignee_id": member_id}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let task_id = task["id"].as_str().unwrap().to_string();
+
+        // Empty progress: null pct.
+        let (code, progress) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/progress"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(progress["checklist_total"], 0, "[{engine}] {progress}");
+        assert!(progress["progress_pct"].is_null());
+
+        // Two items.
+        let mut item_ids = Vec::new();
+        for title in ["write spec", "review spec"] {
+            let (code, item) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/tasks/{task_id}/checklist"),
+                Some(&admin),
+                json!({"title": title}),
+            )
+            .await;
+            assert_eq!(code, StatusCode::CREATED, "[{engine}] create {title}: {item}");
+            item_ids.push(item["id"].as_str().unwrap().to_string());
+        }
+
+        // List reflects both.
+        let (code, list) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/checklist"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(list["items"].as_array().unwrap().len(), 2, "[{engine}] {list}");
+
+        // Toggle one: 1/2 = 50%.
+        let (code, _) = send_json(
+            &app.app,
+            "PATCH",
+            &format!("/api/v1/checklist/{}", item_ids[0]),
+            Some(&admin),
+            json!({"is_checked": true}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let (code, progress) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/progress"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(progress["checklist_checked"], 1, "[{engine}] {progress}");
+        assert_eq!(progress["progress_pct"], 50, "[{engine}] {progress}");
+
+        // Delete one: 1/1 = 100%.
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/checklist/{}", item_ids[1]),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT);
+        let (code, progress) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/progress"),
+            &admin,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(progress["progress_pct"], 100, "[{engine}] {progress}");
+
+        // Closed-task lock: close, then item mutations 409.
+        // Assignee drives the early lifecycle; the reporter closes.
+        for (actor, to) in [
+            (&member, "todo"),
+            (&member, "in_progress"),
+            (&member, "resolved"),
+            (&admin, "in_review"),
+            (&admin, "closed"),
+        ] {
+            let (code, body) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/tasks/{task_id}/transition"),
+                Some(actor),
+                json!({"to": to}),
+            )
+            .await;
+            assert_eq!(code, StatusCode::OK, "[{engine}] transition {to}: {body}");
+        }
+        let (code, err) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/checklist"),
+            Some(&admin),
+            json!({"title": "late"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] closed create: {err}");
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/checklist/{}", item_ids[0]),
+            Some(&admin),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] closed delete");
+    }
+}

@@ -436,6 +436,118 @@
   }
 }
 
+[data-theme="github-dark"] {
+  --background: 216 28% 7%; --foreground: 210 14% 89%;
+  --card: 216 25% 11%; --card-foreground: 210 14% 89%;
+  --popover: 216 25% 11%; --popover-foreground: 210 14% 89%;
+  --primary: 137 55% 30%; --primary-foreground: 0 0% 100%;
+  --secondary: 215 18% 17%; --secondary-foreground: 210 14% 84%;
+  --muted: 215 18% 14%; --muted-foreground: 213 12% 56%;
+  --accent: 215 20% 20%; --accent-foreground: 210 14% 89%;
+  --destructive: 0 62% 55%; --destructive-foreground: 0 0% 100%;
+  --border: 215 16% 22%; --input: 215 16% 25%; --ring: 137 55% 42%;
+  --sidebar: 216 28% 7%; --sidebar-foreground: 213 12% 66%;
+  --priority-urgent: 0 62% 55%; --priority-high: 25 70% 55%; --priority-medium: 45 85% 50%; --priority-low: 215 14% 55%;
+  --status-backlog: 215 14% 55%; --status-todo: 137 55% 42%; --status-in-progress: 206 90% 54%; --status-in-review: 280 60% 65%; --status-resolved: 137 55% 48%; --status-closed: 152 55% 46%;
+  --success: 137 55% 48%; --success-foreground: 0 0% 100%; --warning: 45 85% 50%; --warning-foreground: 0 0% 100%; --info: 206 90% 54%;
+}
+
+[data-theme="github-light"] {
+  --background: 210 20% 98%; --foreground: 210 14% 12%;
+  --card: 0 0% 100%; --card-foreground: 210 14% 12%;
+  --popover: 0 0% 100%; --popover-foreground: 210 14% 12%;
+  --primary: 137 56% 34%; --primary-foreground: 0 0% 100%;
+  --secondary: 210 16% 93%; --secondary-foreground: 210 14% 14%;
+  --muted: 210 16% 94%; --muted-foreground: 213 12% 42%;
+  --accent: 210 18% 91%; --accent-foreground: 210 14% 12%;
+  --destructive: 0 62% 48%; --destructive-foreground: 0 0% 100%;
+  --border: 210 14% 87%; --input: 210 14% 84%; --ring: 137 56% 34%;
+  --sidebar: 210 20% 96%; --sidebar-foreground: 213 12% 32%;
+  --priority-urgent: 0 62% 48%; --priority-high: 25 70% 48%; --priority-medium: 45 85% 40%; --priority-low: 213 12% 46%;
+  --status-backlog: 213 12% 46%; --status-todo: 137 56% 34%; --status-in-progress: 206 90% 44%; --status-in-review: 280 60% 48%; --status-resolved: 137 56% 38%; --status-closed: 152 55% 36%;
+  --success: 137 56% 38%; --success-foreground: 0 0% 100%; --warning: 45 85% 40%; --warning-foreground: 0 0% 100%; --info: 206 90% 44%;
+}
+
+[data-theme="one-dark"] {
+  --background: 220 13% 18%; --foreground: 220 9% 89%;
+  --card: 220 13% 21%; --card-foreground: 220 9% 89%;
+  --popover: 220 13% 19%; --popover-foreground: 220 9% 89%;
+  --primary: 207 82% 66%; --primary-foreground: 220 13% 12%;
+  --secondary: 220 12% 25%; --secondary-foreground: 220 9% 84%;
+  --muted: 220 12% 23%; --muted-foreground: 220 8% 60%;
+  --accent: 220 12% 27%; --accent-foreground: 220 9% 89%;
+  --destructive: 5 74% 62%; --destructive-foreground: 0 0% 100%;
+  --border: 220 12% 30%; --input: 220 12% 33%; --ring: 207 82% 66%;
+  --sidebar: 220 13% 16%; --sidebar-foreground: 220 8% 70%;
+  --priority-urgent: 5 74% 62%; --priority-high: 35 85% 60%; --priority-medium: 41 70% 60%; --priority-low: 220 10% 58%;
+  --status-backlog: 220 10% 58%; --status-todo: 207 82% 66%; --status-in-progress: 187 60% 58%; --status-in-review: 262 60% 68%; --status-resolved: 135 55% 60%; --status-closed: 152 55% 52%;
+  --success: 135 55% 60%; --success-foreground: 220 13% 12%; --warning: 41 70% 60%; --warning-foreground: 220 13% 12%; --info: 187 60% 58%;
+}
+
+[data-theme="gruvbox-dark"] {
+  --background: 0 0% 15%; --foreground: 36 33% 85%;
+  --card: 0 0% 17%; --card-foreground: 36 33% 85%;
+  --popover: 0 0% 16%; --popover-foreground: 36 33% 85%;
+  --primary: 42 65% 55%; --primary-foreground: 0 0% 12%;
+  --secondary: 0 0% 22%; --secondary-foreground: 36 33% 80%;
+  --muted: 0 0% 20%; --muted-foreground: 34 15% 62%;
+  --accent: 0 0% 24%; --accent-foreground: 36 33% 85%;
+  --destructive: 0 65% 55%; --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 28%; --input: 0 0% 31%; --ring: 42 65% 55%;
+  --sidebar: 0 0% 13%; --sidebar-foreground: 34 15% 68%;
+  --priority-urgent: 0 65% 55%; --priority-high: 18 75% 55%; --priority-medium: 42 65% 55%; --priority-low: 34 15% 58%;
+  --status-backlog: 34 15% 58%; --status-todo: 42 65% 55%; --status-in-progress: 92 45% 55%; --status-in-review: 260 40% 62%; --status-resolved: 122 35% 52%; --status-closed: 122 30% 44%;
+  --success: 122 35% 52%; --success-foreground: 0 0% 12%; --warning: 42 65% 55%; --warning-foreground: 0 0% 12%; --info: 108 40% 55%;
+}
+
+[data-theme="gruvbox-light"] {
+  --background: 43 57% 89%; --foreground: 30 10% 20%;
+  --card: 43 50% 92%; --card-foreground: 30 10% 20%;
+  --popover: 43 50% 91%; --popover-foreground: 30 10% 20%;
+  --primary: 26 62% 42%; --primary-foreground: 0 0% 100%;
+  --secondary: 43 40% 85%; --secondary-foreground: 30 10% 22%;
+  --muted: 43 35% 86%; --muted-foreground: 30 8% 42%;
+  --accent: 43 40% 85%; --accent-foreground: 30 10% 20%;
+  --destructive: 0 60% 42%; --destructive-foreground: 0 0% 100%;
+  --border: 43 25% 78%; --input: 43 25% 76%; --ring: 26 62% 42%;
+  --sidebar: 43 45% 87%; --sidebar-foreground: 30 8% 30%;
+  --priority-urgent: 0 60% 42%; --priority-high: 18 60% 42%; --priority-medium: 26 62% 42%; --priority-low: 30 8% 46%;
+  --status-backlog: 30 8% 46%; --status-todo: 26 62% 42%; --status-in-progress: 92 40% 38%; --status-in-review: 260 35% 48%; --status-resolved: 122 30% 38%; --status-closed: 122 25% 32%;
+  --success: 122 30% 38%; --success-foreground: 0 0% 100%; --warning: 26 62% 42%; --warning-foreground: 0 0% 100%; --info: 92 40% 38%;
+}
+
+[data-theme="tokyo-night"] {
+  --background: 230 25% 12%; --foreground: 230 18% 86%;
+  --card: 230 24% 15%; --card-foreground: 230 18% 86%;
+  --popover: 230 24% 14%; --popover-foreground: 230 18% 86%;
+  --primary: 217 88% 66%; --primary-foreground: 230 25% 10%;
+  --secondary: 230 20% 20%; --secondary-foreground: 230 18% 80%;
+  --muted: 230 20% 18%; --muted-foreground: 230 14% 60%;
+  --accent: 230 20% 22%; --accent-foreground: 230 18% 86%;
+  --destructive: 0 65% 60%; --destructive-foreground: 0 0% 100%;
+  --border: 230 18% 25%; --input: 230 18% 28%; --ring: 217 88% 66%;
+  --sidebar: 230 25% 11%; --sidebar-foreground: 230 14% 66%;
+  --priority-urgent: 0 65% 60%; --priority-high: 24 80% 58%; --priority-medium: 197 60% 55%; --priority-low: 230 14% 58%;
+  --status-backlog: 230 14% 58%; --status-todo: 217 88% 66%; --status-in-progress: 187 55% 55%; --status-in-review: 285 55% 65%; --status-resolved: 150 50% 52%; --status-closed: 152 45% 46%;
+  --success: 150 50% 52%; --success-foreground: 230 25% 10%; --warning: 43 80% 55%; --warning-foreground: 230 25% 10%; --info: 187 55% 55%;
+}
+
+[data-theme="kanagawa"] {
+  --background: 240 12% 14%; --foreground: 240 10% 82%;
+  --card: 240 11% 17%; --card-foreground: 240 10% 82%;
+  --popover: 240 11% 15%; --popover-foreground: 240 10% 82%;
+  --primary: 216 40% 67%; --primary-foreground: 240 12% 12%;
+  --secondary: 240 10% 22%; --secondary-foreground: 240 10% 78%;
+  --muted: 240 10% 20%; --muted-foreground: 240 8% 58%;
+  --accent: 240 10% 25%; --accent-foreground: 240 10% 82%;
+  --destructive: 0 60% 55%; --destructive-foreground: 0 0% 100%;
+  --border: 240 10% 27%; --input: 240 10% 30%; --ring: 216 40% 67%;
+  --sidebar: 240 12% 12%; --sidebar-foreground: 240 8% 64%;
+  --priority-urgent: 0 60% 55%; --priority-high: 22 70% 55%; --priority-medium: 98 35% 55%; --priority-low: 240 8% 56%;
+  --status-backlog: 240 8% 56%; --status-todo: 216 40% 67%; --status-in-progress: 167 35% 58%; --status-in-review: 275 35% 65%; --status-resolved: 152 30% 50%; --status-closed: 152 25% 42%;
+  --success: 152 30% 50%; --success-foreground: 240 12% 12%; --warning: 42 60% 55%; --warning-foreground: 240 12% 12%; --info: 167 35% 58%;
+}
+
 /* Sonner renders its own markup; keep its motion aligned with the app's
    reduced-motion contract. */
 @media (prefers-reduced-motion: reduce) {

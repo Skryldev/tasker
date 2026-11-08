@@ -27,6 +27,21 @@ vi.mock("@/api/client", async (importOriginal) => {
   };
 });
 
+// Phase 12 User shape: profile + notification fields are always serialized.
+const userExtras = {
+  username: null,
+  bio: null,
+  timezone: null,
+  notification_prefs: {
+    task_assigned: true,
+    comment_mention: true,
+    task_submitted: true,
+    task_accepted: true,
+    task_rejected: true,
+    task_status_changed: true,
+  },
+};
+
 function renderPage(ui: React.ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -80,6 +95,7 @@ describe("login → MFA verification flow", () => {
       // Successful verification clears the session cookie server-side; the
       // subsequent /me refetch resolves as authenticated.
       vi.mocked(api.me).mockResolvedValueOnce({
+        ...userExtras,
         id: "u1",
         email: "mfa@tasker.local",
         display_name: "Mfa",
@@ -87,6 +103,7 @@ describe("login → MFA verification flow", () => {
         mfa_enabled: true, capacity_limit: 10,
       });
       return Promise.resolve({
+        ...userExtras,
         id: "u1",
         email: "mfa@tasker.local",
         display_name: "Mfa",
@@ -134,6 +151,7 @@ describe("login → MFA verification flow", () => {
     const user = userEvent.setup();
     signedOut();
     vi.mocked(api.login).mockResolvedValueOnce({
+      ...userExtras,
       id: "u1",
       email: "plain@tasker.local",
       display_name: "Plain",
@@ -161,6 +179,7 @@ describe("MfaSettings (account page)", () => {
   it("starts setup and renders the QR code from the provisioning URI", async () => {
     const user = userEvent.setup();
     vi.mocked(api.me).mockResolvedValue({
+      ...userExtras,
       id: "u1",
       email: "u@tasker.local",
       display_name: "U",

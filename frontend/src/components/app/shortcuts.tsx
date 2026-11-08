@@ -1,33 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Keyboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { useWorkspace } from "@/lib/workspace";
+
+// Phase 12: the cheatsheet dialog is code-split — the eager manager keeps
+// only the trigger button and the global key listener.
+const CheatsheetDialog = lazy(() =>
+  import("./CheatsheetDialog").then((m) => ({ default: m.CheatsheetDialog })),
+);
 
 /**
  * Global keyboard shortcuts (Phase 10.5 §6.2). All handlers ignore events
  * from inputs/textareas/contenteditables — except Esc and Cmd/Ctrl+K, which
  * always work. Sequences (G → …) reset after one second of inactivity.
  */
-
-export const SHORTCUTS: { keys: string; action: string }[] = [
-  { keys: "⌘/Ctrl + K", action: "Open the command palette" },
-  { keys: "C", action: "Create a new task" },
-  { keys: "/", action: "Focus search" },
-  { keys: "G then T", action: "Go to My Tasks" },
-  { keys: "G then P", action: "Go to Projects" },
-  { keys: "G then G", action: "Go to Goals" },
-  { keys: "G then C", action: "Go to Capacity" },
-  { keys: "?", action: "Keyboard shortcuts cheatsheet" },
-  { keys: "Esc", action: "Close dialogs and panels" },
-];
 
 function isTypingTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -162,26 +149,11 @@ export function ShortcutsManager() {
         <Keyboard />
       </Button>
       {Palette ? <Palette open={paletteOpen} onOpenChange={setPaletteOpen} /> : null}
-      <Dialog open={cheatsheetOpen} onOpenChange={setCheatsheetOpen}>
-        <DialogContent className="max-w-md" aria-describedby={undefined}>
-          <DialogHeader>
-            <DialogTitle>Keyboard shortcuts</DialogTitle>
-            <DialogDescription>
-              Shortcuts never fire while typing in a field (except Esc and ⌘K).
-            </DialogDescription>
-          </DialogHeader>
-          <ul className="flex flex-col gap-2" data-testid="shortcuts-list">
-            {SHORTCUTS.map((s) => (
-              <li key={s.keys} className="flex items-center justify-between gap-4 text-sm">
-                <span className="text-muted-foreground">{s.action}</span>
-                <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-2xs">
-                  {s.keys}
-                </kbd>
-              </li>
-            ))}
-          </ul>
-        </DialogContent>
-      </Dialog>
+      {cheatsheetOpen ? (
+        <Suspense fallback={null}>
+          <CheatsheetDialog open={cheatsheetOpen} onOpenChange={setCheatsheetOpen} />
+        </Suspense>
+      ) : null}
     </>
   );
 }

@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useState, type ReactNode } from "react";
+import { Fragment, Suspense, useEffect, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Check,
@@ -145,6 +145,13 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
               onNavigate={onNavigate}
             />
             <SidebarLink
+              to={`/teams/${teamId}/dashboard`}
+              icon={<Gauge className="h-4 w-4" />}
+              label="Dashboard"
+              matchPrefix={`/teams/${teamId}/dashboard`}
+              onNavigate={onNavigate}
+            />
+            <SidebarLink
               to={`/teams/${teamId}/workload`}
               icon={<ListTree className="h-4 w-4" />}
               label="Workload"
@@ -229,34 +236,43 @@ function ThemeSwitcher() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
         <DropdownMenuLabel>Theme — hover to preview</DropdownMenuLabel>
-        {THEMES.map((definition) => (
-          <DropdownMenuItem
-            key={definition.id}
-            onSelect={() => setTheme(definition.id)}
-            onMouseEnter={() => setPreview(definition.id)}
-            onMouseLeave={() => setPreview(null)}
-            onFocus={() => setPreview(definition.id)}
-            onBlur={() => setPreview(null)}
-            className="justify-between"
-            data-testid={`theme-option-${definition.id}`}
-          >
-            <span className="flex items-center gap-2">
-              {/* Preview swatch: background, primary, accent. */}
-              <span className="flex -space-x-0.5" aria-hidden>
-                {definition.swatch.map((color) => (
-                  <span
-                    key={color}
-                    className="h-3.5 w-3.5 rounded-full border border-border"
-                    style={{ backgroundColor: color }}
-                  />
-                ))}
-              </span>
-              {definition.label}
-            </span>
-            {theme === definition.id ? (
-              <Check className="h-3.5 w-3.5" aria-label="Active theme" />
-            ) : null}
-          </DropdownMenuItem>
+        {/* WS1: themes grouped by appearance, light first. */}
+        {(["light", "dark"] as const).map((group) => (
+          <Fragment key={group}>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-2xs uppercase tracking-wide text-muted-foreground">
+              {group === "light" ? "Light" : "Dark"}
+            </DropdownMenuLabel>
+            {THEMES.filter((d) => d.appearance === group).map((definition) => (
+              <DropdownMenuItem
+                key={definition.id}
+                onSelect={() => setTheme(definition.id)}
+                onMouseEnter={() => setPreview(definition.id)}
+                onMouseLeave={() => setPreview(null)}
+                onFocus={() => setPreview(definition.id)}
+                onBlur={() => setPreview(null)}
+                className="justify-between"
+                data-testid={`theme-option-${definition.id}`}
+              >
+                <span className="flex items-center gap-2">
+                  {/* Preview swatch: background, primary, accent. */}
+                  <span className="flex -space-x-0.5" aria-hidden>
+                    {definition.swatch.map((color) => (
+                      <span
+                        key={color}
+                        className="h-3.5 w-3.5 rounded-full border border-border"
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </span>
+                  {definition.label}
+                </span>
+                {theme === definition.id ? (
+                  <Check className="h-3.5 w-3.5" aria-label="Active theme" />
+                ) : null}
+              </DropdownMenuItem>
+            ))}
+          </Fragment>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>

@@ -12,14 +12,14 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Plus } from "lucide-react";
+import { ChevronDown, Flag, ListChecks, Plus } from "lucide-react";
 import type { BoardColumn, Task } from "@/api/client";
 import { api } from "@/api/client";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Badge, Skeleton } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
-import { PriorityBadge } from "./TaskBadges";
+import { LabelIcon, PriorityBadge } from "./TaskBadges";
 import { cn, PRIORITY_LABELS, STATUS_LABELS, type TaskStatus } from "@/lib/utils";
 
 function statusToClass(status: string): string {
@@ -86,8 +86,34 @@ const TaskCard = memo(function TaskCard({
       {/* Whitespace between the visible spans so textContent matches the
           accessible name (Label-in-Name substring check). Renders as nothing. */}
       {" "}
-      <div className="mt-2 flex items-center justify-between gap-2">
+      <div className="mt-2 flex items-center gap-1.5">
         <PriorityBadge priority={task.priority} />
+        {task.deadline ? (
+          <span
+            className="inline-flex items-center gap-0.5 rounded-full border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-2xs font-medium text-destructive"
+            title={`Deadline ${task.deadline}`}
+            data-testid={`kanban-deadline-${task.id}`}
+          >
+            <Flag className="h-2.5 w-2.5" aria-hidden />
+            {task.deadline.slice(5)}
+          </span>
+        ) : null}
+        {task.labels.slice(0, 2).map((l) => (
+          <span
+            key={l.id}
+            className="inline-flex max-w-[7rem] items-center gap-1 rounded-full border px-1.5 py-0.5 text-2xs"
+            style={{ backgroundColor: `${l.color}1f`, borderColor: `${l.color}55` }}
+          >
+            {l.icon ? <LabelIcon icon={l.icon} /> : null}
+            <span className="truncate">{l.name}</span>
+          </span>
+        ))}
+        {task.labels.length > 2 ? (
+          <span className="text-2xs text-muted-foreground">+{task.labels.length - 2}</span>
+        ) : null}
+        {progressPill(task)}
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2">
         {task.assignee ? (
           <Avatar name={task.assignee.display_name} size="xs" />
         ) : (
@@ -97,6 +123,22 @@ const TaskCard = memo(function TaskCard({
     </div>
   );
 });
+
+/** WS4: a compact n/total pill when the board task carries subtasks. */
+function progressPill(task: Task) {
+  const subs = task.subtasks;
+  if (!subs || subs.length === 0) return null;
+  const closed = subs.filter((s) => s.status === "closed").length;
+  return (
+    <span
+      className="ml-auto inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-2xs tabular-nums text-muted-foreground"
+      title={`${closed} of ${subs.length} subtasks closed`}
+    >
+      <ListChecks className="h-2.5 w-2.5" aria-hidden />
+      {closed}/{subs.length}
+    </span>
+  );
+}
 
 function KanbanColumn({
   column,
@@ -134,14 +176,15 @@ function KanbanColumn({
           <Plus />
         </Button>
       </header>
-      <div
-        ref={setNodeRef}
-        data-testid={`kanban-column-${column.status}`}
-        className={cn(
-          "flex min-h-[80px] flex-1 flex-col gap-2 overflow-y-auto scrollbar-thin p-2 transition-colors",
-          isOver && "rounded-lg bg-primary/5 ring-1 ring-primary/30",
-        )}
-      >
+        <div
+          ref={setNodeRef}
+          data-testid={`kanban-column-${column.status}`}
+          className={cn(
+            "flex min-h-[80px] flex-1 flex-col gap-2 overflow-y-auto scrollbar-thin p-2 transition-colors",
+            // WS7: the drop target flashes a dashed green outline.
+            isOver && "rounded-lg border-2 border-dashed border-success bg-success/5",
+          )}
+        >
         {column.items.map((task) => (
           <TaskCard key={task.id} task={task} onOpen={onOpen} />
         ))}

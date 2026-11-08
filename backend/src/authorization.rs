@@ -73,6 +73,10 @@ pub enum Capability {
     /// Admin, and Manager — consistent with `ManageProjects`. Members view
     /// goals; guests have no team membership and see nothing.
     ManageGoals,
+    /// Create, update, enable/disable, and archive automation rules. Owner
+    /// and Admin only: rules act team-wide with external-delivery reach.
+    /// Managers read execution history through a separate role check.
+    ManageRules,
 }
 
 impl Role {
@@ -83,7 +87,7 @@ impl Role {
     pub fn can(self, capability: Capability) -> bool {
         use Capability::{
             AddMember, CreateLabel, CreateTask, DeleteAnyComment, DeleteAnyTask, EditAnyComment,
-            ManageGoals, ManageProjects, UpdateAnyTask, UpdateTeam,
+            ManageGoals, ManageProjects, ManageRules, UpdateAnyTask, UpdateTeam,
         };
         match self {
             Self::Owner => true,
@@ -99,6 +103,7 @@ impl Role {
                     | EditAnyComment
                     | DeleteAnyComment
                     | ManageGoals
+                    | ManageRules
             ),
             Self::Manager => matches!(
                 capability,

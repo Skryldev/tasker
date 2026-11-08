@@ -533,3 +533,83 @@ Lease recovery is observed on `/metrics`
 with the recovered count — a persistently nonzero value is the crash-loop
 signal. Recovery never increments attempts, so repeated worker crashes
 cannot strand or exhaust a record.
+
+---
+
+## Rules management API (Task 6)
+
+Endpoints (all team-scoped; contract in `api/openapi.yaml`, regenerated
+client in `frontend/src/api/schema.d.ts`):
+
+| Operation | Endpoint | Authorization |
+|---|---|---|
+| Create | `POST /teams/{team_id}/rules` | Owner/Admin (`Capability::ManageRules`) |
+| List (paginated, trigger/enabled filters) | `GET /teams/{team_id}/rules` | Owner/Admin |
+| Detail | `GET /rules/{rule_id}` | Owner/Admin |
+| Update (CAS on `expected_version`) | `PATCH /rules/{rule_id}` | Owner/Admin |
+| Enable / disable | `POST /rules/{rule_id}/enable` · `/disable` | Owner/Admin |
+| Archive | `POST /rules/{rule_id}/archive` | Owner/Admin |
+| Version history | `GET /rules/{rule_id}/versions` | Owner/Admin |
+| Execution history (paginated) | `GET /rules/{rule_id}/history` | Owner/Admin/Manager |
+
+Semantics: updates write an immutable `rule_versions` row and bump
+`current_version` under CAS (`WHERE current_version = expected`); a lost race
+is 409. Members get 403; outsiders/guests get the standard 404 (no
+enumeration). Invalid conditions/actions yield 422 with `errors[]` field
+entries (via `From<RuleError> for AppError`). Archived rules are read-only,
+stop evaluating, and keep their names reserved. Enable/disable/archive
+record activity-trail entries (`rule_created/updated/enabled/disabled/archived`)
+attributed to the acting user. History survives task deletion by design.
+
+---
+
+## Phase 8B handoff — Git integration (architectural proposal, not implemented)
+
+### Module boundaries (inside Tasker Core, Phase 8B)
+
+```
+src/integrations/
+├── mod.rs        integration registry, provider-neutral intake contract
+├── github.rs     GitHub adapter: webhook verification, event parsing
+├── gitlab.rs     GitLab adapter: webhook verification, event parsing
+└── normalize.rs  Git event → Tasker domain-event mapping
+```
+
+Provider-specific parsing, signature schemes, and API clients live only in
+the adapters; nothing downstream may import a provider type.
+
+### Webhook ingestion requirements
+
+1. Signature/token verification per provider (HMAC for GitHub, token for
+   GitLab) before any parsing.
+2. Provider identity + installation/project context resolved to a Tasker
+   team via an explicit mapping table (new migration in 8B).
+3. Replay protection: delivery-id dedup with a bounded retention window.
+4. Durable intake: webhooks land in an ingestion table inside one
+   transaction; processing is retry-safe and idempotent (delivery id is the
+   idempotency anchor).
+5. Bounded payloads: size caps and per-provider event whitelists; unknown
+   events are recorded and skipped, never guessed at.
+
+### Event normalization
+
+Adapters translate provider payloads into the existing `domain_events`
+pipeline with `origin` extended by a provider-neutral metadata struct
+(provider name, repo, delivery id) — the Rules Engine itself must not learn
+provider names. Rules gain no new trigger types in 8B beyond what the
+normalizer emits.
+
+### Core authorization boundary
+
+Normalized Git events may only act through the established application
+services (task/comment creation, transitions) with an explicit integration
+principal — the Automation Principal pattern reused, never a bypass. The
+Rules Engine's team scoping and `origin` policy apply unchanged.
+
+### Suggested 8B sequence
+
+1. Intake table + ingestion endpoint skeleton (signature verification first).
+2. GitHub adapter (push/PR/issue events) → normalized events.
+3. GitLab adapter (push/MR events) → normalized events.
+4. Rules integration: new trigger vocabulary + docs, reusing the entire
+   evaluate → outbox → dispatch pipeline unchanged.

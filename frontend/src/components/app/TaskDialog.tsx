@@ -23,6 +23,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES, STATUS_LABELS, type Priority, type TaskStatus } from "@/lib/utils";
 import { useLabels, useMembers, useTemplates } from "@/api/hooks";
+import { LabelIcon } from "./TaskBadges";
 import { useWorkspace } from "@/lib/workspace";
 
 export interface TaskDialogProps {
@@ -44,6 +45,7 @@ interface FormState {
   assignee_id: string;
   reporter_id: string;
   due_date: string;
+  deadline: string;
 }
 
 export function TaskDialog(props: TaskDialogProps) {
@@ -69,6 +71,7 @@ export function TaskDialog(props: TaskDialogProps) {
     assignee_id: "none",
     reporter_id: "creator",
     due_date: "",
+    deadline: "",
   });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
@@ -91,6 +94,7 @@ export function TaskDialog(props: TaskDialogProps) {
         assignee_id: task?.assignee?.id ?? "none",
         reporter_id: task?.reporter?.id ?? (canPickReporter ? "creator" : "none"),
         due_date: task?.due_date ?? "",
+        deadline: task?.deadline ?? "",
       });
     }
   }, [open, task, parentTaskId]);
@@ -139,6 +143,7 @@ export function TaskDialog(props: TaskDialogProps) {
         assignee_id: form.assignee_id === "none" ? undefined : form.assignee_id,
         reporter_id: reporter,
         due_date: form.due_date || undefined,
+        deadline: form.deadline || undefined,
         label_ids: selectedLabels.length > 0 ? selectedLabels : undefined,
       };
       if (!task && templateId) {
@@ -169,6 +174,7 @@ export function TaskDialog(props: TaskDialogProps) {
               : form.reporter_id
             : undefined,
           due_date: form.due_date,
+          deadline: form.deadline || null,
           label_ids: selectedLabels,
         });
       }
@@ -365,6 +371,19 @@ export function TaskDialog(props: TaskDialogProps) {
                 <p className="text-2xs text-destructive" role="alert">{fieldErrors.due_date}</p>
               ) : null}
             </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="task-deadline">Deadline</Label>
+              <DateField
+                id="task-deadline"
+                value={form.deadline || null}
+                onChange={(v) => setForm((f) => ({ ...f, deadline: v }))}
+                ariaLabel="Deadline"
+              />
+              <p className="text-2xs text-muted-foreground">Hard cutoff; must be on or after the due date.</p>
+              {fieldErrors.deadline ? (
+                <p className="text-2xs text-destructive" role="alert">{fieldErrors.deadline}</p>
+              ) : null}
+            </div>
           </div>
           {labels.data && labels.data.items.length > 0 ? (
             <div className="flex flex-col gap-1.5">
@@ -372,6 +391,8 @@ export function TaskDialog(props: TaskDialogProps) {
               <div className="flex flex-wrap gap-1.5" data-testid="label-picker">
                 {labels.data.items.map((label) => {
                   const active = selectedLabels.includes(label.id);
+                  // WS5: pastel chips tinted with the label color; the stored
+                  // Lucide icon renders when one is set.
                   return (
                     <button
                       key={label.id}
@@ -382,11 +403,18 @@ export function TaskDialog(props: TaskDialogProps) {
                           active ? prev.filter((id) => id !== label.id) : [...prev, label.id],
                         )
                       }
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs font-medium transition-colors ${
-                        active ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent"
-                      }`}
+                      className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs font-medium transition-colors"
+                      style={
+                        active
+                          ? { backgroundColor: `${label.color}26`, borderColor: `${label.color}66`, color: "inherit" }
+                          : undefined
+                      }
                     >
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: label.color }} />
+                      {label.icon ? (
+                        <LabelIcon icon={label.icon} />
+                      ) : (
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: label.color }} />
+                      )}
                       {label.name}
                     </button>
                   );

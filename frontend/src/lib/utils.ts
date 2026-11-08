@@ -25,14 +25,16 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
   closed: "Closed",
 };
 
-export const PRIORITIES = ["low", "medium", "high", "urgent"] as const;
+export const PRIORITIES = ["none", "low", "medium", "high", "urgent", "critical"] as const;
 export type Priority = (typeof PRIORITIES)[number];
 
 export const PRIORITY_LABELS: Record<Priority, string> = {
+  none: "None",
   low: "Low",
   medium: "Medium",
   high: "High",
   urgent: "Urgent",
+  critical: "Critical",
 };
 
 const ROLE_LABELS: Record<string, string> = {

@@ -48,6 +48,10 @@ pub fn routes() -> Router<AppState> {
             "/teams/{team_id}/labels",
             get(list_labels).post(create_label),
         )
+        .route(
+            "/teams/{team_id}/labels/{label_id}",
+            axum::routing::patch(update_label).delete(delete_label),
+        )
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +89,68 @@ pub struct Label {
     pub id: String,
     pub name: String,
     pub color: String,
+    /// Optional Lucide icon name (Phase 12 WS5), from the app whitelist.
+    pub icon: Option<String>,
     pub created_at: i64,
+}
+
+/// Lucide icon names the label picker may use (Phase 12 WS5). The frontend
+/// resolves these kebab-case names to `lucide-react` components; anything
+/// outside this set is rejected so stored icons always render.
+pub const LABEL_ICONS: [&str; 48] = [
+    "tag",
+    "bookmark",
+    "bug",
+    "wrench",
+    "sparkles",
+    "rocket",
+    "flame",
+    "zap",
+    "star",
+    "heart",
+    "circle-alert",
+    "triangle-alert",
+    "circle-check",
+    "circle-x",
+    "clock",
+    "calendar",
+    "flag",
+    "target",
+    "package",
+    "box",
+    "layers",
+    "folder",
+    "file-text",
+    "pencil",
+    "pen-tool",
+    "message-circle",
+    "message-square",
+    "users",
+    "user",
+    "git-branch",
+    "git-merge",
+    "git-pull-request",
+    "shield",
+    "shield-alert",
+    "shield-check",
+    "key-round",
+    "lock",
+    "unlock",
+    "eye",
+    "search",
+    "compass",
+    "map-pin",
+    "globe",
+    "cloud",
+    "database",
+    "server",
+    "cpu",
+    "terminal",
+];
+
+/// A stored label icon must be exactly one whitelisted Lucide name.
+fn validate_label_icon(icon: &str) -> bool {
+    LABEL_ICONS.contains(&icon)
 }
 
 fn row_to_team(row: &sqlx::any::AnyRow, my_role: Option<Role>) -> Result<Team, AppError> {
@@ -888,7 +953,7 @@ async fn list_labels(
     args.s(&team_id);
     let rows = conn
         .fetch_all(
-            "SELECT id, name, color, created_at FROM labels WHERE team_id = ? ORDER BY name",
+            "SELECT id, name, color, icon, created_at FROM labels WHERE team_id = ? ORDER BY name",
             args,
         )
         .await?;
@@ -899,6 +964,7 @@ async fn list_labels(
                 id: row.try_get("id")?,
                 name: row.try_get("name")?,
                 color: row.try_get("color")?,
+                icon: row.try_get("icon")?,
                 created_at: row.try_get("created_at")?,
             })
         })
@@ -911,6 +977,8 @@ pub struct CreateLabelRequest {
     pub name: String,
     #[serde(default)]
     pub color: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 fn validate_label_color(color: &str) -> bool {
@@ -943,14 +1011,24 @@ async fn create_label(
             "color must be a hex value like #6366f1",
         ));
     }
+    if let Some(icon) = &body.icon {
+        if !validate_label_icon(icon) {
+            return Err(AppError::validation("icon", "unknown label icon"));
+        }
+    }
 
     let id = util::new_id();
     let now = util::now_ms();
     let mut args = Args::new();
-    args.s(&id).s(&team_id).s(&name).s(&color).i(now);
+    args.s(&id)
+        .s(&team_id)
+        .s(&name)
+        .s(&color)
+        .opt_s(body.icon.clone())
+        .i(now);
     if let Err(e) = conn
         .execute(
-            "INSERT INTO labels (id, team_id, name, color, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO labels (id, team_id, name, color, icon, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             args,
         )
         .await
@@ -967,7 +1045,116 @@ async fn create_label(
             id,
             name,
             color,
+            icon: body.icon,
             created_at: now,
         }),
     ))
+}
+
+/// Update a team label (name/color/icon). Reuses the CreateLabel capability:
+/// label management is an owner/admin action.
+#[derive(Deserialize)]
+pub struct UpdateLabelRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub color: Option<String>,
+    /// `null` clears the icon; a whitelisted name sets it.
+    #[serde(default)]
+    pub icon: Option<Option<String>>,
+}
+
+async fn update_label(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path((team_id, label_id)): Path<(String, String)>,
+    Json(body): Json<UpdateLabelRequest>,
+) -> Result<Json<Label>, AppError> {
+    let mut conn = state.db.begin().await?;
+    require_membership(&mut conn, &team_id, &user.id).await?;
+    authorization::require_capability(&mut conn, &team_id, &user.id, Capability::CreateLabel)
+        .await?;
+
+    let mut args = Args::new();
+    args.s(&label_id).s(&team_id);
+    let row = conn
+        .fetch_optional(
+            "SELECT id, name, color, icon, created_at FROM labels WHERE id = ? AND team_id = ?",
+            args,
+        )
+        .await?
+        .ok_or(AppError::NotFound("label not found"))?;
+    let mut label = Label {
+        id: row.try_get("id")?,
+        name: row.try_get("name")?,
+        color: row.try_get("color")?,
+        icon: row.try_get("icon")?,
+        created_at: row.try_get("created_at")?,
+    };
+
+    if let Some(name) = &body.name {
+        let name = name.trim().to_string();
+        if name.is_empty() || name.chars().count() > 80 {
+            return Err(AppError::validation(
+                "name",
+                "label name must be 1-80 characters",
+            ));
+        }
+        label.name = name;
+    }
+    if let Some(color) = &body.color {
+        if !validate_label_color(color) {
+            return Err(AppError::validation(
+                "color",
+                "color must be a hex value like #6366f1",
+            ));
+        }
+        label.color = color.clone();
+    }
+    if let Some(icon) = &body.icon {
+        if let Some(icon) = icon {
+            if !validate_label_icon(icon) {
+                return Err(AppError::validation("icon", "unknown label icon"));
+            }
+            label.icon = Some(icon.clone());
+        } else {
+            label.icon = None;
+        }
+    }
+
+    let mut args = Args::new();
+    args.s(&label.name)
+        .s(&label.color)
+        .opt_s(label.icon.clone())
+        .s(&label_id);
+    conn.execute(
+        "UPDATE labels SET name = ?, color = ?, icon = ? WHERE id = ?",
+        args,
+    )
+    .await?;
+    conn.commit().await?;
+    Ok(Json(label))
+}
+
+/// Delete a team label. `task_labels` rows cascade via FK, so tasks simply
+/// lose the label — no task data is touched.
+async fn delete_label(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path((team_id, label_id)): Path<(String, String)>,
+) -> Result<StatusCode, AppError> {
+    let mut conn = state.db.begin().await?;
+    require_membership(&mut conn, &team_id, &user.id).await?;
+    authorization::require_capability(&mut conn, &team_id, &user.id, Capability::CreateLabel)
+        .await?;
+    let mut args = Args::new();
+    args.s(&label_id).s(&team_id);
+    let deleted = conn
+        .execute("DELETE FROM labels WHERE id = ? AND team_id = ?", args)
+        .await?;
+    if deleted == 0 {
+        return Err(AppError::NotFound("label not found"));
+    }
+    conn.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
 }

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CalendarRange, KanbanSquare, ListFilter, ListTodo, Plus, Search } from "lucide-react";
 import { api } from "@/api/client";
 import { TemplateManager } from "@/components/app/TemplateManager";
+import { DetailSidebar } from "@/components/app/DetailSidebar";
 import { useLabels, useMembers, useBoard, useTasks, useProject, useUpdateTask } from "@/api/hooks";
 import type { Task } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -413,9 +414,9 @@ export function ProjectPage() {
         </div>
 
         {selectedTask ? (
-          <aside className="hidden w-[380px] shrink-0 border-l lg:block" data-testid="task-panel">
+          <DetailSidebar>
             <TaskDetailLoader taskId={selectedTask.id} onClose={() => setSelectedTask(null)} />
-          </aside>
+          </DetailSidebar>
         ) : null}
       </div>
 

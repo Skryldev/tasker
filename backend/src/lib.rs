@@ -5,11 +5,14 @@
 //! authorization (`authorization`), and infrastructure (`db`, `security`).
 
 pub mod activity;
+pub mod attachments;
 pub mod auth;
 pub mod authorization;
 pub mod avatar;
+pub mod checklists;
 pub mod comments;
 pub mod config;
+pub mod dashboard;
 pub mod db;
 pub mod error;
 pub mod goals;

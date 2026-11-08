@@ -18,6 +18,7 @@
 //! Principal (Task 4).
 
 pub mod actions;
+pub mod api;
 pub mod conditions;
 pub mod dispatcher;
 pub mod engine;

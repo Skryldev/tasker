@@ -34,7 +34,7 @@ pub const STATUSES: [&str; 6] = [
 ];
 
 /// Canonical priorities, ascending importance.
-pub const PRIORITIES: [&str; 4] = ["low", "medium", "high", "urgent"];
+pub const PRIORITIES: [&str; 6] = ["none", "low", "medium", "high", "urgent", "critical"];
 
 pub fn validate_status(s: &str) -> Result<&'static str, AppError> {
     STATUSES
@@ -91,6 +91,8 @@ pub struct LabelBrief {
     pub id: String,
     pub name: String,
     pub color: String,
+    /// Optional Lucide icon name (Phase 12 WS5).
+    pub icon: Option<String>,
 }
 
 /// The latest acceptance decision. `None` = no outstanding decision (never
@@ -147,6 +149,10 @@ pub struct Task {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolved_at: Option<i64>,
     pub due_date: Option<String>,
+    /// Hard, non-negotiable cutoff (Phase 12 WS3). Distinct from due_date;
+    /// app enforces deadline >= due_date when both are set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deadline: Option<String>,
     pub position: f64,
     pub completed_at: Option<i64>,
     pub labels: Vec<LabelBrief>,
@@ -178,6 +184,7 @@ pub struct TaskCore {
     pub resolved_by: Option<String>,
     pub resolved_at: Option<i64>,
     pub due_date: Option<String>,
+    pub deadline: Option<String>,
     pub position: f64,
     pub completed_at: Option<i64>,
     pub created_at: i64,
@@ -187,7 +194,7 @@ pub struct TaskCore {
 
 const TASK_COLUMNS: &str = "id, team_id, project_id, parent_task_id, title, description, status, \
      priority, assignee_id, reporter_id, created_by, resolution, resolution_note, resolved_by, \
-     resolved_at, due_date, position, completed_at, created_at, updated_at, from_template_id";
+     resolved_at, due_date, deadline, position, completed_at, created_at, updated_at, from_template_id";
 
 fn row_to_task_core(row: &sqlx::any::AnyRow) -> Result<TaskCore, AppError> {
     Ok(TaskCore {
@@ -210,6 +217,7 @@ fn row_to_task_core(row: &sqlx::any::AnyRow) -> Result<TaskCore, AppError> {
         resolved_by: row.try_get("resolved_by")?,
         resolved_at: row.try_get("resolved_at")?,
         due_date: row.try_get("due_date")?,
+        deadline: row.try_get("deadline")?,
         position: row.try_get("position")?,
         completed_at: row.try_get("completed_at")?,
         created_at: row.try_get("created_at")?,
@@ -249,6 +257,7 @@ fn core_to_task(
             .and_then(|id| users_by_id.get(id).cloned()),
         resolved_at: core.resolved_at,
         due_date: core.due_date,
+        deadline: core.deadline,
         position: core.position,
         from_template_id: core.from_template_id,
         completed_at: core.completed_at,
@@ -326,7 +335,7 @@ async fn embed_extras(conn: &mut Conn<'_>, cores: Vec<TaskCore>) -> Result<Vec<T
     let label_rows = conn
         .fetch_all(
             &format!(
-                "SELECT tl.task_id, l.id, l.name, l.color \
+                "SELECT tl.task_id, l.id, l.name, l.color, l.icon \
                  FROM task_labels tl JOIN labels l ON l.id = tl.label_id \
                  WHERE tl.task_id IN ({placeholders}) ORDER BY l.name"
             ),
@@ -340,6 +349,7 @@ async fn embed_extras(conn: &mut Conn<'_>, cores: Vec<TaskCore>) -> Result<Vec<T
             id: row.try_get("id")?,
             name: row.try_get("name")?,
             color: row.try_get("color")?,
+            icon: row.try_get("icon")?,
         });
     }
 
@@ -370,6 +380,7 @@ struct TaskInput {
     status: &'static str,
     priority: &'static str,
     due_date: Option<String>,
+    deadline: Option<String>,
 }
 
 fn validate_task_fields(
@@ -378,6 +389,7 @@ fn validate_task_fields(
     status: &str,
     priority: &str,
     due_date: Option<&str>,
+    deadline: Option<&str>,
 ) -> Result<TaskInput, AppError> {
     let mut errors = Vec::new();
     let title = title.trim().to_string();
@@ -427,6 +439,7 @@ fn validate_task_fields(
             status,
             priority,
             due_date: due_date.map(std::string::ToString::to_string),
+            deadline: deadline.map(std::string::ToString::to_string),
         })
     } else {
         Err(AppError::Validation(errors))
@@ -546,6 +559,9 @@ pub struct CreateTaskRequest {
     pub reporter_id: Option<String>,
     #[serde(default)]
     pub due_date: Option<String>,
+    /// Hard cutoff (Phase 12 WS3); must be >= due_date when both are set.
+    #[serde(default)]
+    pub deadline: Option<String>,
     #[serde(default)]
     pub parent_task_id: Option<String>,
     #[serde(default)]
@@ -582,6 +598,18 @@ async fn create_subtask(
     .map(|task| (StatusCode::CREATED, Json(task)))
 }
 
+/// Phase 12 WS10: closed tasks are immutable across every field and
+/// interaction. No Owner/Admin override exists — if work must reopen, a new
+/// task is created (ADR-0015). Returns 409 with the `task-closed` slug.
+pub(crate) fn ensure_task_mutable(task: &TaskCore) -> Result<(), AppError> {
+    if task.status == "closed" {
+        return Err(AppError::Conflict(
+            "this task is closed and cannot be modified".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) async fn create_task_inner(
     state: AppState,
     user: AuthedUser,
@@ -595,7 +623,16 @@ pub(crate) async fn create_task_inner(
         body.status.as_deref().unwrap_or("backlog"),
         body.priority.as_deref().unwrap_or("medium"),
         body.due_date.as_deref(),
+        body.deadline.as_deref(),
     )?;
+    if let (Some(dd), Some(dl)) = (&input.due_date, &input.deadline) {
+        if dl < dd {
+            return Err(AppError::validation(
+                "deadline",
+                "deadline must be on or after the due date",
+            ));
+        }
+    }
     // New work always starts in an actionable state: reaching `resolved`,
     // `in_review` or `closed` requires the corresponding lifecycle transition
     // (resolve by the assignee, submission and acceptance by the reporter).
@@ -685,13 +722,14 @@ pub(crate) async fn create_task_inner(
         .opt_s(reporter_id.clone())
         .s(&user.id)
         .opt_s(input.due_date.clone())
+        .opt_s(input.deadline.clone())
         .f(position)
         .opt_i(completed_at)
         .i(now)
         .i(now);
     conn.execute(
-        "INSERT INTO tasks (id, team_id, project_id, parent_task_id, title, description, status, priority, assignee_id, reporter_id, created_by, due_date, position, completed_at, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (id, team_id, project_id, parent_task_id, title, description, status, priority, assignee_id, reporter_id, created_by, due_date, deadline, position, completed_at, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         args,
     )
     .await?;
@@ -770,6 +808,7 @@ pub(crate) async fn create_task_inner(
         resolved_by: None,
         resolved_at: None,
         due_date: input.due_date,
+        deadline: input.deadline,
         position,
         completed_at,
         created_at: now,
@@ -1175,6 +1214,9 @@ pub struct UpdateTaskRequest {
     pub reporter_id: Option<String>,
     #[serde(default)]
     pub due_date: Option<String>,
+    /// Hard cutoff (Phase 12 WS3); must be >= due_date when both are set.
+    #[serde(default)]
+    pub deadline: Option<String>,
     #[serde(default)]
     pub label_ids: Option<Vec<String>>,
 }
@@ -1534,6 +1576,7 @@ async fn update_task(
 ) -> Result<Json<Task>, AppError> {
     let mut conn = state.db.begin().await?;
     let (task, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
+    ensure_task_mutable(&task)?;
     let can_update_any = actor.can(Capability::UpdateAnyTask);
     let is_own = task.created_by == user.id || task.assignee_id.as_deref() == Some(&user.id);
     if !can_update_any && !is_own {
@@ -1561,7 +1604,16 @@ async fn update_task(
         body.status.as_deref().unwrap_or(&task.status),
         body.priority.as_deref().unwrap_or(&task.priority),
         body.due_date.as_deref().or(task.due_date.as_deref()),
+        body.deadline.as_deref().or(task.deadline.as_deref()),
     )?;
+    if let (Some(dd), Some(dl)) = (&input.due_date, &input.deadline) {
+        if dl < dd {
+            return Err(AppError::validation(
+                "deadline",
+                "deadline must be on or after the due date",
+            ));
+        }
+    }
 
     // Assignee rules: privileged roles assign freely; plain members may only
     // claim a task for themselves. Clearing an assignment is allowed when the
@@ -1821,6 +1873,7 @@ async fn update_task(
         resolved_by: task.resolved_by,
         resolved_at: task.resolved_at,
         due_date: input.due_date,
+        deadline: task.deadline,
         position: task.position,
         completed_at: task.completed_at,
         created_at: task.created_at,
@@ -1967,6 +2020,11 @@ async fn delete_task(
     user: AuthedUser,
     Path(task_id): Path<String>,
 ) -> Result<StatusCode, AppError> {
+    {
+        let mut conn = state.db.conn();
+        let (task, _) = require_task_access(&mut conn, &task_id, &user.id).await?;
+        ensure_task_mutable(&task)?;
+    }
     let mut conn = state.db.begin().await?;
     let (task, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
     let can_delete_any = actor.can(Capability::DeleteAnyTask);
@@ -2022,6 +2080,7 @@ async fn set_task_position(
 ) -> Result<StatusCode, AppError> {
     let mut conn = state.db.begin().await?;
     let (task, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
+    ensure_task_mutable(&task)?;
     let can_update_any = actor.can(Capability::UpdateAnyTask);
     let is_own = task.created_by == user.id || task.assignee_id.as_deref() == Some(&user.id);
     if !can_update_any && !is_own {
@@ -2264,6 +2323,7 @@ async fn my_tasks(
                 resolved_by: row.try_get("resolved_by")?,
                 resolved_at: row.try_get("resolved_at")?,
                 due_date: row.try_get("due_date")?,
+                deadline: row.try_get("deadline")?,
                 position: row.try_get("position")?,
                 completed_at: row.try_get("completed_at")?,
                 created_at: row.try_get("created_at")?,

@@ -84,6 +84,17 @@ describe("LoginForm", () => {
       id: "u1",
       email: "admin@tasker.local",
       display_name: "Ada",
+      username: null,
+      bio: null,
+      timezone: null,
+      notification_prefs: {
+        task_assigned: true,
+        comment_mention: true,
+        task_submitted: true,
+        task_accepted: true,
+        task_rejected: true,
+        task_status_changed: true,
+      },
       created_at: 0,
       mfa_enabled: false, capacity_limit: 10,
     });

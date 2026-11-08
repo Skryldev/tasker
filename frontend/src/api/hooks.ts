@@ -5,7 +5,7 @@ import {
   useQueryClient,
   keepPreviousData,
 } from "@tanstack/react-query";
-import { api, ApiError, type NotificationPrefs, type Task, type TaskCreate, type TaskUpdate } from "./client";
+import { api, ApiError, type DashboardWindow, type NotificationPrefs, type Task, type TaskCreate, type TaskUpdate } from "./client";
 
 export const queryKeys = {
   me: ["me"] as const,
@@ -25,6 +25,10 @@ export const queryKeys = {
   sessions: ["sessions"] as const,
   userInfo: (ids: string) => ["user-info", ids] as const,
   teamGuests: (teamId: string) => ["team-guests", teamId] as const,
+  checklist: (taskId: string) => ["checklist", taskId] as const,
+  progress: (taskId: string) => ["progress", taskId] as const,
+  attachments: (taskId: string) => ["attachments", taskId] as const,
+  dashboard: (teamId: string, window: string) => ["dashboard", teamId, window] as const,
 };
 
 export function useMe() {
@@ -392,5 +396,104 @@ export function useDeleteComment(taskId: string) {
       void qc.invalidateQueries({ queryKey: ["comments", taskId] });
       void qc.invalidateQueries({ queryKey: ["activity", taskId] });
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 12 WS4: task checklists + combined progress
+// ---------------------------------------------------------------------------
+
+export function useChecklist(taskId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.checklist(taskId ?? ""),
+    queryFn: () => api.listChecklist(taskId!),
+    enabled: Boolean(taskId),
+  });
+}
+
+export function useTaskProgress(taskId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.progress(taskId ?? ""),
+    queryFn: () => api.taskProgress(taskId!),
+    enabled: Boolean(taskId),
+  });
+}
+
+/** Invalidate the checklist and the combined progress counter together. */
+function useInvalidateChecklist(taskId: string) {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ["checklist", taskId] });
+    void qc.invalidateQueries({ queryKey: ["progress", taskId] });
+  };
+}
+
+export function useCreateChecklistItem(taskId: string) {
+  const invalidate = useInvalidateChecklist(taskId);
+  return useMutation({
+    mutationFn: (title: string) => api.createChecklistItem(taskId, title),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateChecklistItem(taskId: string) {
+  const invalidate = useInvalidateChecklist(taskId);
+  return useMutation({
+    mutationFn: ({ itemId, body }: { itemId: string; body: { title?: string; is_checked?: boolean } }) =>
+      api.updateChecklistItem(itemId, body),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteChecklistItem(taskId: string) {
+  const invalidate = useInvalidateChecklist(taskId);
+  return useMutation({
+    mutationFn: (itemId: string) => api.deleteChecklistItem(itemId),
+    onSuccess: invalidate,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 12 WS11: task attachments
+// ---------------------------------------------------------------------------
+
+export function useAttachments(taskId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.attachments(taskId ?? ""),
+    queryFn: () => api.listAttachments(taskId!),
+    enabled: Boolean(taskId),
+  });
+}
+
+export function useUploadAttachment(taskId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => api.uploadAttachment(taskId, file),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["attachments", taskId] });
+    },
+  });
+}
+
+export function useDeleteAttachment(taskId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (attachmentId: string) => api.deleteAttachment(attachmentId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["attachments", taskId] });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 12 WS14: team dashboard
+// ---------------------------------------------------------------------------
+
+export function useDashboard(teamId: string | undefined, window: DashboardWindow = "7d") {
+  return useQuery({
+    queryKey: queryKeys.dashboard(teamId ?? "", window),
+    queryFn: () => api.teamDashboard(teamId!, window),
+    enabled: Boolean(teamId),
+    staleTime: 30_000,
   });
 }

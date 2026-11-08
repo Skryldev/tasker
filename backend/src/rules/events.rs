@@ -53,6 +53,17 @@ pub enum TriggerType {
 }
 
 impl TriggerType {
+    /// Parse the serialized trigger name (API input validation).
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "task_status_changed" => Some(Self::TaskStatusChanged),
+            "task_priority_changed" => Some(Self::TaskPriorityChanged),
+            "task_assigned" => Some(Self::TaskAssigned),
+            _ => None,
+        }
+    }
+
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {

@@ -15,7 +15,7 @@ name = "tasker"
 path = "src/main.rs"
 
 [dependencies]
-axum = { version = "0.8", features = ["http2", "matched-path", "json"] }
+axum = { version = "0.8", features = ["http2", "matched-path", "json", "multipart"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
 tower-http = { version = "0.6", features = ["trace", "cors", "fs", "set-header", "timeout"] }
 

@@ -720,7 +720,9 @@ mod tests {
 
     #[test]
     fn rejects_priority_field_with_unknown_priority_value() {
-        let json = leaf("task.priority", "critical");
+        // Phase 12 WS2 made "critical" a valid priority level; "catastrophic"
+        // remains outside the closed vocabulary.
+        let json = leaf("task.priority", "catastrophic");
         assert!(
             Condition::from_json_str(&json).unwrap_err().0[0]
                 .message

@@ -43,6 +43,9 @@
     },
     {
       "name": "ops"
+    },
+    {
+      "name": "rules"
     }
   ],
   "security": [
@@ -399,40 +402,6 @@
             "$ref": "#/components/responses/Problem401"
           }
         }
-      },
-      "patch": {
-        "tags": [
-          "users"
-        ],
-        "summary": "Update the session user's profile",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateProfileRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The updated profile.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/User"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Problem401"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem422"
-          }
-        }
       }
     },
     "/me/password": {
@@ -503,27 +472,6 @@
           },
           {
             "$ref": "#/components/parameters/PageSize"
-          },
-          {
-            "name": "overdue",
-            "in": "query",
-            "required": false,
-            "description": "Restrict to open tasks whose due date has passed.",
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
-            "name": "mentioned",
-            "in": "query",
-            "required": false,
-            "description": "`unread` restricts to tasks with an unread mention in the trailing 7 days.",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "unread"
-              ]
-            }
           }
         ],
         "responses": {
@@ -677,22 +625,6 @@
                   "description": {
                     "type": "string",
                     "maxLength": 1000
-                  },
-                  "timezone": {
-                    "type": "string",
-                    "description": "IANA timezone name."
-                  },
-                  "avatar": {
-                    "oneOf": [
-                      {
-                        "type": "string",
-                        "description": "data URL of a square JPG, PNG or WebP image, at most 2 MB decoded."
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "null clears the team avatar."
                   }
                 }
               }
@@ -709,45 +641,6 @@
                 }
               }
             }
-          },
-          "403": {
-            "$ref": "#/components/responses/Problem403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Problem404"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem422"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "teams"
-        ],
-        "summary": "Delete the team permanently (Owner only)",
-        "description": "Irreversible. Requires the exact team name and the caller's current password. Removes all projects, tasks, labels, and automation history of the team.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/TeamId"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeleteTeamRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "No content."
-          },
-          "401": {
-            "$ref": "#/components/responses/Problem401"
           },
           "403": {
             "$ref": "#/components/responses/Problem403"
@@ -1031,6 +924,11 @@
                   "color": {
                     "type": "string",
                     "pattern": "^#[0-9a-fA-F]{6}$"
+                  },
+                  "icon": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Optional whitelisted Lucide icon name."
                   }
                 }
               }
@@ -1250,35 +1148,6 @@
           },
           "422": {
             "$ref": "#/components/responses/Problem422"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Soft-delete a project (Owner/Admin)",
-        "description": "Hides the project and its tasks from all users; recoverable within the 30-day retention window via POST /projects/{project_id}/restore. Managers archive, they do not delete. See docs/adr-0013-project-delete.md.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ProjectId"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "No content."
-          },
-          "401": {
-            "$ref": "#/components/responses/Problem401"
-          },
-          "403": {
-            "$ref": "#/components/responses/Problem403"
-          },
-          "404": {
-            "$ref": "#/components/responses/Problem404"
-          },
-          "409": {
-            "$ref": "#/components/responses/Problem409"
           }
         }
       }
@@ -3459,6 +3328,356 @@
         }
       }
     },
+    "/teams/{team_id}/rules": {
+      "post": {
+        "tags": [
+          "rules"
+        ],
+        "summary": "Create an automation rule (Owner/Admin)",
+        "description": "Condition and action payloads are validated against the typed DSL. Rule names are unique per team; archived rules keep their names reserved. Creating a rule writes immutable version 1.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleUpsert"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Rule created (version 1).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rule"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "rules"
+        ],
+        "summary": "List team rules (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "trigger_type",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "task_status_changed",
+                "task_priority_changed",
+                "task_assigned"
+              ]
+            }
+          },
+          {
+            "name": "enabled",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated live (non-archived) rules.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RulePage"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/rules/{rule_id}": {
+      "get": {
+        "tags": [
+          "rules"
+        ],
+        "summary": "Rule details (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RuleId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The current rule aggregate.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rule"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "rules"
+        ],
+        "summary": "Update a rule (Owner/Admin, optimistic CAS)",
+        "description": "Writes a new immutable version and bumps `current_version` atomically. A stale `expected_version` yields 409. Archived rules are read-only.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RuleId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated rule (new current version).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rule"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/rules/{rule_id}/enable": {
+      "post": {
+        "tags": [
+          "rules"
+        ],
+        "summary": "Enable a rule (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RuleId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rule enabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rule"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          }
+        }
+      }
+    },
+    "/rules/{rule_id}/disable": {
+      "post": {
+        "tags": [
+          "rules"
+        ],
+        "summary": "Disable a rule (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RuleId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rule disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rule"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/rules/{rule_id}/archive": {
+      "post": {
+        "tags": [
+          "rules"
+        ],
+        "summary": "Archive a rule (Owner/Admin)",
+        "description": "Archiving stops future evaluation, keeps the name reserved, and preserves all history. Irreversible in this phase.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RuleId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rule archived.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rule"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/rules/{rule_id}/versions": {
+      "get": {
+        "tags": [
+          "rules"
+        ],
+        "summary": "Immutable version history (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RuleId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All immutable versions, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RuleVersion"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/rules/{rule_id}/history": {
+      "get": {
+        "tags": [
+          "rules"
+        ],
+        "summary": "Execution history (Owner/Admin/Manager)",
+        "description": "Paginated per-event execution records with action-level outcomes. Survives task deletion by design.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RuleId"
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated execution history.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleHistoryPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
     "/me/summary": {
       "get": {
         "tags": [
@@ -4033,6 +4252,476 @@
           }
         }
       }
+    },
+    "/tasks/{task_id}/checklist": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "List checklist items",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TaskId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checklist items.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecklistItemList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Add a checklist item",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TaskId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChecklistItemRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecklistItem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/checklist/{item_id}": {
+      "patch": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Update a checklist item (toggle/edit)",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateChecklistItemRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecklistItem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Delete a checklist item",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          }
+        }
+      }
+    },
+    "/tasks/{task_id}/progress": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Combined progress from subtasks + checklist",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TaskId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Progress counters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProgress"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/dashboard": {
+      "get": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Team dashboard KPIs (Manager+)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "description": "Aggregation window for throughput/cycle/lead.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "7d",
+                "30d",
+                "90d"
+              ],
+              "default": "7d"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "KPI snapshot.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/labels/{label_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TeamId"
+        },
+        {
+          "name": "label_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "patch": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Update a team label (Owner/Admin/Manager)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLabelRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated label.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Label"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Delete a team label (Owner/Admin/Manager)",
+        "responses": {
+          "204": {
+            "description": "No content. Task-label rows cascade; tasks are untouched."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/tasks/{task_id}/attachments": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "List task attachments",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TaskId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attachments oldest-first; soft-deleted excluded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Upload an attachment (multipart)",
+        "description": "Multipart form with exactly one `file` part. Task editors only; closed tasks and archived projects reject with 409.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TaskId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "At most TASKER_ATTACHMENTS_MAX_MB (default 25 MB); empty files are rejected."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Attachment"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          },
+          "413": {
+            "description": "Payload too large (exceeds the configured attachment limit)."
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/attachments/{attachment_id}": {
+      "parameters": [
+        {
+          "name": "attachment_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Download an attachment",
+        "responses": {
+          "200": {
+            "description": "Raw bytes with the stored MIME type, `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`.",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Soft-delete an attachment (task editors only)",
+        "responses": {
+          "204": {
+            "description": "No content."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4064,6 +4753,15 @@
       },
       "TaskId": {
         "name": "task_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "RuleId": {
+        "name": "rule_id",
         "in": "path",
         "required": true,
         "schema": {
@@ -4109,6 +4807,15 @@
       },
       "UserId": {
         "name": "user_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "SessionId": {
+        "name": "session_id",
         "in": "path",
         "required": true,
         "schema": {
@@ -4176,15 +4883,6 @@
         "schema": {
           "type": "string",
           "example": "high,urgent"
-        }
-      },
-      "SessionId": {
-        "name": "session_id",
-        "in": "path",
-        "required": true,
-        "schema": {
-          "type": "string",
-          "format": "uuid"
         }
       }
     },
@@ -4321,7 +5019,11 @@
           "email",
           "display_name",
           "created_at",
-          "mfa_enabled"
+          "mfa_enabled",
+          "username",
+          "bio",
+          "timezone",
+          "notification_prefs"
         ],
         "properties": {
           "id": {
@@ -4343,13 +5045,19 @@
             "type": "boolean",
             "description": "Whether TOTP two-factor authentication is enabled for this account."
           },
+          "capacity_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 10
+          },
           "username": {
             "type": [
               "string",
               "null"
             ],
             "pattern": "^[a-z0-9_]{3,32}$",
-            "description": "Unique @mention handle; null until the user sets one."
+            "description": "Unique @mention handle."
           },
           "bio": {
             "type": [
@@ -4357,24 +5065,17 @@
               "null"
             ],
             "maxLength": 200,
-            "description": "Short bio shown on avatar hover cards."
+            "description": "Short bio."
           },
           "timezone": {
             "type": [
               "string",
               "null"
             ],
-            "description": "IANA timezone used to display dates (e.g. Europe/Berlin)."
+            "description": "IANA timezone."
           },
           "notification_prefs": {
             "$ref": "#/components/schemas/NotificationPrefs"
-          },
-          "capacity_limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100,
-            "default": 10,
-            "description": "Forward-looking capacity unit used by the Capacity view."
           }
         }
       },
@@ -4545,19 +5246,19 @@
               null
             ]
           },
-          "timezone": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Default timezone for the team."
-          },
           "archived_at": {
             "type": [
               "integer",
               "null"
             ],
-            "description": "Set when the team is archived; null while active."
+            "description": "Archive timestamp."
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Default timezone."
           }
         }
       },
@@ -4599,7 +5300,8 @@
           "id",
           "name",
           "color",
-          "created_at"
+          "created_at",
+          "icon"
         ],
         "properties": {
           "id": {
@@ -4615,6 +5317,14 @@
           },
           "created_at": {
             "type": "integer"
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64,
+            "description": "Optional Lucide icon name from the app whitelist (see `LABEL_ICONS` in the API); null = no icon."
           }
         }
       },
@@ -4623,7 +5333,8 @@
         "required": [
           "id",
           "name",
-          "color"
+          "color",
+          "icon"
         ],
         "properties": {
           "id": {
@@ -4635,6 +5346,14 @@
           },
           "color": {
             "type": "string"
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64,
+            "description": "Optional Lucide icon name from the app whitelist."
           }
         }
       },
@@ -4708,13 +5427,6 @@
           "is_guest": {
             "type": "boolean",
             "description": "True when the caller reaches this project through a guest grant (read-only)."
-          },
-          "deleted_at": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "description": "Soft-delete timestamp (epoch ms). Present only on soft-deleted projects (trash view); live payloads omit the field."
           }
         }
       },
@@ -4752,10 +5464,12 @@
           "priority": {
             "type": "string",
             "enum": [
+              "none",
               "low",
               "medium",
               "high",
-              "urgent"
+              "urgent",
+              "critical"
             ]
           },
           "assignee_id": {
@@ -4786,6 +5500,11 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date",
+            "description": "Hard cutoff; must be >= due_date when both set."
           }
         }
       },
@@ -4809,10 +5528,12 @@
           "priority": {
             "type": "string",
             "enum": [
+              "none",
               "low",
               "medium",
               "high",
-              "urgent"
+              "urgent",
+              "critical"
             ]
           },
           "assignee_id": {
@@ -4843,6 +5564,19 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          "deadline": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date",
+                "description": "Hard cutoff; must be >= due_date when both set."
+              },
+              {
+                "type": "null",
+                "description": "Clears the deadline."
+              }
+            ]
           }
         }
       },
@@ -4902,10 +5636,12 @@
           "priority": {
             "type": "string",
             "enum": [
+              "none",
               "low",
               "medium",
               "high",
-              "urgent"
+              "urgent",
+              "critical"
             ]
           },
           "assignee": {
@@ -4982,8 +5718,7 @@
             "format": "date"
           },
           "position": {
-            "type": "number",
-            "description": "Manual ordering position within (project, status). Midpoint-computed."
+            "type": "number"
           },
           "completed_at": {
             "type": [
@@ -5011,12 +5746,19 @@
               "$ref": "#/components/schemas/Task"
             }
           },
+          "deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Hard cutoff; app enforces deadline >= due_date."
+          },
           "from_template_id": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Template provenance; absent for directly created tasks."
+            "description": "Template provenance."
           }
         }
       },
@@ -5400,10 +6142,12 @@
           "default_priority": {
             "type": "string",
             "enum": [
+              "none",
               "low",
               "medium",
               "high",
-              "urgent"
+              "urgent",
+              "critical"
             ]
           },
           "label_ids": {
@@ -5428,14 +6172,6 @@
           },
           "updated_at": {
             "type": "integer"
-          },
-          "default_subtasks": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 20,
-            "description": "Subtask titles applied when creating a task from this template."
           }
         }
       },
@@ -5463,10 +6199,12 @@
           "default_priority": {
             "type": "string",
             "enum": [
+              "none",
               "low",
               "medium",
               "high",
-              "urgent"
+              "urgent",
+              "critical"
             ]
           },
           "label_ids": {
@@ -5984,7 +6722,7 @@
               "string",
               "null"
             ],
-            "description": "Parent comment id for replies (depth 2). Absent for top-level comments."
+            "description": "Parent comment id for replies."
           }
         }
       },
@@ -6051,6 +6789,413 @@
           },
           "created_at": {
             "type": "integer"
+          }
+        }
+      },
+      "Rule": {
+        "type": "object",
+        "required": [
+          "id",
+          "team_id",
+          "name",
+          "trigger_type",
+          "enabled",
+          "current_version",
+          "condition",
+          "actions",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "team_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          },
+          "trigger_type": {
+            "type": "string",
+            "enum": [
+              "task_status_changed",
+              "task_priority_changed",
+              "task_assigned"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "current_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "condition": {
+            "description": "Typed condition DSL tree (see docs/rules-engine.md).",
+            "type": "object"
+          },
+          "actions": {
+            "description": "1-5 typed action objects in execution order.",
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "type": "object"
+            }
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "integer"
+          },
+          "archived_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "RuleUpsert": {
+        "type": "object",
+        "required": [
+          "name",
+          "trigger_type",
+          "condition",
+          "actions"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "trigger_type": {
+            "type": "string",
+            "enum": [
+              "task_status_changed",
+              "task_priority_changed",
+              "task_assigned"
+            ]
+          },
+          "condition": {
+            "description": "Typed condition DSL tree (strictly validated; unknown fields rejected).",
+            "type": "object"
+          },
+          "actions": {
+            "description": "1-5 typed actions (add_comment / send_notification / send_message).",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 5,
+            "items": {
+              "type": "object"
+            }
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "RuleUpdate": {
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          },
+          "trigger_type": {
+            "type": "string",
+            "enum": [
+              "task_status_changed",
+              "task_priority_changed",
+              "task_assigned"
+            ]
+          },
+          "condition": {
+            "type": "object"
+          },
+          "actions": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "type": "object"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "expected_version": {
+            "description": "Optimistic concurrency guard (current_version seen by the caller).",
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "RuleVersion": {
+        "type": "object",
+        "required": [
+          "version",
+          "trigger_type",
+          "condition",
+          "actions",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "trigger_type": {
+            "type": "string",
+            "enum": [
+              "task_status_changed",
+              "task_priority_changed",
+              "task_assigned"
+            ]
+          },
+          "condition": {
+            "type": "object"
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "RulePage": {
+        "type": "object",
+        "required": [
+          "items",
+          "page",
+          "page_size",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            }
+          },
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "RuleHistoryPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "page",
+          "page_size",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuleExecution"
+            }
+          },
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "RuleExecution": {
+        "type": "object",
+        "required": [
+          "id",
+          "rule_version",
+          "event_id",
+          "event_type",
+          "event_origin",
+          "trigger_type",
+          "condition_result",
+          "status",
+          "created_at",
+          "actions"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rule_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "task_status_changed",
+              "task_priority_changed",
+              "task_assigned"
+            ]
+          },
+          "event_origin": {
+            "type": "string",
+            "enum": [
+              "user",
+              "automation"
+            ]
+          },
+          "occurred_at": {
+            "type": "integer"
+          },
+          "actor_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "trigger_type": {
+            "type": "string",
+            "enum": [
+              "task_status_changed",
+              "task_priority_changed",
+              "task_assigned"
+            ]
+          },
+          "condition_result": {
+            "type": "string",
+            "enum": [
+              "matched",
+              "not_matched"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "planned",
+              "completed",
+              "failed"
+            ]
+          },
+          "planned_actions": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error_category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error_detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "completed_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "actions": {
+            "description": "Action-level outcomes recorded in the idempotency ledger.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "action_type",
+                "outcome",
+                "outbox_status"
+              ],
+              "properties": {
+                "action_type": {
+                  "type": "string",
+                  "enum": [
+                    "send_notification",
+                    "add_comment",
+                    "send_message"
+                  ]
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "completed",
+                    "skipped"
+                  ]
+                },
+                "outbox_status": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
           }
         }
       },
@@ -6156,7 +7301,7 @@
           "capacity_limit": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 100,
+            "maximum": 1000,
             "description": "Clamped server-side; absent leaves the stored value untouched."
           }
         }
@@ -6575,10 +7720,12 @@
           "priority": {
             "type": "string",
             "enum": [
+              "none",
               "low",
               "medium",
               "high",
-              "urgent"
+              "urgent",
+              "critical"
             ]
           },
           "assignee_id": {
@@ -6623,6 +7770,317 @@
             "$ref": "#/components/schemas/Task"
           }
         ]
+      },
+      "ChecklistItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "task_id",
+          "title",
+          "is_checked",
+          "position",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "is_checked": {
+            "type": "boolean"
+          },
+          "position": {
+            "type": "number"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "ChecklistItemList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChecklistItem"
+            }
+          }
+        }
+      },
+      "CreateChecklistItemRequest": {
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "position": {
+            "type": "number"
+          }
+        }
+      },
+      "UpdateChecklistItemRequest": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "is_checked": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TaskProgress": {
+        "type": "object",
+        "required": [
+          "subtasks_total",
+          "subtasks_closed",
+          "checklist_total",
+          "checklist_checked"
+        ],
+        "properties": {
+          "subtasks_total": {
+            "type": "integer"
+          },
+          "subtasks_closed": {
+            "type": "integer"
+          },
+          "checklist_total": {
+            "type": "integer"
+          },
+          "checklist_checked": {
+            "type": "integer"
+          },
+          "progress_pct": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "0-100; null when nothing to track."
+          }
+        }
+      },
+      "DashboardKpis": {
+        "type": "object",
+        "required": [
+          "throughput",
+          "throughput_prev",
+          "cycle_time_days",
+          "lead_time_days",
+          "wip",
+          "overdue",
+          "deadline_risk",
+          "review_load",
+          "priority_mix"
+        ],
+        "properties": {
+          "throughput": {
+            "type": "integer",
+            "description": "Tasks closed in the window."
+          },
+          "throughput_prev": {
+            "type": "integer",
+            "description": "Tasks closed in the previous window."
+          },
+          "cycle_time_days": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Avg days from first in_progress to close (null when no matches)."
+          },
+          "lead_time_days": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Avg days from creation to close (null when no matches)."
+          },
+          "wip": {
+            "type": "integer",
+            "description": "Open tasks currently in_progress or in_review."
+          },
+          "overdue": {
+            "type": "integer",
+            "description": "Open tasks past their due date."
+          },
+          "deadline_risk": {
+            "type": "integer",
+            "description": "Open tasks with a deadline within the next 7 days."
+          },
+          "review_load": {
+            "type": "integer",
+            "description": "Tasks currently in review."
+          },
+          "priority_mix": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Open task count per priority level."
+          },
+          "capacity_utilization": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Team-wide assigned-open / capacity, clamped to 2.0; null when no member sets capacity."
+          }
+        }
+      },
+      "DashboardReviewRow": {
+        "type": "object",
+        "required": [
+          "reporter_id",
+          "display_name",
+          "count"
+        ],
+        "properties": {
+          "reporter_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
+      },
+      "DashboardResponse": {
+        "type": "object",
+        "required": [
+          "window_days",
+          "kpis",
+          "review_by_reporter"
+        ],
+        "properties": {
+          "window_days": {
+            "type": "integer",
+            "enum": [
+              7,
+              30,
+              90
+            ]
+          },
+          "kpis": {
+            "$ref": "#/components/schemas/DashboardKpis"
+          },
+          "review_by_reporter": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardReviewRow"
+            }
+          }
+        }
+      },
+      "UpdateLabelRequest": {
+        "type": "object",
+        "description": "Label fields to change. Absent fields are untouched.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "icon": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "description": "Whitelisted Lucide icon name."
+              },
+              {
+                "type": "null",
+                "description": "Clears the icon."
+              }
+            ]
+          }
+        }
+      },
+      "Attachment": {
+        "type": "object",
+        "required": [
+          "id",
+          "task_id",
+          "filename",
+          "mime_type",
+          "size_bytes",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filename": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "description": "Stored byte size."
+          },
+          "uploaded_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UserBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "AttachmentList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attachment"
+            }
+          }
+        }
       }
     }
   }

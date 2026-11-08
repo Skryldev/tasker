@@ -1,3 +1,4 @@
+# Canonical source: api/openapi.json — regenerated, do not hand-edit.
 openapi: 3.1.0
 info:
   title: Tasker API
@@ -44,13 +45,14 @@ tags:
   - name: comments
   - name: activity
   - name: ops
+  - name: rules
 security:
   - cookieAuth: []
-
 paths:
   /auth/login:
     post:
-      tags: [auth]
+      tags:
+        - auth
       summary: Authenticate with email and password
       description: Sets the session cookie. Rate limited per client IP.
       security: []
@@ -60,7 +62,9 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email, password]
+              required:
+                - email
+                - password
               properties:
                 email:
                   type: string
@@ -68,7 +72,7 @@ paths:
                 password:
                   type: string
       responses:
-        "200":
+        '200':
           description: |
             Authenticated. Two shapes:
             - users WITHOUT two-factor authentication: the user, session cookie set;
@@ -83,16 +87,16 @@ paths:
             application/json:
               schema:
                 oneOf:
-                  - $ref: "#/components/schemas/User"
-                  - $ref: "#/components/schemas/MfaRequired"
-        "401":
-          $ref: "#/components/responses/Problem401"
-        "429":
-          $ref: "#/components/responses/Problem429"
-
+                  - $ref: '#/components/schemas/User'
+                  - $ref: '#/components/schemas/MfaRequired'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '429':
+          $ref: '#/components/responses/Problem429'
   /auth/2fa/setup:
     post:
-      tags: [auth]
+      tags:
+        - auth
       summary: Begin TOTP two-factor enrollment (normal session required)
       description: |
         Generates a fresh pending TOTP secret, stores it encrypted
@@ -101,22 +105,22 @@ paths:
         setup replaces the pending secret. Responses are `Cache-Control:
         no-store`. An MFA-pending token cannot call this endpoint.
       responses:
-        "200":
+        '200':
           description: Pending provisioning information.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MfaSetup"
-        "401":
-          $ref: "#/components/responses/Problem401"
-        "409":
-          $ref: "#/components/responses/Problem409"
-        "500":
-          $ref: "#/components/responses/Problem500"
-
+                $ref: '#/components/schemas/MfaSetup'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '500':
+          $ref: '#/components/responses/Problem500'
   /auth/2fa/enable:
     post:
-      tags: [auth]
+      tags:
+        - auth
       summary: Confirm enrollment with a six-digit TOTP code
       description: |
         Verifies the code against the pending secret (window 0: only the
@@ -128,26 +132,26 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TotpCode"
+              $ref: '#/components/schemas/TotpCode'
       responses:
-        "200":
+        '200':
           description: MFA enabled; recovery codes returned exactly once.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RecoveryCodes"
-        "400":
-          $ref: "#/components/responses/Problem400"
-        "401":
-          $ref: "#/components/responses/Problem401"
-        "409":
-          $ref: "#/components/responses/Problem409"
-        "422":
-          $ref: "#/components/responses/Problem422"
-
+                $ref: '#/components/schemas/RecoveryCodes'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /auth/2fa/verify:
     post:
-      tags: [auth]
+      tags:
+        - auth
       summary: Complete two-factor login (MFA-pending token required)
       description: |
         Accepts either a six-digit TOTP code or a recovery code
@@ -162,9 +166,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/MfaVerify"
+              $ref: '#/components/schemas/MfaVerify'
       responses:
-        "200":
+        '200':
           description: Two-factor check passed; session cookie set.
           headers:
             Set-Cookie:
@@ -173,15 +177,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/User"
-        "401":
-          $ref: "#/components/responses/Problem401"
-        "429":
-          $ref: "#/components/responses/Problem429"
-
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '429':
+          $ref: '#/components/responses/Problem429'
   /auth/2fa/disable:
     post:
-      tags: [auth]
+      tags:
+        - auth
       summary: Disable two-factor authentication (password re-authentication)
       description: |
         Requires the current password. Removes the encrypted TOTP secret and
@@ -192,18 +196,18 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CurrentPassword"
+              $ref: '#/components/schemas/CurrentPassword'
       responses:
-        "204":
+        '204':
           description: Two-factor authentication disabled.
-        "401":
-          $ref: "#/components/responses/Problem401"
-        "422":
-          $ref: "#/components/responses/Problem422"
-
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /auth/2fa/recovery-codes:
     post:
-      tags: [auth]
+      tags:
+        - auth
       summary: Regenerate recovery codes (password re-authentication)
       description: |
         Requires the current password and enabled MFA. Replaces all stored
@@ -214,33 +218,34 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CurrentPassword"
+              $ref: '#/components/schemas/CurrentPassword'
       responses:
-        "200":
+        '200':
           description: Ten new recovery codes.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RecoveryCodes"
-        "400":
-          $ref: "#/components/responses/Problem400"
-        "401":
-          $ref: "#/components/responses/Problem401"
-        "422":
-          $ref: "#/components/responses/Problem422"
-
+                $ref: '#/components/schemas/RecoveryCodes'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /auth/logout:
     post:
-      tags: [auth]
+      tags:
+        - auth
       summary: Revoke the current session
       responses:
-        "204":
+        '204':
           description: Session revoked and cookie cleared.
-        "401":
-          $ref: "#/components/responses/Problem401"
+        '401':
+          $ref: '#/components/responses/Problem401'
   /auth/register:
     post:
-      tags: [auth]
+      tags:
+        - auth
       summary: Public self-registration (if enabled)
       description: |
         Returns 403 when the deployment disables public registration
@@ -252,38 +257,51 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email, display_name, password]
+              required:
+                - email
+                - display_name
+                - password
               properties:
-                email: { type: string, maxLength: 255 }
-                display_name: { type: string, minLength: 1, maxLength: 120 }
-                password: { type: string, minLength: 10, maxLength: 128 }
+                email:
+                  type: string
+                  maxLength: 255
+                display_name:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                password:
+                  type: string
+                  minLength: 10
+                  maxLength: 128
       responses:
-        "201":
+        '201':
           description: User created.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/User"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "422":
-          $ref: "#/components/responses/Problem422"
+                $ref: '#/components/schemas/User'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /me:
     get:
-      tags: [users]
+      tags:
+        - users
       summary: Current authenticated user
       responses:
-        "200":
+        '200':
           description: The session user.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/User"
-        "401":
-          $ref: "#/components/responses/Problem401"
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Problem401'
   /me/password:
     put:
-      tags: [users]
+      tags:
+        - users
       summary: Change own password
       description: Revokes all other sessions of the user on success.
       requestBody:
@@ -292,59 +310,68 @@ paths:
           application/json:
             schema:
               type: object
-              required: [current_password, new_password]
+              required:
+                - current_password
+                - new_password
               properties:
-                current_password: { type: string }
-                new_password: { type: string, minLength: 10, maxLength: 128 }
+                current_password:
+                  type: string
+                new_password:
+                  type: string
+                  minLength: 10
+                  maxLength: 128
       responses:
-        "204":
+        '204':
           description: Password changed.
-        "401":
-          $ref: "#/components/responses/Problem401"
-        "422":
-          $ref: "#/components/responses/Problem422"
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /me/tasks:
     get:
-      tags: [users]
+      tags:
+        - users
       summary: Tasks assigned to the current user across all teams
       parameters:
-        - $ref: "#/components/parameters/TaskStatusFilter"
-        - $ref: "#/components/parameters/TaskPriorityFilter"
-        - $ref: "#/components/parameters/Sort"
-        - $ref: "#/components/parameters/Order"
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
+        - $ref: '#/components/parameters/TaskStatusFilter'
+        - $ref: '#/components/parameters/TaskPriorityFilter'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
       responses:
-        "200":
+        '200':
           description: Paginated assigned tasks with team/project context.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PaginatedMyTasks"
-        "401":
-          $ref: "#/components/responses/Problem401"
-
+                $ref: '#/components/schemas/PaginatedMyTasks'
+        '401':
+          $ref: '#/components/responses/Problem401'
   /teams:
     get:
-      tags: [teams]
+      tags:
+        - teams
       summary: List teams the caller belongs to
       responses:
-        "200":
+        '200':
           description: Teams with the caller's role.
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required:
+                  - items
                 properties:
                   items:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Team"
-        "401":
-          $ref: "#/components/responses/Problem401"
+                      $ref: '#/components/schemas/Team'
+        '401':
+          $ref: '#/components/responses/Problem401'
     post:
-      tags: [teams]
+      tags:
+        - teams
       summary: Create a team (caller becomes Owner)
       requestBody:
         required: true
@@ -352,41 +379,49 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name]
+              required:
+                - name
               properties:
-                name: { type: string, minLength: 1, maxLength: 120 }
-                description: { type: string, maxLength: 1000 }
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                description:
+                  type: string
+                  maxLength: 1000
       responses:
-        "201":
+        '201':
           description: Team created; caller is Owner.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Team"
-        "401":
-          $ref: "#/components/responses/Problem401"
-        "422":
-          $ref: "#/components/responses/Problem422"
+                $ref: '#/components/schemas/Team'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /teams/{team_id}:
     get:
-      tags: [teams]
+      tags:
+        - teams
       summary: Team details (requires membership)
       parameters:
-        - $ref: "#/components/parameters/TeamId"
+        - $ref: '#/components/parameters/TeamId'
       responses:
-        "200":
+        '200':
           description: Team with caller's role.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Team"
-        "404":
-          $ref: "#/components/responses/Problem404"
+                $ref: '#/components/schemas/Team'
+        '404':
+          $ref: '#/components/responses/Problem404'
     patch:
-      tags: [teams]
+      tags:
+        - teams
       summary: Update team details (Owner/Admin)
       parameters:
-        - $ref: "#/components/parameters/TeamId"
+        - $ref: '#/components/parameters/TeamId'
       requestBody:
         required: true
         content:
@@ -394,44 +429,52 @@ paths:
             schema:
               type: object
               properties:
-                name: { type: string, minLength: 1, maxLength: 120 }
-                description: { type: string, maxLength: 1000 }
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                description:
+                  type: string
+                  maxLength: 1000
       responses:
-        "200":
+        '200':
           description: Updated team.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Team"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "422":
-          $ref: "#/components/responses/Problem422"
+                $ref: '#/components/schemas/Team'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /teams/{team_id}/members:
     get:
-      tags: [teams]
+      tags:
+        - teams
       summary: List team members (requires membership)
       parameters:
-        - $ref: "#/components/parameters/TeamId"
+        - $ref: '#/components/parameters/TeamId'
       responses:
-        "200":
+        '200':
           description: Members ordered by join date.
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required:
+                  - items
                 properties:
                   items:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Member"
-        "404":
-          $ref: "#/components/responses/Problem404"
+                      $ref: '#/components/schemas/Member'
+        '404':
+          $ref: '#/components/responses/Problem404'
     post:
-      tags: [teams]
+      tags:
+        - teams
       summary: Add a member (Owner/Admin)
       description: |
         Administrator-assisted provisioning: if no user exists with the
@@ -440,215 +483,260 @@ paths:
         exists, only the membership is added. Granting the `owner` role
         requires the caller to be Owner.
       parameters:
-        - $ref: "#/components/parameters/TeamId"
+        - $ref: '#/components/parameters/TeamId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [email, role]
+              required:
+                - email
+                - role
               properties:
-                email: { type: string, maxLength: 255 }
-                display_name: { type: string, maxLength: 120 }
+                email:
+                  type: string
+                  maxLength: 255
+                display_name:
+                  type: string
+                  maxLength: 120
                 role:
                   type: string
-                  enum: [owner, admin, manager, member]
-                temp_password: { type: string, minLength: 10, maxLength: 128 }
+                  enum:
+                    - owner
+                    - admin
+                    - manager
+                    - member
+                temp_password:
+                  type: string
+                  minLength: 10
+                  maxLength: 128
       responses:
-        "201":
+        '201':
           description: Membership created.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Member"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "409":
-          $ref: "#/components/responses/Problem409"
-        "422":
-          $ref: "#/components/responses/Problem422"
+                $ref: '#/components/schemas/Member'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /teams/{team_id}/members/{user_id}:
     patch:
-      tags: [teams]
+      tags:
+        - teams
       summary: Change a member's role (Owner/Admin)
       description: |
         Owners can change any role; Admins can change roles of non-owner
         members but can never grant or modify `owner`. The last owner
         cannot be demoted and members cannot change their own role.
       parameters:
-        - $ref: "#/components/parameters/TeamId"
-        - $ref: "#/components/parameters/UserId"
+        - $ref: '#/components/parameters/TeamId'
+        - $ref: '#/components/parameters/UserId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [role]
+              required:
+                - role
               properties:
-                role: { type: string, enum: [owner, admin, manager, member] }
+                role:
+                  type: string
+                  enum:
+                    - owner
+                    - admin
+                    - manager
+                    - member
       responses:
-        "200":
+        '200':
           description: Role changed.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Member"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "409":
-          $ref: "#/components/responses/Problem409"
+                $ref: '#/components/schemas/Member'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
     delete:
-      tags: [teams]
+      tags:
+        - teams
       summary: Remove a member (Owner/Admin)
       description: |
         Owners can remove anyone (except themselves); Admins can remove
         Manager/Member roles only. The last owner cannot be removed. The
         member's task assignments are cleared.
       parameters:
-        - $ref: "#/components/parameters/TeamId"
-        - $ref: "#/components/parameters/UserId"
+        - $ref: '#/components/parameters/TeamId'
+        - $ref: '#/components/parameters/UserId'
       responses:
-        "204":
+        '204':
           description: Member removed.
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "409":
-          $ref: "#/components/responses/Problem409"
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
   /teams/{team_id}/labels:
     get:
-      tags: [teams]
+      tags:
+        - teams
       summary: List team labels (requires membership)
       parameters:
-        - $ref: "#/components/parameters/TeamId"
+        - $ref: '#/components/parameters/TeamId'
       responses:
-        "200":
+        '200':
           description: Labels ordered by name.
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required:
+                  - items
                 properties:
                   items:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Label"
-        "404":
-          $ref: "#/components/responses/Problem404"
+                      $ref: '#/components/schemas/Label'
+        '404':
+          $ref: '#/components/responses/Problem404'
     post:
-      tags: [teams]
+      tags:
+        - teams
       summary: Create a label (Owner/Admin/Manager)
       parameters:
-        - $ref: "#/components/parameters/TeamId"
+        - $ref: '#/components/parameters/TeamId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [name]
+              required:
+                - name
               properties:
-                name: { type: string, minLength: 1, maxLength: 80 }
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
                 color:
                   type: string
-                  pattern: "^#[0-9a-fA-F]{6}$"
+                  pattern: ^#[0-9a-fA-F]{6}$
+                icon:
+                  type: string
+                  maxLength: 64
+                  description: Optional whitelisted Lucide icon name.
       responses:
-        "201":
+        '201':
           description: Label created.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Label"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "409":
-          $ref: "#/components/responses/Problem409"
-        "422":
-          $ref: "#/components/responses/Problem422"
-
+                $ref: '#/components/schemas/Label'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /teams/{team_id}/projects:
     get:
-      tags: [projects]
+      tags:
+        - projects
       summary: List team projects
       parameters:
-        - $ref: "#/components/parameters/TeamId"
+        - $ref: '#/components/parameters/TeamId'
         - name: include_archived
           in: query
-          schema: { type: boolean, default: false }
+          schema:
+            type: boolean
+            default: false
       responses:
-        "200":
+        '200':
           description: Projects with open task counts.
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required:
+                  - items
                 properties:
                   items:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Project"
-        "404":
-          $ref: "#/components/responses/Problem404"
+                      $ref: '#/components/schemas/Project'
+        '404':
+          $ref: '#/components/responses/Problem404'
     post:
-      tags: [projects]
+      tags:
+        - projects
       summary: Create a project (Owner/Admin/Manager)
       parameters:
-        - $ref: "#/components/parameters/TeamId"
+        - $ref: '#/components/parameters/TeamId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [name]
+              required:
+                - name
               properties:
-                name: { type: string, minLength: 1, maxLength: 160 }
-                description: { type: string, maxLength: 2000 }
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 160
+                description:
+                  type: string
+                  maxLength: 2000
                 owner_id:
                   description: Project owner; must be a team member. Defaults to caller.
                   type: string
       responses:
-        "201":
+        '201':
           description: Project created.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Project"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "422":
-          $ref: "#/components/responses/Problem422"
+                $ref: '#/components/schemas/Project'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /projects/{project_id}:
     get:
-      tags: [projects]
+      tags:
+        - projects
       summary: Project details (requires team membership)
       parameters:
-        - $ref: "#/components/parameters/ProjectId"
+        - $ref: '#/components/parameters/ProjectId'
       responses:
-        "200":
+        '200':
           description: Project.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Project"
-        "404":
-          $ref: "#/components/responses/Problem404"
+                $ref: '#/components/schemas/Project'
+        '404':
+          $ref: '#/components/responses/Problem404'
     patch:
-      tags: [projects]
+      tags:
+        - projects
       summary: Update project (Owner/Admin/Manager; archived projects are read-only)
       parameters:
-        - $ref: "#/components/parameters/ProjectId"
+        - $ref: '#/components/parameters/ProjectId'
       requestBody:
         required: true
         content:
@@ -656,161 +744,185 @@ paths:
             schema:
               type: object
               properties:
-                name: { type: string, minLength: 1, maxLength: 160 }
-                description: { type: string, maxLength: 2000 }
-                owner_id: { type: string }
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 160
+                description:
+                  type: string
+                  maxLength: 2000
+                owner_id:
+                  type: string
       responses:
-        "200":
+        '200':
           description: Updated project.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Project"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "409":
-          $ref: "#/components/responses/Problem409"
-        "422":
-          $ref: "#/components/responses/Problem422"
+                $ref: '#/components/schemas/Project'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /projects/{project_id}/archive:
     post:
-      tags: [projects]
+      tags:
+        - projects
       summary: Archive a project (Owner/Admin/Manager)
       parameters:
-        - $ref: "#/components/parameters/ProjectId"
+        - $ref: '#/components/parameters/ProjectId'
       responses:
-        "200":
+        '200':
           description: Archived project.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Project"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
+                $ref: '#/components/schemas/Project'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /projects/{project_id}/unarchive:
     post:
-      tags: [projects]
+      tags:
+        - projects
       summary: Restore an archived project (Owner/Admin/Manager)
       parameters:
-        - $ref: "#/components/parameters/ProjectId"
+        - $ref: '#/components/parameters/ProjectId'
       responses:
-        "200":
+        '200':
           description: Active project.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Project"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-
+                $ref: '#/components/schemas/Project'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /projects/{project_id}/tasks:
     get:
-      tags: [tasks]
+      tags:
+        - tasks
       summary: List project tasks (root tasks; server-side pagination)
       parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/TaskStatusFilter"
-        - $ref: "#/components/parameters/TaskPriorityFilter"
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/TaskStatusFilter'
+        - $ref: '#/components/parameters/TaskPriorityFilter'
         - name: assignee_id
           in: query
-          schema: { type: string }
+          schema:
+            type: string
           description: User id, or `none` for unassigned tasks.
         - name: label_id
           in: query
-          schema: { type: string }
+          schema:
+            type: string
         - name: q
           in: query
-          schema: { type: string, maxLength: 200 }
+          schema:
+            type: string
+            maxLength: 200
           description: Case-insensitive substring search over title and description.
         - name: due_before
           in: query
-          schema: { type: string, format: date }
+          schema:
+            type: string
+            format: date
         - name: due_after
           in: query
-          schema: { type: string, format: date }
-        - $ref: "#/components/parameters/Sort"
-        - $ref: "#/components/parameters/Order"
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
+          schema:
+            type: string
+            format: date
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
       responses:
-        "200":
+        '200':
           description: Paginated tasks.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PaginatedTasks"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "422":
-          $ref: "#/components/responses/Problem422"
+                $ref: '#/components/schemas/PaginatedTasks'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
     post:
-      tags: [tasks]
+      tags:
+        - tasks
       summary: Create a task (all roles; archived projects reject)
       parameters:
-        - $ref: "#/components/parameters/ProjectId"
+        - $ref: '#/components/parameters/ProjectId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TaskCreate"
+              $ref: '#/components/schemas/TaskCreate'
       responses:
-        "201":
+        '201':
           description: Task created.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Task"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "409":
-          $ref: "#/components/responses/Problem409"
-        "422":
-          $ref: "#/components/responses/Problem422"
+                $ref: '#/components/schemas/Task'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /projects/{project_id}/board:
     get:
-      tags: [tasks]
+      tags:
+        - tasks
       summary: Kanban board — tasks grouped by status
       parameters:
-        - $ref: "#/components/parameters/ProjectId"
+        - $ref: '#/components/parameters/ProjectId'
         - name: page_size
           in: query
-          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
           description: Maximum cards per column; totals are unaffected.
       responses:
-        "200":
+        '200':
           description: Board columns in canonical status order.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Board"
-        "404":
-          $ref: "#/components/responses/Problem404"
+                $ref: '#/components/schemas/Board'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /tasks/{task_id}:
     get:
-      tags: [tasks]
+      tags:
+        - tasks
       summary: Task detail with labels and subtasks (requires team membership)
       parameters:
-        - $ref: "#/components/parameters/TaskId"
+        - $ref: '#/components/parameters/TaskId'
       responses:
-        "200":
+        '200':
           description: Task detail.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Task"
-        "404":
-          $ref: "#/components/responses/Problem404"
+                $ref: '#/components/schemas/Task'
+        '404':
+          $ref: '#/components/responses/Problem404'
     patch:
-      tags: [tasks]
+      tags:
+        - tasks
       summary: Update a task
       description: |
         Owner/Admin/Manager can update any task. Members can update tasks
@@ -823,32 +935,33 @@ paths:
         `POST /tasks/{task_id}/transition`. A change that would leave one
         person as both assignee and reporter is rejected with 422.
       parameters:
-        - $ref: "#/components/parameters/TaskId"
+        - $ref: '#/components/parameters/TaskId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TaskUpdate"
+              $ref: '#/components/schemas/TaskUpdate'
       responses:
-        "200":
+        '200':
           description: Updated task.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Task"
-        "400":
-          $ref: "#/components/responses/Problem400"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "409":
-          $ref: "#/components/responses/Problem409"
-        "422":
-          $ref: "#/components/responses/Problem422"
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/Problem400'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
     delete:
-      tags: [tasks]
+      tags:
+        - tasks
       summary: Delete a task
       description: |
         Owner/Admin/Manager can delete any task; members only tasks they
@@ -856,158 +969,178 @@ paths:
         cascade semantics). The deletion is recorded as project-level
         activity.
       parameters:
-        - $ref: "#/components/parameters/TaskId"
+        - $ref: '#/components/parameters/TaskId'
       responses:
-        "204":
+        '204':
           description: Task deleted.
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /tasks/{task_id}/subtasks:
     post:
-      tags: [tasks]
+      tags:
+        - tasks
       summary: Create a subtask
       description: The parent must be a root task in the same project.
       parameters:
-        - $ref: "#/components/parameters/TaskId"
+        - $ref: '#/components/parameters/TaskId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TaskCreate"
+              $ref: '#/components/schemas/TaskCreate'
       responses:
-        "201":
+        '201':
           description: Subtask created.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Task"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "422":
-          $ref: "#/components/responses/Problem422"
-
+                $ref: '#/components/schemas/Task'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /tasks/{task_id}/comments:
     get:
-      tags: [comments]
+      tags:
+        - comments
       summary: List task comments
       parameters:
-        - $ref: "#/components/parameters/TaskId"
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
       responses:
-        "200":
+        '200':
           description: Paginated comments (oldest first).
           content:
             application/json:
               schema:
                 type: object
-                required: [items, page, page_size, total]
+                required:
+                  - items
+                  - page
+                  - page_size
+                  - total
                 properties:
                   items:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Comment"
-                  page: { type: integer }
-                  page_size: { type: integer }
-                  total: { type: integer }
-        "404":
-          $ref: "#/components/responses/Problem404"
+                      $ref: '#/components/schemas/Comment'
+                  page:
+                    type: integer
+                  page_size:
+                    type: integer
+                  total:
+                    type: integer
+        '404':
+          $ref: '#/components/responses/Problem404'
     post:
-      tags: [comments]
+      tags:
+        - comments
       summary: Add a comment (any team member)
       parameters:
-        - $ref: "#/components/parameters/TaskId"
+        - $ref: '#/components/parameters/TaskId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [body]
+              required:
+                - body
               properties:
-                body: { type: string, minLength: 1, maxLength: 10000 }
+                body:
+                  type: string
+                  minLength: 1
+                  maxLength: 10000
       responses:
-        "201":
+        '201':
           description: Comment created.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Comment"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "422":
-          $ref: "#/components/responses/Problem422"
+                $ref: '#/components/schemas/Comment'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /comments/{comment_id}:
     patch:
-      tags: [comments]
+      tags:
+        - comments
       summary: Edit a comment (author, or Owner/Admin)
       parameters:
-        - $ref: "#/components/parameters/CommentId"
+        - $ref: '#/components/parameters/CommentId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [body]
+              required:
+                - body
               properties:
-                body: { type: string, minLength: 1, maxLength: 10000 }
+                body:
+                  type: string
+                  minLength: 1
+                  maxLength: 10000
       responses:
-        "200":
+        '200':
           description: Updated comment.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Comment"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
+                $ref: '#/components/schemas/Comment'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
     delete:
-      tags: [comments]
+      tags:
+        - comments
       summary: Delete a comment (author, or Owner/Admin/Manager)
       parameters:
-        - $ref: "#/components/parameters/CommentId"
+        - $ref: '#/components/parameters/CommentId'
       responses:
-        "204":
+        '204':
           description: Comment deleted.
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /tasks/{task_id}/activity:
     get:
-      tags: [activity]
+      tags:
+        - activity
       summary: Task activity history (latest 100 events)
       parameters:
-        - $ref: "#/components/parameters/TaskId"
+        - $ref: '#/components/parameters/TaskId'
       responses:
-        "200":
+        '200':
           description: Activity events, newest first.
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required:
+                  - items
                 properties:
                   items:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Activity"
-        "404":
-          $ref: "#/components/responses/Problem404"
-
+                      $ref: '#/components/schemas/Activity'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /tasks/{task_id}/transition:
     post:
-      tags: [tasks]
+      tags:
+        - tasks
       summary: Execute a lifecycle transition on a task
       description: |
         The only way to change a task's status. The lifecycle is strict:
@@ -1029,112 +1162,124 @@ paths:
         rejection records `resolution=rejected` with the audited reason and
         returns the task to In Progress.
       parameters:
-        - $ref: "#/components/parameters/TaskId"
+        - $ref: '#/components/parameters/TaskId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TaskTransition"
+              $ref: '#/components/schemas/TaskTransition'
       responses:
-        "200":
+        '200':
           description: Transition applied; the updated task is returned.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Task"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "409":
-          $ref: "#/components/responses/Problem409"
-        "422":
-          $ref: "#/components/responses/Problem422"
-
+                $ref: '#/components/schemas/Task'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /notifications:
     get:
-      tags: [notifications]
+      tags:
+        - notifications
       summary: List the authenticated user's notifications
       parameters:
         - name: unread
           in: query
-          schema: { type: boolean, default: false }
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
+          schema:
+            type: boolean
+            default: false
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
       responses:
-        "200":
+        '200':
           description: Recipient-scoped notifications, newest first.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PaginatedNotifications"
-        "401":
-          $ref: "#/components/responses/Problem401"
+                $ref: '#/components/schemas/PaginatedNotifications'
+        '401':
+          $ref: '#/components/responses/Problem401'
   /notifications/unread-count:
     get:
-      tags: [notifications]
+      tags:
+        - notifications
       summary: Unread notification count for the authenticated user
       responses:
-        "200":
+        '200':
           description: Current unread count.
           content:
             application/json:
               schema:
                 type: object
-                required: [count]
+                required:
+                  - count
                 properties:
-                  count: { type: integer, minimum: 0 }
-        "401":
-          $ref: "#/components/responses/Problem401"
+                  count:
+                    type: integer
+                    minimum: 0
+        '401':
+          $ref: '#/components/responses/Problem401'
   /notifications/read-all:
     post:
-      tags: [notifications]
+      tags:
+        - notifications
       summary: Mark every unread notification of the caller as read
       responses:
-        "204":
+        '204':
           description: All notifications marked read.
-        "401":
-          $ref: "#/components/responses/Problem401"
+        '401':
+          $ref: '#/components/responses/Problem401'
   /notifications/{notification_id}/read:
     post:
-      tags: [notifications]
+      tags:
+        - notifications
       summary: Mark one notification as read (idempotent)
-      description: Scoped to the authenticated recipient; foreign or unknown
-        ids return 404 without disclosing existence.
+      description: >-
+        Scoped to the authenticated recipient; foreign or unknown ids return 404 without disclosing
+        existence.
       parameters:
         - name: notification_id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema:
+            type: string
+            format: uuid
       responses:
-        "204":
+        '204':
           description: Marked read (or already read).
-        "401":
-          $ref: "#/components/responses/Problem401"
-        "404":
-          $ref: "#/components/responses/Problem404"
-
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /tasks/{task_id}/dependencies:
     get:
-      tags: [tasks]
+      tags:
+        - tasks
       summary: List dependency relations for a task
       description: |
         `blockers` are tasks that must finish before this task;
         `blocked` are tasks waiting on this one. Read-only for guests.
       parameters:
-        - $ref: "#/components/parameters/TaskId"
+        - $ref: '#/components/parameters/TaskId'
       responses:
-        "200":
+        '200':
           description: Dependency relations.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DependencyList"
-        "404":
-          $ref: "#/components/responses/Problem404"
+                $ref: '#/components/schemas/DependencyList'
+        '404':
+          $ref: '#/components/responses/Problem404'
     post:
-      tags: [tasks]
+      tags:
+        - tasks
       summary: Add a finish-to-start dependency
       description: |
         The predecessor must finish before this task starts. Both tasks must
@@ -1143,52 +1288,58 @@ paths:
         Dependency mutations serialize per project; the cycle check is
         therefore race-free.
       parameters:
-        - $ref: "#/components/parameters/TaskId"
+        - $ref: '#/components/parameters/TaskId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [predecessor_task_id]
+              required:
+                - predecessor_task_id
               properties:
-                predecessor_task_id: { type: string, format: uuid }
+                predecessor_task_id:
+                  type: string
+                  format: uuid
       responses:
-        "201":
+        '201':
           description: Dependency created.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DependencyEdge"
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "409":
-          $ref: "#/components/responses/Problem409"
-        "422":
-          $ref: "#/components/responses/Problem422"
+                $ref: '#/components/schemas/DependencyEdge'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /tasks/{task_id}/dependencies/{predecessor_task_id}:
     delete:
-      tags: [tasks]
+      tags:
+        - tasks
       summary: Remove a dependency edge
       parameters:
-        - $ref: "#/components/parameters/TaskId"
+        - $ref: '#/components/parameters/TaskId'
         - name: predecessor_task_id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema:
+            type: string
+            format: uuid
       responses:
-        "204":
+        '204':
           description: Edge removed.
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /teams/{team_id}/workload:
     get:
-      tags: [teams]
+      tags:
+        - teams
       summary: Team workload aggregation (assigned task distribution)
       description: |
         Server-side SQL aggregation grouped by assignee. Counts open tasks by
@@ -1196,288 +1347,345 @@ paths:
         and status not closed). This is task distribution, NOT effort or
         capacity. Requires team membership; guests receive 404.
       parameters:
-        - $ref: "#/components/parameters/TeamId"
+        - $ref: '#/components/parameters/TeamId'
         - name: project_id
           in: query
-          schema: { type: string, format: uuid }
+          schema:
+            type: string
+            format: uuid
         - name: due_before
           in: query
-          schema: { type: string, format: date }
+          schema:
+            type: string
+            format: date
         - name: due_after
           in: query
-          schema: { type: string, format: date }
+          schema:
+            type: string
+            format: date
       responses:
-        "200":
+        '200':
           description: Per-member aggregates and unassigned summary.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Workload"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "422":
-          $ref: "#/components/responses/Problem422"
-
+                $ref: '#/components/schemas/Workload'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /projects/{project_id}/templates:
     get:
-      tags: [templates]
+      tags:
+        - templates
       summary: List project task templates (team members only)
       parameters:
-        - $ref: "#/components/parameters/ProjectId"
+        - $ref: '#/components/parameters/ProjectId'
       responses:
-        "200":
+        '200':
           description: Templates ordered by name.
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required:
+                  - items
                 properties:
                   items:
                     type: array
-                    items: { $ref: "#/components/schemas/TaskTemplate" }
-        "404":
-          $ref: "#/components/responses/Problem404"
+                    items:
+                      $ref: '#/components/schemas/TaskTemplate'
+        '404':
+          $ref: '#/components/responses/Problem404'
     post:
-      tags: [templates]
+      tags:
+        - templates
       summary: Create a template (Manager+)
       parameters:
-        - $ref: "#/components/parameters/ProjectId"
+        - $ref: '#/components/parameters/ProjectId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TemplateUpsert"
+              $ref: '#/components/schemas/TemplateUpsert'
       responses:
-        "201":
+        '201':
           description: Template created.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/TaskTemplate" }
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "422":
-          $ref: "#/components/responses/Problem422"
+              schema:
+                $ref: '#/components/schemas/TaskTemplate'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /templates/{template_id}:
     get:
-      tags: [templates]
+      tags:
+        - templates
       summary: Template detail (team members only)
       parameters:
-        - $ref: "#/components/parameters/TemplateId"
+        - $ref: '#/components/parameters/TemplateId'
       responses:
-        "200":
+        '200':
           description: Template with label defaults.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/TaskTemplate" }
-        "404":
-          $ref: "#/components/responses/Problem404"
+              schema:
+                $ref: '#/components/schemas/TaskTemplate'
+        '404':
+          $ref: '#/components/responses/Problem404'
     patch:
-      tags: [templates]
+      tags:
+        - templates
       summary: Update a template (Manager+)
       parameters:
-        - $ref: "#/components/parameters/TemplateId"
+        - $ref: '#/components/parameters/TemplateId'
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/TemplateUpsert" }
+            schema:
+              $ref: '#/components/schemas/TemplateUpsert'
       responses:
-        "200":
+        '200':
           description: Updated template. Existing tasks are unaffected.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/TaskTemplate" }
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "422":
-          $ref: "#/components/responses/Problem422"
+              schema:
+                $ref: '#/components/schemas/TaskTemplate'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
     delete:
-      tags: [templates]
+      tags:
+        - templates
       summary: Delete a template (Manager+). Created tasks are unaffected.
       parameters:
-        - $ref: "#/components/parameters/TemplateId"
+        - $ref: '#/components/parameters/TemplateId'
       responses:
-        "204":
+        '204':
           description: Deleted.
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /projects/{project_id}/guests:
     get:
-      tags: [projects]
+      tags:
+        - projects
       summary: List project guests (Manager+; 404 for guests)
       parameters:
-        - $ref: "#/components/parameters/ProjectId"
+        - $ref: '#/components/parameters/ProjectId'
       responses:
-        "200":
+        '200':
           description: Guest roster.
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required:
+                  - items
                 properties:
                   items:
                     type: array
-                    items: { $ref: "#/components/schemas/ProjectGuest" }
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
+                    items:
+                      $ref: '#/components/schemas/ProjectGuest'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
     post:
-      tags: [projects]
+      tags:
+        - projects
       summary: Grant read-only access to an existing user (Manager+)
       parameters:
-        - $ref: "#/components/parameters/ProjectId"
+        - $ref: '#/components/parameters/ProjectId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [email]
+              required:
+                - email
               properties:
-                email: { type: string, format: email }
+                email:
+                  type: string
+                  format: email
       responses:
-        "201":
+        '201':
           description: Guest granted viewer access.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ProjectGuest" }
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "409":
-          $ref: "#/components/responses/Problem409"
-        "422":
-          $ref: "#/components/responses/Problem422"
+              schema:
+                $ref: '#/components/schemas/ProjectGuest'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /projects/{project_id}/guests/{user_id}:
     delete:
-      tags: [projects]
+      tags:
+        - projects
       summary: Revoke guest access (Manager+). Takes effect immediately.
       parameters:
-        - $ref: "#/components/parameters/ProjectId"
+        - $ref: '#/components/parameters/ProjectId'
         - name: user_id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema:
+            type: string
+            format: uuid
       responses:
-        "204":
+        '204':
           description: Revoked.
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /me/projects:
     get:
-      tags: [users]
+      tags:
+        - users
       summary: Projects explicitly shared with the caller (guest access)
       responses:
-        "200":
+        '200':
           description: Guest-visible projects, oldest first.
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required:
+                  - items
                 properties:
                   items:
                     type: array
-                    items: { $ref: "#/components/schemas/Project" }
-        "401":
-          $ref: "#/components/responses/Problem401"
-
+                    items:
+                      $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Problem401'
   /teams/{team_id}/goals:
     get:
-      tags: [goals]
+      tags:
+        - goals
       summary: List team goals (team members only)
       parameters:
-        - $ref: "#/components/parameters/TeamId"
+        - $ref: '#/components/parameters/TeamId'
         - name: status
           in: query
-          schema: { type: string, enum: [draft, active, completed, cancelled] }
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
+          schema:
+            type: string
+            enum:
+              - draft
+              - active
+              - completed
+              - cancelled
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
       responses:
-        "200":
+        '200':
           description: Team goals, newest first, with measured progress.
           content:
             application/json:
               schema:
                 type: object
-                required: [items, page, page_size, total]
+                required:
+                  - items
+                  - page
+                  - page_size
+                  - total
                 properties:
                   items:
                     type: array
-                    items: { $ref: "#/components/schemas/Goal" }
-                  page: { type: integer }
-                  page_size: { type: integer }
-                  total: { type: integer }
-        "404":
-          $ref: "#/components/responses/Problem404"
+                    items:
+                      $ref: '#/components/schemas/Goal'
+                  page:
+                    type: integer
+                  page_size:
+                    type: integer
+                  total:
+                    type: integer
+        '404':
+          $ref: '#/components/responses/Problem404'
     post:
-      tags: [goals]
+      tags:
+        - goals
       summary: Create a goal (Manager+)
       description: New goals start in `draft` with the caller as default owner.
       parameters:
-        - $ref: "#/components/parameters/TeamId"
+        - $ref: '#/components/parameters/TeamId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [title]
+              required:
+                - title
               properties:
-                title: { type: string, minLength: 1, maxLength: 250 }
-                description: { type: string, maxLength: 5000 }
+                title:
+                  type: string
+                  minLength: 1
+                  maxLength: 250
+                description:
+                  type: string
+                  maxLength: 5000
                 owner_id:
                   type: string
                   format: uuid
                   description: Team member; defaults to the caller.
-                start_date: { type: string, format: date }
-                due_date: { type: string, format: date }
+                start_date:
+                  type: string
+                  format: date
+                due_date:
+                  type: string
+                  format: date
       responses:
-        "201":
+        '201':
           description: Goal created in `draft`.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Goal" }
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "422":
-          $ref: "#/components/responses/Problem422"
+              schema:
+                $ref: '#/components/schemas/Goal'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /goals/{goal_id}:
     get:
-      tags: [goals]
+      tags:
+        - goals
       summary: Goal detail with key results, associations and execution stats
       parameters:
-        - $ref: "#/components/parameters/GoalId"
+        - $ref: '#/components/parameters/GoalId'
       responses:
-        "200":
+        '200':
           description: Full goal view.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/GoalDetail" }
-        "404":
-          $ref: "#/components/responses/Problem404"
+              schema:
+                $ref: '#/components/schemas/GoalDetail'
+        '404':
+          $ref: '#/components/responses/Problem404'
     patch:
-      tags: [goals]
+      tags:
+        - goals
       summary: Update goal metadata (Manager+). Never changes status.
       parameters:
-        - $ref: "#/components/parameters/GoalId"
+        - $ref: '#/components/parameters/GoalId'
       requestBody:
         required: true
         content:
@@ -1485,42 +1693,53 @@ paths:
             schema:
               type: object
               properties:
-                title: { type: string, minLength: 1, maxLength: 250 }
-                description: { type: string, maxLength: 5000 }
+                title:
+                  type: string
+                  minLength: 1
+                  maxLength: 250
+                description:
+                  type: string
+                  maxLength: 5000
                 owner_id:
                   type: string
                   format: uuid
                   description: Team member.
-                start_date: { type: string, format: date }
-                due_date: { type: string, format: date }
+                start_date:
+                  type: string
+                  format: date
+                due_date:
+                  type: string
+                  format: date
       responses:
-        "200":
+        '200':
           description: Updated goal.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Goal" }
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "422":
-          $ref: "#/components/responses/Problem422"
+              schema:
+                $ref: '#/components/schemas/Goal'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
     delete:
-      tags: [goals]
-      summary: Delete a goal (Manager+). Cascades key results and
-        associations; projects and tasks survive.
+      tags:
+        - goals
+      summary: Delete a goal (Manager+). Cascades key results and associations; projects and tasks survive.
       parameters:
-        - $ref: "#/components/parameters/GoalId"
+        - $ref: '#/components/parameters/GoalId'
       responses:
-        "204":
+        '204':
           description: Deleted.
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /goals/{goal_id}/status:
     post:
-      tags: [goals]
+      tags:
+        - goals
       summary: Explicit lifecycle transition (Manager+)
       description: |
         Allowed: draft→active, draft→cancelled, active→completed,
@@ -1528,322 +1747,1260 @@ paths:
         (reopen). Activation requires at least one key result. Reaching 100%
         key-result progress does NOT complete a goal automatically.
       parameters:
-        - $ref: "#/components/parameters/GoalId"
+        - $ref: '#/components/parameters/GoalId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [status]
+              required:
+                - status
               properties:
-                status: { type: string, enum: [draft, active, completed, cancelled] }
+                status:
+                  type: string
+                  enum:
+                    - draft
+                    - active
+                    - completed
+                    - cancelled
       responses:
-        "200":
+        '200':
           description: Transitioned.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Goal" }
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "409":
-          $ref: "#/components/responses/Problem409"
-        "422":
-          $ref: "#/components/responses/Problem422"
+              schema:
+                $ref: '#/components/schemas/Goal'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /goals/{goal_id}/activity:
     get:
-      tags: [goals]
+      tags:
+        - goals
       summary: Goal activity history (team members only)
       parameters:
-        - $ref: "#/components/parameters/GoalId"
+        - $ref: '#/components/parameters/GoalId'
       responses:
-        "200":
+        '200':
           description: Goal events, newest first.
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required:
+                  - items
                 properties:
                   items:
                     type: array
-                    items: { $ref: "#/components/schemas/GoalActivity" }
-        "404":
-          $ref: "#/components/responses/Problem404"
+                    items:
+                      $ref: '#/components/schemas/GoalActivity'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /goals/{goal_id}/key-results:
     get:
-      tags: [goals]
+      tags:
+        - goals
       summary: List key results (team members only)
       parameters:
-        - $ref: "#/components/parameters/GoalId"
+        - $ref: '#/components/parameters/GoalId'
       responses:
-        "200":
+        '200':
           description: Key results ordered by position.
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required:
+                  - items
                 properties:
                   items:
                     type: array
-                    items: { $ref: "#/components/schemas/KeyResult" }
-        "404":
-          $ref: "#/components/responses/Problem404"
+                    items:
+                      $ref: '#/components/schemas/KeyResult'
+        '404':
+          $ref: '#/components/responses/Problem404'
     post:
-      tags: [goals]
+      tags:
+        - goals
       summary: Add a key result (Manager+)
       parameters:
-        - $ref: "#/components/parameters/GoalId"
+        - $ref: '#/components/parameters/GoalId'
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/KeyResultUpsert" }
+            schema:
+              $ref: '#/components/schemas/KeyResultUpsert'
       responses:
-        "201":
+        '201':
           description: Key result created; progress computed server-side.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/KeyResult" }
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "422":
-          $ref: "#/components/responses/Problem422"
+              schema:
+                $ref: '#/components/schemas/KeyResult'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /key-results/{key_result_id}:
     get:
-      tags: [goals]
+      tags:
+        - goals
       summary: Key result detail (team members only)
       parameters:
-        - $ref: "#/components/parameters/KeyResultId"
+        - $ref: '#/components/parameters/KeyResultId'
       responses:
-        "200":
+        '200':
           description: The key result.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/KeyResult" }
-        "404":
-          $ref: "#/components/responses/Problem404"
+              schema:
+                $ref: '#/components/schemas/KeyResult'
+        '404':
+          $ref: '#/components/responses/Problem404'
     patch:
-      tags: [goals]
-      summary: Update a key result (Manager+). Merge semantics; progress
-        recomputed server-side.
+      tags:
+        - goals
+      summary: Update a key result (Manager+). Merge semantics; progress recomputed server-side.
       parameters:
-        - $ref: "#/components/parameters/KeyResultId"
+        - $ref: '#/components/parameters/KeyResultId'
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/KeyResultUpsert" }
+            schema:
+              $ref: '#/components/schemas/KeyResultUpsert'
       responses:
-        "200":
+        '200':
           description: Updated key result.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/KeyResult" }
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "422":
-          $ref: "#/components/responses/Problem422"
+              schema:
+                $ref: '#/components/schemas/KeyResult'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
     delete:
-      tags: [goals]
+      tags:
+        - goals
       summary: Delete a key result (Manager+)
       parameters:
-        - $ref: "#/components/parameters/KeyResultId"
+        - $ref: '#/components/parameters/KeyResultId'
       responses:
-        "204":
+        '204':
           description: Deleted.
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /goals/{goal_id}/projects:
     get:
-      tags: [goals]
+      tags:
+        - goals
       summary: Projects associated with the goal (team members only)
       parameters:
-        - $ref: "#/components/parameters/GoalId"
+        - $ref: '#/components/parameters/GoalId'
       responses:
-        "200":
+        '200':
           description: Associated projects.
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required:
+                  - items
                 properties:
                   items:
                     type: array
                     items:
                       type: object
-                      required: [id, name, status]
+                      required:
+                        - id
+                        - name
+                        - status
                       properties:
-                        id: { type: string, format: uuid }
-                        name: { type: string }
-                        status: { type: string, enum: [active, archived] }
-        "404":
-          $ref: "#/components/responses/Problem404"
+                        id:
+                          type: string
+                          format: uuid
+                        name:
+                          type: string
+                        status:
+                          type: string
+                          enum:
+                            - active
+                            - archived
+        '404':
+          $ref: '#/components/responses/Problem404'
     post:
-      tags: [goals]
+      tags:
+        - goals
       summary: Associate a same-team project (Manager+)
       parameters:
-        - $ref: "#/components/parameters/GoalId"
+        - $ref: '#/components/parameters/GoalId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [project_id]
+              required:
+                - project_id
               properties:
-                project_id: { type: string, format: uuid }
+                project_id:
+                  type: string
+                  format: uuid
       responses:
-        "201":
+        '201':
           description: Associated.
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "409":
-          $ref: "#/components/responses/Problem409"
-        "422":
-          $ref: "#/components/responses/Problem422"
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /goals/{goal_id}/projects/{project_id}:
     delete:
-      tags: [goals]
+      tags:
+        - goals
       summary: Remove a project association (Manager+). The project survives.
       parameters:
-        - $ref: "#/components/parameters/GoalId"
+        - $ref: '#/components/parameters/GoalId'
         - name: project_id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema:
+            type: string
+            format: uuid
       responses:
-        "204":
+        '204':
           description: Disassociated.
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /goals/{goal_id}/tasks:
     get:
-      tags: [goals]
+      tags:
+        - goals
       summary: Tasks associated with the goal (team members only)
       parameters:
-        - $ref: "#/components/parameters/GoalId"
+        - $ref: '#/components/parameters/GoalId'
       responses:
-        "200":
+        '200':
           description: Associated tasks.
           content:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required:
+                  - items
                 properties:
                   items:
                     type: array
                     items:
                       type: object
-                      required: [id, title, status]
+                      required:
+                        - id
+                        - title
+                        - status
                       properties:
-                        id: { type: string, format: uuid }
-                        title: { type: string }
-                        status: { type: string, enum: [backlog, todo, in_progress, resolved, in_review, closed] }
-        "404":
-          $ref: "#/components/responses/Problem404"
+                        id:
+                          type: string
+                          format: uuid
+                        title:
+                          type: string
+                        status:
+                          type: string
+                          enum:
+                            - backlog
+                            - todo
+                            - in_progress
+                            - resolved
+                            - in_review
+                            - closed
+        '404':
+          $ref: '#/components/responses/Problem404'
     post:
-      tags: [goals]
+      tags:
+        - goals
       summary: Associate a same-team task (Manager+)
       parameters:
-        - $ref: "#/components/parameters/GoalId"
+        - $ref: '#/components/parameters/GoalId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [task_id]
+              required:
+                - task_id
               properties:
-                task_id: { type: string, format: uuid }
+                task_id:
+                  type: string
+                  format: uuid
       responses:
-        "201":
+        '201':
           description: Associated.
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-        "409":
-          $ref: "#/components/responses/Problem409"
-        "422":
-          $ref: "#/components/responses/Problem422"
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
   /goals/{goal_id}/tasks/{task_id}:
     delete:
-      tags: [goals]
+      tags:
+        - goals
       summary: Remove a task association (Manager+). The task survives.
       parameters:
-        - $ref: "#/components/parameters/GoalId"
+        - $ref: '#/components/parameters/GoalId'
         - name: task_id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema:
+            type: string
+            format: uuid
       responses:
-        "204":
+        '204':
           description: Disassociated.
-        "403":
-          $ref: "#/components/responses/Problem403"
-        "404":
-          $ref: "#/components/responses/Problem404"
-
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
   /health/live:
     get:
-      tags: [ops]
+      tags:
+        - ops
       summary: Liveness probe
       description: Always responds 200 while the process runs; does not touch the database.
       security: []
       responses:
-        "200":
+        '200':
           description: Alive.
           content:
             application/json:
               schema:
                 type: object
-                required: [status]
+                required:
+                  - status
                 properties:
-                  status: { type: string }
+                  status:
+                    type: string
   /health/ready:
     get:
-      tags: [ops]
+      tags:
+        - ops
       summary: Readiness probe
       description: Verifies database connectivity; 503 while degraded.
       security: []
       responses:
-        "200":
+        '200':
           description: Ready to accept traffic.
           content:
             application/json:
               schema:
                 type: object
-                required: [status, database]
+                required:
+                  - status
+                  - database
                 properties:
-                  status: { type: string }
-                  database: { type: string }
-        "503":
+                  status:
+                    type: string
+                  database:
+                    type: string
+        '503':
           description: Not ready (database unreachable).
           content:
             application/json:
               schema:
                 type: object
-                required: [status, database]
+                required:
+                  - status
+                  - database
                 properties:
-                  status: { type: string }
-                  database: { type: string }
-
+                  status:
+                    type: string
+                  database:
+                    type: string
+  /teams/{team_id}/rules:
+    post:
+      tags:
+        - rules
+      summary: Create an automation rule (Owner/Admin)
+      description: >-
+        Condition and action payloads are validated against the typed DSL. Rule names are unique per
+        team; archived rules keep their names reserved. Creating a rule writes immutable version 1.
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuleUpsert'
+      responses:
+        '201':
+          description: Rule created (version 1).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
+    get:
+      tags:
+        - rules
+      summary: List team rules (Owner/Admin)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: trigger_type
+          in: query
+          schema:
+            type: string
+            enum:
+              - task_status_changed
+              - task_priority_changed
+              - task_assigned
+        - name: enabled
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Paginated live (non-archived) rules.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RulePage'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /rules/{rule_id}:
+    get:
+      tags:
+        - rules
+      summary: Rule details (Owner/Admin)
+      parameters:
+        - $ref: '#/components/parameters/RuleId'
+      responses:
+        '200':
+          description: The current rule aggregate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+        '404':
+          $ref: '#/components/responses/Problem404'
+    patch:
+      tags:
+        - rules
+      summary: Update a rule (Owner/Admin, optimistic CAS)
+      description: >-
+        Writes a new immutable version and bumps `current_version` atomically. A stale
+        `expected_version` yields 409. Archived rules are read-only.
+      parameters:
+        - $ref: '#/components/parameters/RuleId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuleUpdate'
+      responses:
+        '200':
+          description: Updated rule (new current version).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
+  /rules/{rule_id}/enable:
+    post:
+      tags:
+        - rules
+      summary: Enable a rule (Owner/Admin)
+      parameters:
+        - $ref: '#/components/parameters/RuleId'
+      responses:
+        '200':
+          description: Rule enabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+  /rules/{rule_id}/disable:
+    post:
+      tags:
+        - rules
+      summary: Disable a rule (Owner/Admin)
+      parameters:
+        - $ref: '#/components/parameters/RuleId'
+      responses:
+        '200':
+          description: Rule disabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /rules/{rule_id}/archive:
+    post:
+      tags:
+        - rules
+      summary: Archive a rule (Owner/Admin)
+      description: >-
+        Archiving stops future evaluation, keeps the name reserved, and preserves all history.
+        Irreversible in this phase.
+      parameters:
+        - $ref: '#/components/parameters/RuleId'
+      responses:
+        '200':
+          description: Rule archived.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /rules/{rule_id}/versions:
+    get:
+      tags:
+        - rules
+      summary: Immutable version history (Owner/Admin)
+      parameters:
+        - $ref: '#/components/parameters/RuleId'
+      responses:
+        '200':
+          description: All immutable versions, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RuleVersion'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /rules/{rule_id}/history:
+    get:
+      tags:
+        - rules
+      summary: Execution history (Owner/Admin/Manager)
+      description: >-
+        Paginated per-event execution records with action-level outcomes. Survives task deletion by
+        design.
+      parameters:
+        - $ref: '#/components/parameters/RuleId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Paginated execution history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleHistoryPage'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /me/summary:
+    get:
+      tags:
+        - users
+      summary: Server-computed My Work Summary for the session user
+      responses:
+        '200':
+          description: Task counts grouped by lifecycle status, overdue count, and unread mentions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyWorkSummary'
+        '401':
+          $ref: '#/components/responses/Problem401'
+  /me/sessions:
+    get:
+      tags:
+        - users
+      summary: List the session user's active sessions
+      responses:
+        '200':
+          description: Active (non-revoked, non-expired) sessions, most recently seen first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionList'
+        '401':
+          $ref: '#/components/responses/Problem401'
+  /me/sessions/{session_id}:
+    delete:
+      tags:
+        - users
+      summary: Revoke one of the session user's sessions
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '204':
+          description: No content.
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /users:
+    get:
+      tags:
+        - users
+      summary: Resolve user identities (hover cards, @mention resolution)
+      parameters:
+        - name: ids
+          in: query
+          required: false
+          description: Comma-separated user ids (at most 100).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Identity cards for the requested ids.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfoList'
+        '401':
+          $ref: '#/components/responses/Problem401'
+  /users/{user_id}/avatar:
+    get:
+      tags:
+        - users
+      summary: Serve a user's avatar image
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: The avatar image bytes.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /teams/{team_id}/archive:
+    post:
+      tags:
+        - teams
+      summary: Archive the team (Owner/Admin)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+      responses:
+        '200':
+          description: The archived team.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /teams/{team_id}/unarchive:
+    post:
+      tags:
+        - teams
+      summary: Restore an archived team (Owner/Admin)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+      responses:
+        '200':
+          description: The restored team.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /teams/{team_id}/avatar:
+    get:
+      tags:
+        - teams
+      summary: Serve the team's avatar image
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+      responses:
+        '200':
+          description: The avatar image bytes.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /teams/{team_id}/guests:
+    get:
+      tags:
+        - teams
+      summary: List every project viewer (guest) across the team's projects
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+      responses:
+        '200':
+          description: Guests grouped by project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamGuestList'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /teams/{team_id}/guests/{user_id}:
+    delete:
+      tags:
+        - teams
+      summary: Revoke a guest's access to every project in the team
+      description: Requires the Manager role or above.
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '204':
+          description: No content.
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /projects/{project_id}/restore:
+    post:
+      tags:
+        - projects
+      summary: Restore a soft-deleted project (Owner/Admin)
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: The restored project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+  /projects/{project_id}/purge:
+    delete:
+      tags:
+        - projects
+      summary: Permanently delete a soft-deleted project (Owner only)
+      description: >-
+        Irreversible. Requires the typed project name and the caller's current password. Cascades
+        tasks, comments, notifications, dependencies, templates, guest grants, and goal links;
+        activity history is preserved.
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurgeProjectRequest'
+      responses:
+        '204':
+          description: No content.
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
+  /teams/{team_id}/projects/trash:
+    get:
+      tags:
+        - projects
+      summary: List soft-deleted projects of the team (Owner/Admin)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+      responses:
+        '200':
+          description: Deleted projects, most recent first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrashProjectList'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /teams/{team_id}/capacity:
+    get:
+      tags:
+        - teams
+      summary: Forward-looking team capacity (Manager+)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+        - name: window
+          in: query
+          required: false
+          description: Rolling window for due-soon counters.
+          schema:
+            type: string
+            enum:
+              - week
+              - month
+            default: week
+      responses:
+        '200':
+          description: Per-member capacity and utilization.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapacityResponse'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /tasks/from-template/{template_id}:
+    post:
+      tags:
+        - tasks
+      summary: Create a task from a template (team members)
+      description: >-
+        Applies the template's defaults (title, description, priority, labels, subtasks) with
+        per-field overrides, then creates the task and its subtasks. All task validation and
+        workflow constraints apply unchanged.
+      parameters:
+        - $ref: '#/components/parameters/TemplateId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FromTemplateRequest'
+      responses:
+        '201':
+          description: The created task with subtasks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
+  /tasks/{task_id}/position:
+    patch:
+      tags:
+        - tasks
+      summary: Reorder a task within its status column
+      description: >-
+        Pure manual ordering (project + status scoped). Authorization mirrors the generic task
+        update. Concurrent reorders resolve last-write-wins via server-side midpoint computation.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                before_task_id:
+                  type: string
+                  format: uuid
+                  description: >-
+                    Place the task immediately above this sibling in the same column. Omit to move
+                    to the bottom.
+      responses:
+        '204':
+          description: No content.
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
+  /tasks/{task_id}/checklist:
+    get:
+      tags:
+        - tasks
+      summary: List checklist items
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Checklist items.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChecklistItemList'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+    post:
+      tags:
+        - tasks
+      summary: Add a checklist item
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChecklistItemRequest'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChecklistItem'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
+  /checklist/{item_id}:
+    patch:
+      tags:
+        - tasks
+      summary: Update a checklist item (toggle/edit)
+      parameters:
+        - name: item_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateChecklistItemRequest'
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChecklistItem'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '422':
+          $ref: '#/components/responses/Problem422'
+    delete:
+      tags:
+        - tasks
+      summary: Delete a checklist item
+      parameters:
+        - name: item_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: No content.
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+  /tasks/{task_id}/progress:
+    get:
+      tags:
+        - tasks
+      summary: Combined progress from subtasks + checklist
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Progress counters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskProgress'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /teams/{team_id}/dashboard:
+    get:
+      tags:
+        - teams
+      summary: Team dashboard KPIs (Manager+)
+      parameters:
+        - $ref: '#/components/parameters/TeamId'
+        - name: window
+          in: query
+          required: false
+          description: Aggregation window for throughput/cycle/lead.
+          schema:
+            type: string
+            enum:
+              - 7d
+              - 30d
+              - 90d
+            default: 7d
+      responses:
+        '200':
+          description: KPI snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardResponse'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /teams/{team_id}/labels/{label_id}:
+    parameters:
+      - $ref: '#/components/parameters/TeamId'
+      - name: label_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags:
+        - teams
+      summary: Update a team label (Owner/Admin/Manager)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLabelRequest'
+      responses:
+        '200':
+          description: Updated label.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Label'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '422':
+          $ref: '#/components/responses/Problem422'
+    delete:
+      tags:
+        - teams
+      summary: Delete a team label (Owner/Admin/Manager)
+      responses:
+        '204':
+          description: No content. Task-label rows cascade; tasks are untouched.
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+  /tasks/{task_id}/attachments:
+    get:
+      tags:
+        - tasks
+      summary: List task attachments
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Attachments oldest-first; soft-deleted excluded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentList'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+    post:
+      tags:
+        - tasks
+      summary: Upload an attachment (multipart)
+      description: >-
+        Multipart form with exactly one `file` part. Task editors only; closed tasks and archived
+        projects reject with 409.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: At most TASKER_ATTACHMENTS_MAX_MB (default 25 MB); empty files are rejected.
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attachment'
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
+        '413':
+          description: Payload too large (exceeds the configured attachment limit).
+        '422':
+          $ref: '#/components/responses/Problem422'
+  /attachments/{attachment_id}:
+    parameters:
+      - name: attachment_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags:
+        - tasks
+      summary: Download an attachment
+      responses:
+        '200':
+          description: >-
+            Raw bytes with the stored MIME type, `Content-Disposition: attachment` and
+            `X-Content-Type-Options: nosniff`.
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '404':
+          $ref: '#/components/responses/Problem404'
+    delete:
+      tags:
+        - tasks
+      summary: Soft-delete an attachment (task editors only)
+      responses:
+        '204':
+          description: No content.
+        '401':
+          $ref: '#/components/responses/Problem401'
+        '403':
+          $ref: '#/components/responses/Problem403'
+        '404':
+          $ref: '#/components/responses/Problem404'
+        '409':
+          $ref: '#/components/responses/Problem409'
 components:
   securitySchemes:
     cookieAuth:
@@ -1855,113 +3012,157 @@ components:
       name: team_id
       in: path
       required: true
-      schema: { type: string, format: uuid }
+      schema:
+        type: string
+        format: uuid
     ProjectId:
       name: project_id
       in: path
       required: true
-      schema: { type: string, format: uuid }
+      schema:
+        type: string
+        format: uuid
     TaskId:
       name: task_id
       in: path
       required: true
-      schema: { type: string, format: uuid }
+      schema:
+        type: string
+        format: uuid
+    RuleId:
+      name: rule_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     TemplateId:
       name: template_id
       in: path
       required: true
-      schema: { type: string, format: uuid }
+      schema:
+        type: string
+        format: uuid
     GoalId:
       name: goal_id
       in: path
       required: true
-      schema: { type: string, format: uuid }
+      schema:
+        type: string
+        format: uuid
     KeyResultId:
       name: key_result_id
       in: path
       required: true
-      schema: { type: string, format: uuid }
+      schema:
+        type: string
+        format: uuid
     CommentId:
       name: comment_id
       in: path
       required: true
-      schema: { type: string, format: uuid }
+      schema:
+        type: string
+        format: uuid
     UserId:
       name: user_id
       in: path
       required: true
-      schema: { type: string, format: uuid }
+      schema:
+        type: string
+        format: uuid
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     Page:
       name: page
       in: query
-      schema: { type: integer, minimum: 1, default: 1 }
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
     PageSize:
       name: page_size
       in: query
-      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
     Sort:
       name: sort
       in: query
       schema:
         type: string
-        enum: [created_at, updated_at, due_date, priority, title]
+        enum:
+          - created_at
+          - updated_at
+          - due_date
+          - priority
+          - title
     Order:
       name: order
       in: query
       schema:
         type: string
-        enum: [asc, desc]
+        enum:
+          - asc
+          - desc
     TaskStatusFilter:
       name: status
       in: query
       description: Comma-separated status values.
       schema:
         type: string
-        example: "todo,in_progress"
+        example: todo,in_progress
     TaskPriorityFilter:
       name: priority
       in: query
       description: Comma-separated priority values.
       schema:
         type: string
-        example: "high,urgent"
+        example: high,urgent
   responses:
     Problem401:
       description: Authentication required.
       content:
         application/problem+json:
           schema:
-            $ref: "#/components/schemas/Problem"
+            $ref: '#/components/schemas/Problem'
     Problem403:
       description: Insufficient permissions.
       content:
         application/problem+json:
           schema:
-            $ref: "#/components/schemas/Problem"
+            $ref: '#/components/schemas/Problem'
     Problem400:
       description: Bad request (e.g. a status field on the generic task update).
       content:
         application/problem+json:
           schema:
-            $ref: "#/components/schemas/Problem"
+            $ref: '#/components/schemas/Problem'
     Problem404:
       description: Resource not found (or not visible to the caller).
       content:
         application/problem+json:
           schema:
-            $ref: "#/components/schemas/Problem"
+            $ref: '#/components/schemas/Problem'
     Problem409:
       description: Conflict with current state.
       content:
         application/problem+json:
           schema:
-            $ref: "#/components/schemas/Problem"
+            $ref: '#/components/schemas/Problem'
     Problem422:
       description: Validation failed.
       content:
         application/problem+json:
           schema:
-            $ref: "#/components/schemas/Problem"
+            $ref: '#/components/schemas/Problem'
     Problem500:
       description: Internal error (e.g. two-factor authentication is not configured on this deployment).
       content:
@@ -1973,17 +3174,20 @@ components:
       content:
         application/problem+json:
           schema:
-            $ref: "#/components/schemas/Problem"
+            $ref: '#/components/schemas/Problem'
   schemas:
     Problem:
       type: object
       description: RFC 9457 Problem Details with a field-error extension.
-      required: [type, title, status]
+      required:
+        - type
+        - title
+        - status
       properties:
         type:
           type: string
           format: uri-reference
-          example: "https://tasker.dev/problems/validation-failed"
+          example: https://tasker.dev/problems/validation-failed
         title:
           type: string
         status:
@@ -1994,24 +3198,70 @@ components:
           type: array
           items:
             type: object
-            required: [field, message]
+            required:
+              - field
+              - message
             properties:
-              field: { type: string }
-              message: { type: string }
+              field:
+                type: string
+              message:
+                type: string
     User:
       type: object
-      required: [id, email, display_name, created_at, mfa_enabled]
+      required:
+        - id
+        - email
+        - display_name
+        - created_at
+        - mfa_enabled
+        - username
+        - bio
+        - timezone
+        - notification_prefs
       properties:
-        id: { type: string, format: uuid }
-        email: { type: string, format: email }
-        display_name: { type: string }
-        created_at: { type: integer, description: "epoch milliseconds" }
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        created_at:
+          type: integer
+          description: epoch milliseconds
         mfa_enabled:
           type: boolean
           description: Whether TOTP two-factor authentication is enabled for this account.
+        capacity_limit:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 10
+        username:
+          type:
+            - string
+            - 'null'
+          pattern: ^[a-z0-9_]{3,32}$
+          description: Unique @mention handle.
+        bio:
+          type:
+            - string
+            - 'null'
+          maxLength: 200
+          description: Short bio.
+        timezone:
+          type:
+            - string
+            - 'null'
+          description: IANA timezone.
+        notification_prefs:
+          $ref: '#/components/schemas/NotificationPrefs'
     MfaRequired:
       type: object
-      required: [mfa_required, mfa_token]
+      required:
+        - mfa_required
+        - mfa_token
       properties:
         mfa_required:
           type: boolean
@@ -2024,7 +3274,11 @@ components:
             authenticated user. It authorizes only `POST /auth/2fa/verify`.
     MfaSetup:
       type: object
-      required: [uri, secret, issuer, account]
+      required:
+        - uri
+        - secret
+        - issuer
+        - account
       properties:
         uri:
           type: string
@@ -2039,7 +3293,8 @@ components:
           format: email
     TotpCode:
       type: object
-      required: [code]
+      required:
+        - code
       properties:
         code:
           type: string
@@ -2048,7 +3303,9 @@ components:
           description: Six-digit TOTP code from the authenticator.
     MfaVerify:
       type: object
-      required: [mfa_token, code]
+      required:
+        - mfa_token
+        - code
       properties:
         mfa_token:
           type: string
@@ -2062,13 +3319,15 @@ components:
             (separators optional, case-insensitive).
     CurrentPassword:
       type: object
-      required: [current_password]
+      required:
+        - current_password
       properties:
         current_password:
           type: string
     RecoveryCodes:
       type: object
-      required: [recovery_codes]
+      required:
+        - recovery_codes
       properties:
         recovery_codes:
           type: array
@@ -2079,94 +3338,249 @@ components:
             description: '`XXXX-XXXX`; shown exactly once at issuance or regeneration.'
     UserBrief:
       type: object
-      required: [id, display_name, email]
+      required:
+        - id
+        - display_name
+        - email
       properties:
-        id: { type: string, format: uuid }
-        display_name: { type: string }
-        email: { type: string, format: email }
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        email:
+          type: string
+          format: email
     Team:
       type: object
-      required: [id, name, created_at, updated_at]
+      required:
+        - id
+        - name
+        - created_at
+        - updated_at
       properties:
-        id: { type: string, format: uuid }
-        name: { type: string }
-        description: { type: [string, "null"] }
-        created_at: { type: integer }
-        updated_at: { type: integer }
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - 'null'
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
         my_role:
-          type: [string, "null"]
-          enum: [owner, admin, manager, member, null]
+          type:
+            - string
+            - 'null'
+          enum:
+            - owner
+            - admin
+            - manager
+            - member
+            - null
+        archived_at:
+          type:
+            - integer
+            - 'null'
+          description: Archive timestamp.
+        timezone:
+          type:
+            - string
+            - 'null'
+          description: Default timezone.
     Member:
       type: object
-      required: [user, role, created_at]
+      required:
+        - user
+        - role
+        - created_at
       properties:
-        user: { $ref: "#/components/schemas/UserBrief" }
-        role: { type: string, enum: [owner, admin, manager, member] }
-        created_at: { type: integer }
+        user:
+          $ref: '#/components/schemas/UserBrief'
+        role:
+          type: string
+          enum:
+            - owner
+            - admin
+            - manager
+            - member
+        created_at:
+          type: integer
+        username:
+          type:
+            - string
+            - 'null'
+          description: The member's @mention handle.
     Label:
       type: object
-      required: [id, name, color, created_at]
+      required:
+        - id
+        - name
+        - color
+        - created_at
+        - icon
       properties:
-        id: { type: string, format: uuid }
-        name: { type: string }
-        color: { type: string, pattern: "^#[0-9a-fA-F]{6}$" }
-        created_at: { type: integer }
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        color:
+          type: string
+          pattern: ^#[0-9a-fA-F]{6}$
+        created_at:
+          type: integer
+        icon:
+          type:
+            - string
+            - 'null'
+          maxLength: 64
+          description: >-
+            Optional Lucide icon name from the app whitelist (see `LABEL_ICONS` in the API); null =
+            no icon.
     LabelBrief:
       type: object
-      required: [id, name, color]
+      required:
+        - id
+        - name
+        - color
+        - icon
       properties:
-        id: { type: string, format: uuid }
-        name: { type: string }
-        color: { type: string }
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        color:
+          type: string
+        icon:
+          type:
+            - string
+            - 'null'
+          maxLength: 64
+          description: Optional Lucide icon name from the app whitelist.
     Project:
       type: object
-      required: [id, team_id, name, status, owner_id, created_by, created_at, updated_at]
+      required:
+        - id
+        - team_id
+        - name
+        - status
+        - owner_id
+        - created_by
+        - created_at
+        - updated_at
       properties:
-        id: { type: string, format: uuid }
-        team_id: { type: string, format: uuid }
-        name: { type: string }
-        description: { type: [string, "null"] }
-        status: { type: string, enum: [active, archived] }
-        owner_id: { type: string, format: uuid }
-        created_by: { type: string, format: uuid }
-        created_at: { type: integer }
-        updated_at: { type: integer }
-        open_task_count: { type: integer }
-        my_role: { type: [string, "null"], enum: [owner, admin, manager, member, null] }
+        id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - 'null'
+        status:
+          type: string
+          enum:
+            - active
+            - archived
+        owner_id:
+          type: string
+          format: uuid
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+        open_task_count:
+          type: integer
+        my_role:
+          type:
+            - string
+            - 'null'
+          enum:
+            - owner
+            - admin
+            - manager
+            - member
+            - null
         is_guest:
           type: boolean
           description: True when the caller reaches this project through a guest grant (read-only).
     TaskCreate:
       type: object
-      required: [title]
+      required:
+        - title
       properties:
-        title: { type: string, minLength: 1, maxLength: 250 }
-        description: { type: string, maxLength: 10000 }
+        title:
+          type: string
+          minLength: 1
+          maxLength: 250
+        description:
+          type: string
+          maxLength: 10000
         status:
           type: string
-          enum: [backlog, todo, in_progress]
-          description: New tasks start in an actionable state; later lifecycle states are reached only via transitions.
+          enum:
+            - backlog
+            - todo
+            - in_progress
+          description: >-
+            New tasks start in an actionable state; later lifecycle states are reached only via
+            transitions.
         reporter_id:
-          type: [string, "null"]
+          type:
+            - string
+            - 'null'
           description: |
             Acceptance reviewer. Defaults to the caller; selecting another
             user requires the Manager role or above and must be a team
             member. The assignee and reporter must be different users — a
             creation request that gives one person both roles is rejected.
-        priority: { type: string, enum: [low, medium, high, urgent] }
+        priority:
+          type: string
+          enum:
+            - none
+            - low
+            - medium
+            - high
+            - urgent
+            - critical
         assignee_id:
-          type: [string, "null"]
+          type:
+            - string
+            - 'null'
           description: Must be a team member.
         due_date:
-          type: [string, "null"]
+          type:
+            - string
+            - 'null'
           format: date
         parent_task_id:
-          type: [string, "null"]
+          type:
+            - string
+            - 'null'
           description: Subtask parent; must be a root task in the same project.
         label_ids:
           type: array
           maxItems: 20
-          items: { type: string, format: uuid }
+          items:
+            type: string
+            format: uuid
+        deadline:
+          type: string
+          format: date
+          description: Hard cutoff; must be >= due_date when both set.
     TaskUpdate:
       type: object
       minProperties: 1
@@ -2176,97 +3590,240 @@ components:
         and reporter must remain different users; a change that would give
         one person both roles is rejected with 422.
       properties:
-        title: { type: string, minLength: 1, maxLength: 250 }
-        description: { type: [string, "null"], maxLength: 10000 }
-        priority: { type: string, enum: [low, medium, high, urgent] }
+        title:
+          type: string
+          minLength: 1
+          maxLength: 250
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 10000
+        priority:
+          type: string
+          enum:
+            - none
+            - low
+            - medium
+            - high
+            - urgent
+            - critical
         assignee_id:
-          type: [string, "null"]
+          type:
+            - string
+            - 'null'
           description: Team member id; empty string clears the assignment.
         reporter_id:
-          type: [string, "null"]
+          type:
+            - string
+            - 'null'
           description: |
             Acceptance reviewer. Changes require the Manager role or above
             and must reference a member; the assignee and reporter must be
             different users.
         due_date:
-          type: [string, "null"]
+          type:
+            - string
+            - 'null'
           format: date
         label_ids:
           type: array
           maxItems: 20
-          items: { type: string, format: uuid }
+          items:
+            type: string
+            format: uuid
+        deadline:
+          oneOf:
+            - type: string
+              format: date
+              description: Hard cutoff; must be >= due_date when both set.
+            - type: 'null'
+              description: Clears the deadline.
     Task:
       type: object
       required:
-        [id, team_id, project_id, title, status, priority, position, labels, created_at, updated_at]
+        - id
+        - team_id
+        - project_id
+        - title
+        - status
+        - priority
+        - position
+        - labels
+        - created_at
+        - updated_at
       properties:
-        id: { type: string, format: uuid }
-        team_id: { type: string, format: uuid }
-        project_id: { type: string, format: uuid }
-        parent_task_id: { type: [string, "null"] }
-        title: { type: string }
-        description: { type: [string, "null"] }
-        status: { type: string, enum: [backlog, todo, in_progress, resolved, in_review, closed] }
-        priority: { type: string, enum: [low, medium, high, urgent] }
-        assignee: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
+        id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        parent_task_id:
+          type:
+            - string
+            - 'null'
+        title:
+          type: string
+        description:
+          type:
+            - string
+            - 'null'
+        status:
+          type: string
+          enum:
+            - backlog
+            - todo
+            - in_progress
+            - resolved
+            - in_review
+            - closed
+        priority:
+          type: string
+          enum:
+            - none
+            - low
+            - medium
+            - high
+            - urgent
+            - critical
+        assignee:
+          oneOf:
+            - $ref: '#/components/schemas/UserBrief'
+            - type: 'null'
         reporter:
           description: User responsible for accepting or rejecting the work.
-          oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }]
-        created_by: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
+          oneOf:
+            - $ref: '#/components/schemas/UserBrief'
+            - type: 'null'
+        created_by:
+          oneOf:
+            - $ref: '#/components/schemas/UserBrief'
+            - type: 'null'
         resolution:
-          description: Latest acceptance decision; set on acceptance (closing) or rejection (returning to In Progress), cleared when work restarts.
-          type: [string, "null"]
-          enum: [accepted, rejected, null]
-        resolution_note: { type: [string, "null"] }
-        resolved_by: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
-        resolved_at: { type: [integer, "null"], description: "epoch ms of the latest decision" }
-        due_date: { type: [string, "null"], format: date }
-        position: { type: number }
-        completed_at: { type: [integer, "null"], description: "epoch ms; set when the reporter accepts the task (status closed)" }
+          description: >-
+            Latest acceptance decision; set on acceptance (closing) or rejection (returning to In
+            Progress), cleared when work restarts.
+          type:
+            - string
+            - 'null'
+          enum:
+            - accepted
+            - rejected
+            - null
+        resolution_note:
+          type:
+            - string
+            - 'null'
+        resolved_by:
+          oneOf:
+            - $ref: '#/components/schemas/UserBrief'
+            - type: 'null'
+        resolved_at:
+          type:
+            - integer
+            - 'null'
+          description: epoch ms of the latest decision
+        due_date:
+          type:
+            - string
+            - 'null'
+          format: date
+        position:
+          type: number
+        completed_at:
+          type:
+            - integer
+            - 'null'
+          description: epoch ms; set when the reporter accepts the task (status closed)
         labels:
           type: array
-          items: { $ref: "#/components/schemas/LabelBrief" }
-        created_at: { type: integer }
-        updated_at: { type: integer }
+          items:
+            $ref: '#/components/schemas/LabelBrief'
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
         subtasks:
           type: array
           description: Present in task detail responses (one nesting level).
-          items: { $ref: "#/components/schemas/Task" }
+          items:
+            $ref: '#/components/schemas/Task'
+        deadline:
+          type:
+            - string
+            - 'null'
+          description: Hard cutoff; app enforces deadline >= due_date.
+        from_template_id:
+          type:
+            - string
+            - 'null'
+          description: Template provenance.
     PaginatedTasks:
       type: object
-      required: [items, page, page_size, total]
+      required:
+        - items
+        - page
+        - page_size
+        - total
       properties:
         items:
           type: array
-          items: { $ref: "#/components/schemas/Task" }
-        page: { type: integer }
-        page_size: { type: integer }
-        total: { type: integer }
+          items:
+            $ref: '#/components/schemas/Task'
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
     PaginatedMyTasks:
       type: object
-      required: [items, page, page_size, total]
+      required:
+        - items
+        - page
+        - page_size
+        - total
       properties:
         items:
           type: array
           items:
             allOf:
-              - $ref: "#/components/schemas/Task"
+              - $ref: '#/components/schemas/Task'
               - type: object
-                required: [team_name, project_name]
+                required:
+                  - team_name
+                  - project_name
                 properties:
-                  team_name: { type: string }
-                  project_name: { type: string }
-        page: { type: integer }
-        page_size: { type: integer }
-        total: { type: integer }
+                  team_name:
+                    type: string
+                  project_name:
+                    type: string
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
     TaskTransition:
       type: object
-      required: [to]
+      required:
+        - to
       properties:
         to:
           type: string
-          enum: [todo, in_progress, resolved, in_review, closed]
-          description: Target state; must be a legal successor of the current state (see POST /tasks/{task_id}/transition).
+          enum:
+            - todo
+            - in_progress
+            - resolved
+            - in_review
+            - closed
+          description: >-
+            Target state; must be a legal successor of the current state (see POST
+            /tasks/{task_id}/transition).
         reason:
           type: string
           minLength: 1
@@ -2276,9 +3833,15 @@ components:
             with the rejection decision; otherwise ignored.
     Notification:
       type: object
-      required: [id, event, summary, created_at]
+      required:
+        - id
+        - event
+        - summary
+        - created_at
       properties:
-        id: { type: string, format: uuid }
+        id:
+          type: string
+          format: uuid
         event:
           type: string
           enum:
@@ -2289,222 +3852,503 @@ components:
             - task_rejected
             - task_status_changed
             - task_reporter_changed
-        task_id: { type: [string, "null"], format: uuid }
-        actor: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
+        task_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        actor:
+          oneOf:
+            - $ref: '#/components/schemas/UserBrief'
+            - type: 'null'
         summary:
           type: string
           maxLength: 300
           description: Frozen, human-readable summary captured when the event happened.
-        created_at: { type: integer }
-        read_at: { type: [integer, "null"] }
+        created_at:
+          type: integer
+        read_at:
+          type:
+            - integer
+            - 'null'
     PaginatedNotifications:
       type: object
-      required: [items, page, page_size, total]
+      required:
+        - items
+        - page
+        - page_size
+        - total
       properties:
         items:
           type: array
-          items: { $ref: "#/components/schemas/Notification" }
-        page: { type: integer }
-        page_size: { type: integer }
-        total: { type: integer }
+          items:
+            $ref: '#/components/schemas/Notification'
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
     DependencyEdge:
       type: object
-      required: [predecessor_task_id, successor_task_id, created_at]
+      required:
+        - predecessor_task_id
+        - successor_task_id
+        - created_at
       properties:
-        predecessor_task_id: { type: string, format: uuid }
-        successor_task_id: { type: string, format: uuid }
-        created_at: { type: integer }
+        predecessor_task_id:
+          type: string
+          format: uuid
+        successor_task_id:
+          type: string
+          format: uuid
+        created_at:
+          type: integer
     DependencyTaskRef:
       type: object
-      required: [task_id, title, status]
+      required:
+        - task_id
+        - title
+        - status
       properties:
-        task_id: { type: string, format: uuid }
-        title: { type: string }
-        status: { type: string, enum: [backlog, todo, in_progress, resolved, in_review, closed] }
-        due_date: { type: [string, "null"], format: date }
+        task_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        status:
+          type: string
+          enum:
+            - backlog
+            - todo
+            - in_progress
+            - resolved
+            - in_review
+            - closed
+        due_date:
+          type:
+            - string
+            - 'null'
+          format: date
     DependencyList:
       type: object
-      required: [blockers, blocked, can_manage]
+      required:
+        - blockers
+        - blocked
+        - can_manage
       properties:
         blockers:
           type: array
           description: Tasks that must finish before this task.
-          items: { $ref: "#/components/schemas/DependencyTaskRef" }
+          items:
+            $ref: '#/components/schemas/DependencyTaskRef'
         blocked:
           type: array
           description: Tasks waiting on this task.
-          items: { $ref: "#/components/schemas/DependencyTaskRef" }
+          items:
+            $ref: '#/components/schemas/DependencyTaskRef'
         can_manage:
           type: boolean
           description: False for project guests.
     Workload:
       type: object
-      required: [members, unassigned, generated_at]
+      required:
+        - members
+        - unassigned
+        - generated_at
       properties:
         members:
           type: array
           items:
             type: object
-            required: [user, by_status, by_priority, overdue, total]
+            required:
+              - user
+              - by_status
+              - by_priority
+              - overdue
+              - total
             properties:
-              user: { $ref: "#/components/schemas/UserBrief" }
+              user:
+                $ref: '#/components/schemas/UserBrief'
               by_status:
                 type: object
                 description: Status -> open task count.
-                additionalProperties: { type: integer }
+                additionalProperties:
+                  type: integer
               by_priority:
                 type: object
                 description: Priority -> open task count.
-                additionalProperties: { type: integer }
-              overdue: { type: integer }
-              total: { type: integer }
+                additionalProperties:
+                  type: integer
+              overdue:
+                type: integer
+              total:
+                type: integer
         unassigned:
           type: object
-          required: [by_status, by_priority, overdue, total]
+          required:
+            - by_status
+            - by_priority
+            - overdue
+            - total
           properties:
             by_status:
               type: object
-              additionalProperties: { type: integer }
+              additionalProperties:
+                type: integer
             by_priority:
               type: object
-              additionalProperties: { type: integer }
-            overdue: { type: integer }
-            total: { type: integer }
-        generated_at: { type: integer }
+              additionalProperties:
+                type: integer
+            overdue:
+              type: integer
+            total:
+              type: integer
+        generated_at:
+          type: integer
     TaskTemplate:
       type: object
-      required: [id, project_id, name, default_title, default_priority, label_ids, created_at, updated_at]
+      required:
+        - id
+        - project_id
+        - name
+        - default_title
+        - default_priority
+        - label_ids
+        - created_at
+        - updated_at
       properties:
-        id: { type: string, format: uuid }
-        project_id: { type: string, format: uuid }
-        name: { type: string }
-        default_title: { type: string }
-        default_description: { type: [string, "null"] }
-        default_priority: { type: string, enum: [low, medium, high, urgent] }
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        default_title:
+          type: string
+        default_description:
+          type:
+            - string
+            - 'null'
+        default_priority:
+          type: string
+          enum:
+            - none
+            - low
+            - medium
+            - high
+            - urgent
+            - critical
         label_ids:
           type: array
-          items: { type: string, format: uuid }
-        created_by: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
-        created_at: { type: integer }
-        updated_at: { type: integer }
+          items:
+            type: string
+            format: uuid
+        created_by:
+          oneOf:
+            - $ref: '#/components/schemas/UserBrief'
+            - type: 'null'
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
     TemplateUpsert:
       type: object
-      required: [name, default_title]
+      required:
+        - name
+        - default_title
       properties:
-        name: { type: string, minLength: 1, maxLength: 160 }
-        default_title: { type: string, minLength: 1, maxLength: 250 }
-        default_description: { type: string, maxLength: 10000 }
-        default_priority: { type: string, enum: [low, medium, high, urgent] }
+        name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        default_title:
+          type: string
+          minLength: 1
+          maxLength: 250
+        default_description:
+          type: string
+          maxLength: 10000
+        default_priority:
+          type: string
+          enum:
+            - none
+            - low
+            - medium
+            - high
+            - urgent
+            - critical
         label_ids:
           type: array
           maxItems: 20
-          items: { type: string, format: uuid }
+          items:
+            type: string
+            format: uuid
     ProjectGuest:
       type: object
-      required: [user, role, created_at]
+      required:
+        - user
+        - role
+        - created_at
       properties:
-        user: { $ref: "#/components/schemas/UserBrief" }
-        role: { type: string, enum: [viewer] }
-        created_at: { type: integer }
-        granted_by: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
+        user:
+          $ref: '#/components/schemas/UserBrief'
+        role:
+          type: string
+          enum:
+            - viewer
+        created_at:
+          type: integer
+        granted_by:
+          oneOf:
+            - $ref: '#/components/schemas/UserBrief'
+            - type: 'null'
     Goal:
       type: object
-      required: [id, team_id, title, owner, status, created_at, updated_at]
+      required:
+        - id
+        - team_id
+        - title
+        - owner
+        - status
+        - created_at
+        - updated_at
       properties:
-        id: { type: string, format: uuid }
-        team_id: { type: string, format: uuid }
-        title: { type: string }
-        description: { type: [string, "null"] }
-        owner: { $ref: "#/components/schemas/UserBrief" }
-        status: { type: string, enum: [draft, active, completed, cancelled] }
-        start_date: { type: [string, "null"], format: date }
-        due_date: { type: [string, "null"], format: date }
-        created_by: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
-        completed_at: { type: [integer, "null"] }
-        created_at: { type: integer }
-        updated_at: { type: integer }
+        id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type:
+            - string
+            - 'null'
+        owner:
+          $ref: '#/components/schemas/UserBrief'
+        status:
+          type: string
+          enum:
+            - draft
+            - active
+            - completed
+            - cancelled
+        start_date:
+          type:
+            - string
+            - 'null'
+          format: date
+        due_date:
+          type:
+            - string
+            - 'null'
+          format: date
+        created_by:
+          oneOf:
+            - $ref: '#/components/schemas/UserBrief'
+            - type: 'null'
+        completed_at:
+          type:
+            - integer
+            - 'null'
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
         progress:
-          type: [number, "null"]
+          type:
+            - number
+            - 'null'
           description: Mean key-result progress (0-100); null with no key results.
-        key_result_count: { type: [integer, "null"] }
+        key_result_count:
+          type:
+            - integer
+            - 'null'
     KeyResult:
       type: object
-      required: [id, goal_id, title, metric_type, current_value, progress, position, created_at, updated_at]
+      required:
+        - id
+        - goal_id
+        - title
+        - metric_type
+        - current_value
+        - progress
+        - position
+        - created_at
+        - updated_at
       properties:
-        id: { type: string, format: uuid }
-        goal_id: { type: string, format: uuid }
-        title: { type: string }
-        description: { type: [string, "null"] }
-        metric_type: { type: string, enum: [increase, decrease, boolean] }
-        start_value: { type: [number, "null"] }
-        current_value: { type: number }
-        target_value: { type: [number, "null"] }
-        unit: { type: [string, "null"], maxLength: 30 }
+        id:
+          type: string
+          format: uuid
+        goal_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type:
+            - string
+            - 'null'
+        metric_type:
+          type: string
+          enum:
+            - increase
+            - decrease
+            - boolean
+        start_value:
+          type:
+            - number
+            - 'null'
+        current_value:
+          type: number
+        target_value:
+          type:
+            - number
+            - 'null'
+        unit:
+          type:
+            - string
+            - 'null'
+          maxLength: 30
         progress:
           type: number
           description: Server-computed 0-100; clamped. 100% means the metric target was reached.
-        position: { type: number }
-        created_at: { type: integer }
-        updated_at: { type: integer }
+        position:
+          type: number
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
     KeyResultUpsert:
       type: object
-      required: [title, metric_type]
+      required:
+        - title
+        - metric_type
       properties:
-        title: { type: string, minLength: 1, maxLength: 250 }
-        description: { type: string, maxLength: 5000 }
-        metric_type: { type: string, enum: [increase, decrease, boolean] }
+        title:
+          type: string
+          minLength: 1
+          maxLength: 250
+        description:
+          type: string
+          maxLength: 5000
+        metric_type:
+          type: string
+          enum:
+            - increase
+            - decrease
+            - boolean
         start_value:
-          type: [number, "null"]
+          type:
+            - number
+            - 'null'
           description: Required for increase/decrease.
         current_value:
-          type: [number, "null"]
+          type:
+            - number
+            - 'null'
           description: Defaults to start_value (numeric) or 0 (boolean); boolean accepts 0/1 only.
         target_value:
-          type: [number, "null"]
+          type:
+            - number
+            - 'null'
           description: Required for increase/decrease.
-        unit: { type: [string, "null"], maxLength: 30 }
+        unit:
+          type:
+            - string
+            - 'null'
+          maxLength: 30
     GoalDetail:
       type: object
-      required: [goal, key_results, projects, tasks, execution]
+      required:
+        - goal
+        - key_results
+        - projects
+        - tasks
+        - execution
       properties:
-        goal: { $ref: "#/components/schemas/Goal" }
+        goal:
+          $ref: '#/components/schemas/Goal'
         key_results:
           type: array
-          items: { $ref: "#/components/schemas/KeyResult" }
+          items:
+            $ref: '#/components/schemas/KeyResult'
         projects:
           type: array
           items:
             type: object
-            required: [id, name, status]
+            required:
+              - id
+              - name
+              - status
             properties:
-              id: { type: string, format: uuid }
-              name: { type: string }
-              status: { type: string, enum: [active, archived] }
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              status:
+                type: string
+                enum:
+                  - active
+                  - archived
         tasks:
           type: array
           items:
             type: object
-            required: [id, title, status]
+            required:
+              - id
+              - title
+              - status
             properties:
-              id: { type: string, format: uuid }
-              title: { type: string }
-              status: { type: string, enum: [backlog, todo, in_progress, resolved, in_review, closed] }
+              id:
+                type: string
+                format: uuid
+              title:
+                type: string
+              status:
+                type: string
+                enum:
+                  - backlog
+                  - todo
+                  - in_progress
+                  - resolved
+                  - in_review
+                  - closed
         execution:
           type: object
           description: Task execution statistics — NOT key-result achievement.
-          required: [total, by_status, completed]
+          required:
+            - total
+            - by_status
+            - completed
           properties:
-            total: { type: integer }
+            total:
+              type: integer
             by_status:
               type: object
-              additionalProperties: { type: integer }
-            completed: { type: integer }
-            completion_percent: { type: [number, "null"] }
+              additionalProperties:
+                type: integer
+            completed:
+              type: integer
+            completion_percent:
+              type:
+                - number
+                - 'null'
     GoalActivity:
       type: object
-      required: [id, event, created_at]
+      required:
+        - id
+        - event
+        - created_at
       properties:
-        id: { type: string, format: uuid }
+        id:
+          type: string
+          format: uuid
         event:
           type: string
           enum:
@@ -2519,43 +4363,100 @@ components:
             - goal_project_disassociated
             - goal_task_associated
             - goal_task_disassociated
-        field: { type: [string, "null"] }
-        old_value: { type: [string, "null"] }
-        new_value: { type: [string, "null"] }
-        actor: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
-        created_at: { type: integer }
+        field:
+          type:
+            - string
+            - 'null'
+        old_value:
+          type:
+            - string
+            - 'null'
+        new_value:
+          type:
+            - string
+            - 'null'
+        actor:
+          oneOf:
+            - $ref: '#/components/schemas/UserBrief'
+            - type: 'null'
+        created_at:
+          type: integer
     Board:
       type: object
-      required: [project_id, columns]
+      required:
+        - project_id
+        - columns
       properties:
-        project_id: { type: string, format: uuid }
+        project_id:
+          type: string
+          format: uuid
         columns:
           type: array
           items:
             type: object
-            required: [status, total, items]
+            required:
+              - status
+              - total
+              - items
             properties:
-              status: { type: string, enum: [backlog, todo, in_progress, resolved, in_review, closed] }
-              total: { type: integer }
+              status:
+                type: string
+                enum:
+                  - backlog
+                  - todo
+                  - in_progress
+                  - resolved
+                  - in_review
+                  - closed
+              total:
+                type: integer
               items:
                 type: array
-                items: { $ref: "#/components/schemas/Task" }
+                items:
+                  $ref: '#/components/schemas/Task'
     Comment:
       type: object
-      required: [id, task_id, author, body, created_at, updated_at]
+      required:
+        - id
+        - task_id
+        - author
+        - body
+        - created_at
+        - updated_at
       properties:
-        id: { type: string, format: uuid }
-        task_id: { type: string, format: uuid }
-        author: { $ref: "#/components/schemas/UserBrief" }
-        body: { type: string }
-        created_at: { type: integer }
-        updated_at: { type: integer }
+        id:
+          type: string
+          format: uuid
+        task_id:
+          type: string
+          format: uuid
+        author:
+          $ref: '#/components/schemas/UserBrief'
+        body:
+          type: string
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+        parent_comment_id:
+          type:
+            - string
+            - 'null'
+          description: Parent comment id for replies.
     Activity:
       type: object
-      required: [id, event, created_at]
+      required:
+        - id
+        - event
+        - created_at
       properties:
-        id: { type: string, format: uuid }
-        task_id: { type: [string, "null"] }
+        id:
+          type: string
+          format: uuid
+        task_id:
+          type:
+            - string
+            - 'null'
         event:
           type: string
           enum:
@@ -2569,8 +4470,933 @@ components:
             - comment_added
             - comment_edited
             - comment_deleted
-        field: { type: [string, "null"] }
-        old_value: { type: [string, "null"] }
-        new_value: { type: [string, "null"] }
-        actor: { oneOf: [{ $ref: "#/components/schemas/UserBrief" }, { type: "null" }] }
-        created_at: { type: integer }
+        field:
+          type:
+            - string
+            - 'null'
+        old_value:
+          type:
+            - string
+            - 'null'
+        new_value:
+          type:
+            - string
+            - 'null'
+        actor:
+          oneOf:
+            - $ref: '#/components/schemas/UserBrief'
+            - type: 'null'
+        created_at:
+          type: integer
+    Rule:
+      type: object
+      required:
+        - id
+        - team_id
+        - name
+        - trigger_type
+        - enabled
+        - current_version
+        - condition
+        - actions
+        - created_by
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 120
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 500
+        trigger_type:
+          type: string
+          enum:
+            - task_status_changed
+            - task_priority_changed
+            - task_assigned
+        enabled:
+          type: boolean
+        current_version:
+          type: integer
+          minimum: 1
+        condition:
+          description: Typed condition DSL tree (see docs/rules-engine.md).
+          type: object
+        actions:
+          description: 1-5 typed action objects in execution order.
+          type: array
+          maxItems: 5
+          items:
+            type: object
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+        archived_at:
+          type:
+            - integer
+            - 'null'
+    RuleUpsert:
+      type: object
+      required:
+        - name
+        - trigger_type
+        - condition
+        - actions
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 500
+        trigger_type:
+          type: string
+          enum:
+            - task_status_changed
+            - task_priority_changed
+            - task_assigned
+        condition:
+          description: Typed condition DSL tree (strictly validated; unknown fields rejected).
+          type: object
+        actions:
+          description: 1-5 typed actions (add_comment / send_notification / send_message).
+          type: array
+          minItems: 1
+          maxItems: 5
+          items:
+            type: object
+        enabled:
+          type: boolean
+          default: false
+    RuleUpdate:
+      type: object
+      required:
+        - expected_version
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 500
+        trigger_type:
+          type: string
+          enum:
+            - task_status_changed
+            - task_priority_changed
+            - task_assigned
+        condition:
+          type: object
+        actions:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+        enabled:
+          type: boolean
+        expected_version:
+          description: Optimistic concurrency guard (current_version seen by the caller).
+          type: integer
+          minimum: 1
+    RuleVersion:
+      type: object
+      required:
+        - version
+        - trigger_type
+        - condition
+        - actions
+        - created_by
+        - created_at
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        trigger_type:
+          type: string
+          enum:
+            - task_status_changed
+            - task_priority_changed
+            - task_assigned
+        condition:
+          type: object
+        actions:
+          type: array
+          items:
+            type: object
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: integer
+    RulePage:
+      type: object
+      required:
+        - items
+        - page
+        - page_size
+        - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Rule'
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+    RuleHistoryPage:
+      type: object
+      required:
+        - items
+        - page
+        - page_size
+        - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuleExecution'
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+    RuleExecution:
+      type: object
+      required:
+        - id
+        - rule_version
+        - event_id
+        - event_type
+        - event_origin
+        - trigger_type
+        - condition_result
+        - status
+        - created_at
+        - actions
+      properties:
+        id:
+          type: string
+          format: uuid
+        rule_version:
+          type: integer
+          minimum: 1
+        event_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+          enum:
+            - task_status_changed
+            - task_priority_changed
+            - task_assigned
+        event_origin:
+          type: string
+          enum:
+            - user
+            - automation
+        occurred_at:
+          type: integer
+        actor_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        trigger_type:
+          type: string
+          enum:
+            - task_status_changed
+            - task_priority_changed
+            - task_assigned
+        condition_result:
+          type: string
+          enum:
+            - matched
+            - not_matched
+        status:
+          type: string
+          enum:
+            - planned
+            - completed
+            - failed
+        planned_actions:
+          type:
+            - string
+            - 'null'
+        error_category:
+          type:
+            - string
+            - 'null'
+        error_detail:
+          type:
+            - string
+            - 'null'
+          maxLength: 500
+        created_at:
+          type: integer
+        completed_at:
+          type:
+            - integer
+            - 'null'
+        actions:
+          description: Action-level outcomes recorded in the idempotency ledger.
+          type: array
+          items:
+            type: object
+            required:
+              - action_type
+              - outcome
+              - outbox_status
+            properties:
+              action_type:
+                type: string
+                enum:
+                  - send_notification
+                  - add_comment
+                  - send_message
+              outcome:
+                type: string
+                enum:
+                  - completed
+                  - skipped
+              outbox_status:
+                type: string
+              detail:
+                type:
+                  - string
+                  - 'null'
+    NotificationPrefs:
+      type: object
+      description: Per-event notification toggles. Unset storage resolves to all-enabled.
+      additionalProperties: false
+      required:
+        - task_assigned
+        - comment_mention
+        - task_submitted
+        - task_accepted
+        - task_rejected
+        - task_status_changed
+      properties:
+        task_assigned:
+          type: boolean
+          default: true
+        comment_mention:
+          type: boolean
+          default: true
+        task_submitted:
+          type: boolean
+          default: true
+        task_accepted:
+          type: boolean
+          default: true
+        task_rejected:
+          type: boolean
+          default: true
+        task_status_changed:
+          type: boolean
+          default: true
+    UpdateProfileRequest:
+      type: object
+      description: Profile fields to change. Absent fields are untouched.
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        username:
+          oneOf:
+            - type: string
+              pattern: ^[a-z0-9_]{3,32}$
+            - type: 'null'
+          description: null clears the username.
+        bio:
+          oneOf:
+            - type: string
+              maxLength: 200
+            - type: 'null'
+          description: null clears the bio.
+        timezone:
+          oneOf:
+            - type: string
+              description: IANA timezone name.
+            - type: 'null'
+          description: null clears the timezone.
+        avatar:
+          oneOf:
+            - type: string
+              description: data URL of a square JPG, PNG or WebP image, at most 2 MB decoded.
+            - type: 'null'
+          description: null clears the avatar.
+        notification_prefs:
+          $ref: '#/components/schemas/NotificationPrefs'
+        capacity_limit:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          description: Clamped server-side; absent leaves the stored value untouched.
+    MyWorkSummary:
+      type: object
+      required:
+        - by_status
+        - overdue
+        - unread_mentions_7d
+      properties:
+        by_status:
+          type: object
+          required:
+            - backlog
+            - todo
+            - in_progress
+            - in_review
+            - resolved
+            - closed
+          additionalProperties: false
+          properties:
+            backlog:
+              type: integer
+            todo:
+              type: integer
+            in_progress:
+              type: integer
+            in_review:
+              type: integer
+            resolved:
+              type: integer
+            closed:
+              type: integer
+        overdue:
+          type: integer
+          description: Open tasks assigned to the caller whose due date passed.
+        unread_mentions_7d:
+          type: integer
+          description: Unread comment mentions in the trailing 7 days.
+    SessionInfo:
+      type: object
+      required:
+        - id
+        - created_at
+        - last_seen_at
+        - current
+      properties:
+        id:
+          type: string
+          format: uuid
+        created_at:
+          type: integer
+        last_seen_at:
+          type: integer
+        ip_address:
+          type:
+            - string
+            - 'null'
+        user_agent:
+          type:
+            - string
+            - 'null'
+        current:
+          type: boolean
+    SessionList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionInfo'
+    UserInfo:
+      type: object
+      description: Identity card for hover cards and @mention resolution.
+      required:
+        - id
+        - display_name
+        - email
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        email:
+          type: string
+          format: email
+        username:
+          type:
+            - string
+            - 'null'
+        bio:
+          type:
+            - string
+            - 'null'
+    UserInfoList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserInfo'
+    TeamGuest:
+      type: object
+      description: A project viewer (guest) within one of the team's projects.
+      required:
+        - user
+        - project_id
+        - project_name
+        - created_at
+      properties:
+        user:
+          $ref: '#/components/schemas/UserBrief'
+        project_id:
+          type: string
+          format: uuid
+        project_name:
+          type: string
+        created_at:
+          type: integer
+    TeamGuestList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamGuest'
+    DeleteTeamRequest:
+      type: object
+      required:
+        - confirm_name
+        - current_password
+      properties:
+        confirm_name:
+          type: string
+          description: The exact team name.
+        current_password:
+          type: string
+    PurgeProjectRequest:
+      type: object
+      required:
+        - confirm_name
+        - current_password
+      properties:
+        confirm_name:
+          type: string
+          description: The exact project name.
+        current_password:
+          type: string
+    TrashProject:
+      type: object
+      required:
+        - id
+        - name
+        - status
+        - deleted_at
+        - task_count
+        - retention_expires_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - 'null'
+        status:
+          type: string
+        deleted_at:
+          type: integer
+        task_count:
+          type: integer
+        retention_expires_at:
+          type: integer
+          description: deleted_at + 30 days; after this only purge remains.
+    TrashProjectList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrashProject'
+    CapacityMember:
+      type: object
+      required:
+        - user_id
+        - display_name
+        - avatar_url
+        - open_tasks
+        - overdue_tasks
+        - capacity_limit
+        - utilization
+        - status
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+        open_tasks:
+          type: integer
+        overdue_tasks:
+          type: integer
+        due_this_week:
+          type:
+            - integer
+            - 'null'
+          description: Open tasks due within the next 7 days; null unless window=week.
+        due_this_month:
+          type:
+            - integer
+            - 'null'
+          description: Open tasks due within the next 30 days; null unless window=month.
+        due_in_window:
+          type: integer
+          description: Open tasks due within the requested window.
+        capacity_limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        utilization:
+          type: number
+          description: open_tasks / capacity_limit, clamped to 0-2.
+        status:
+          type: string
+          enum:
+            - underutilized
+            - balanced
+            - overloaded
+    CapacityResponse:
+      type: object
+      required:
+        - window_days
+        - summary
+        - items
+      properties:
+        window_days:
+          type: integer
+          enum:
+            - 7
+            - 30
+        summary:
+          type: object
+          required:
+            - total_open_tasks
+            - total_capacity
+            - utilization
+          properties:
+            total_open_tasks:
+              type: integer
+            total_capacity:
+              type: integer
+            utilization:
+              type: number
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CapacityMember'
+    CreateCommentRequest:
+      type: object
+      properties:
+        parent_comment_id:
+          type: string
+          description: Parent comment id for a threaded reply; replying to a reply is a 422 (depth 2).
+    UpsertTemplateRequest:
+      type: object
+      properties:
+        default_subtasks:
+          type: array
+          items:
+            type: string
+          maxItems: 20
+    FromTemplateRequest:
+      type: object
+      description: >-
+        Overrides applied on top of the template's defaults. Absent fields keep the template
+        default.
+      properties:
+        title:
+          type: string
+        default_description:
+          type: string
+        priority:
+          type: string
+          enum:
+            - none
+            - low
+            - medium
+            - high
+            - urgent
+            - critical
+        assignee_id:
+          type: string
+          format: uuid
+        due_date:
+          type: string
+          format: date
+        subtasks:
+          type: array
+          items:
+            type: string
+          maxItems: 20
+        status:
+          type: string
+          enum:
+            - backlog
+            - todo
+            - in_progress
+          description: Overrides the creation status (actionable states only).
+        label_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Overrides the template's default label set.
+    FromTemplateTask:
+      type: object
+      description: The created task (Task shape) with from_template_id provenance.
+      allOf:
+        - $ref: '#/components/schemas/Task'
+    ChecklistItem:
+      type: object
+      required:
+        - id
+        - task_id
+        - title
+        - is_checked
+        - position
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        task_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          maxLength: 200
+        is_checked:
+          type: boolean
+        position:
+          type: number
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+    ChecklistItemList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChecklistItem'
+    CreateChecklistItemRequest:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        position:
+          type: number
+    UpdateChecklistItemRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        is_checked:
+          type: boolean
+    TaskProgress:
+      type: object
+      required:
+        - subtasks_total
+        - subtasks_closed
+        - checklist_total
+        - checklist_checked
+      properties:
+        subtasks_total:
+          type: integer
+        subtasks_closed:
+          type: integer
+        checklist_total:
+          type: integer
+        checklist_checked:
+          type: integer
+        progress_pct:
+          type:
+            - integer
+            - 'null'
+          description: 0-100; null when nothing to track.
+    DashboardKpis:
+      type: object
+      required:
+        - throughput
+        - throughput_prev
+        - cycle_time_days
+        - lead_time_days
+        - wip
+        - overdue
+        - deadline_risk
+        - review_load
+        - priority_mix
+      properties:
+        throughput:
+          type: integer
+          description: Tasks closed in the window.
+        throughput_prev:
+          type: integer
+          description: Tasks closed in the previous window.
+        cycle_time_days:
+          type:
+            - number
+            - 'null'
+          description: Avg days from first in_progress to close (null when no matches).
+        lead_time_days:
+          type:
+            - number
+            - 'null'
+          description: Avg days from creation to close (null when no matches).
+        wip:
+          type: integer
+          description: Open tasks currently in_progress or in_review.
+        overdue:
+          type: integer
+          description: Open tasks past their due date.
+        deadline_risk:
+          type: integer
+          description: Open tasks with a deadline within the next 7 days.
+        review_load:
+          type: integer
+          description: Tasks currently in review.
+        priority_mix:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Open task count per priority level.
+        capacity_utilization:
+          type:
+            - number
+            - 'null'
+          description: Team-wide assigned-open / capacity, clamped to 2.0; null when no member sets capacity.
+    DashboardReviewRow:
+      type: object
+      required:
+        - reporter_id
+        - display_name
+        - count
+      properties:
+        reporter_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        count:
+          type: integer
+    DashboardResponse:
+      type: object
+      required:
+        - window_days
+        - kpis
+        - review_by_reporter
+      properties:
+        window_days:
+          type: integer
+          enum:
+            - 7
+            - 30
+            - 90
+        kpis:
+          $ref: '#/components/schemas/DashboardKpis'
+        review_by_reporter:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardReviewRow'
+    UpdateLabelRequest:
+      type: object
+      description: Label fields to change. Absent fields are untouched.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        color:
+          type: string
+          pattern: ^#[0-9a-fA-F]{6}$
+        icon:
+          oneOf:
+            - type: string
+              maxLength: 64
+              description: Whitelisted Lucide icon name.
+            - type: 'null'
+              description: Clears the icon.
+    Attachment:
+      type: object
+      required:
+        - id
+        - task_id
+        - filename
+        - mime_type
+        - size_bytes
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        task_id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+          maxLength: 255
+        mime_type:
+          type: string
+        size_bytes:
+          type: integer
+          description: Stored byte size.
+        uploaded_by:
+          oneOf:
+            - $ref: '#/components/schemas/UserBrief'
+            - type: 'null'
+        created_at:
+          type: integer
+    AttachmentList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
