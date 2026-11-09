@@ -5024,6 +5024,238 @@
           }
         }
       }
+    },
+    "/teams/{team_id}/guests2": {
+      "get": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "List team guests with their grants (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active guests, oldest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamGuest2List"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Invite an existing instance user as a team guest (Owner/Admin)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteGuestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Guest created (no permissions — deny by default).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamGuest2"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/guests2/{guest_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TeamId"
+        },
+        {
+          "name": "guest_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "delete": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Revoke a team guest (Owner/Admin)",
+        "description": "Soft-revokes (revoked_at set); every permission dies with it. Immediate: the guest's next request gets 404.",
+        "responses": {
+          "204": {
+            "description": "Revoked."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/guests2/{guest_id}/permissions": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TeamId"
+        },
+        {
+          "name": "guest_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "List a guest's permission grants (Owner/Admin)",
+        "responses": {
+          "200": {
+            "description": "Grants.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/GuestPermissionRow"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Grant a permission (Owner/Admin)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantGuestPermissionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Granted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestPermissionRow"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/guests2/{guest_id}/permissions/{permission_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TeamId"
+        },
+        {
+          "name": "guest_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        {
+          "name": "permission_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "delete": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Revoke one permission grant (Owner/Admin)",
+        "responses": {
+          "204": {
+            "description": "Revoked (immediate)."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5557,6 +5789,7 @@
               "admin",
               "manager",
               "member",
+              "guest",
               null
             ]
           },
@@ -8658,6 +8891,153 @@
           },
           "total": {
             "type": "integer"
+          }
+        }
+      },
+      "GuestUser": {
+        "type": "object",
+        "required": [
+          "id",
+          "display_name",
+          "email"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          }
+        }
+      },
+      "GuestPermissionRow": {
+        "type": "object",
+        "required": [
+          "id",
+          "permission",
+          "scope_type",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "permission": {
+            "type": "string",
+            "enum": [
+              "view_team",
+              "view_project",
+              "view_task",
+              "comment_task",
+              "view_activity"
+            ]
+          },
+          "scope_type": {
+            "type": "string",
+            "enum": [
+              "team",
+              "project"
+            ]
+          },
+          "scope_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "project_id for project-scoped grants; null for team scope."
+          },
+          "created_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "TeamGuest2": {
+        "type": "object",
+        "required": [
+          "guest_id",
+          "user",
+          "created_at",
+          "permissions"
+        ],
+        "properties": {
+          "guest_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user": {
+            "$ref": "#/components/schemas/GuestUser"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuestPermissionRow"
+            }
+          }
+        }
+      },
+      "TeamGuest2List": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TeamGuest2"
+            }
+          }
+        }
+      },
+      "InviteGuestRequest": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "An existing instance user (Bug 2); members cannot be guests."
+          }
+        }
+      },
+      "GrantGuestPermissionRequest": {
+        "type": "object",
+        "required": [
+          "permission",
+          "scope_type"
+        ],
+        "properties": {
+          "permission": {
+            "type": "string",
+            "enum": [
+              "view_team",
+              "view_project",
+              "view_task",
+              "comment_task",
+              "view_activity"
+            ]
+          },
+          "scope_type": {
+            "type": "string",
+            "enum": [
+              "team",
+              "project"
+            ]
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Required for project-scoped permissions; the project must belong to this team."
           }
         }
       }

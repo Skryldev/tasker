@@ -53,6 +53,7 @@ import { TimezoneSelect, timezoneValue } from "@/components/app/TimezoneSelect";
 import { useToast } from "@/components/ui/toast";
 import { useWorkspace, useIsAdmin } from "@/lib/workspace";
 import { fileToAvatarDataUrl, AvatarError } from "@/lib/avatar";
+import { setTeamAvatarVersion } from "@/lib/avatar-version";
 import { roleLabel, timeAgo } from "@/lib/utils";
 
 const ROLES = ["owner", "admin", "manager", "member"] as const;
@@ -60,6 +61,16 @@ const ROLES = ["owner", "admin", "manager", "member"] as const;
 export function TeamSettingsPage() {
   const { teamId } = useWorkspace();
   const team = useTeam(teamId);
+  // Guest permission scopes come from the team's projects (Phase 13).
+  const projectsScope = useQuery({
+    queryKey: ["projects", teamId],
+    queryFn: () => api.listProjects(teamId!),
+    enabled: Boolean(teamId),
+  });
+  const projectsForScope = (projectsScope.data?.items ?? []).map((p) => ({
+    id: p.id,
+    name: p.name,
+  }));
   const isAdmin = useIsAdmin();
   const archived = Boolean(team.data?.archived_at);
 
@@ -115,6 +126,7 @@ export function TeamSettingsPage() {
       <MembersSection teamId={teamId} isAdmin={isAdmin} />
       <Separator className="my-8" />
       <GuestsSection teamId={teamId} canManage={isAdmin} />
+      <TeamGuestsSection teamId={teamId} projects={projectsForScope} canManage={isAdmin} />
       <Separator className="my-8" />
       <LabelsSection teamId={teamId} isAdmin={isAdmin} />
       {isAdmin ? (
@@ -181,6 +193,9 @@ function TeamDetailsForm({
         .then(() => {
           push("success", "Team avatar updated");
           void qc.invalidateQueries({ queryKey: ["team", teamId] });
+          // Bug 8: cache-bust the team avatar across every surface (same
+          // pattern as the profile avatar, Phase 12.5).
+          setTeamAvatarVersion(teamId, Date.now());
         })
         .catch((error) =>
           setLocalError(
@@ -460,6 +475,7 @@ function MemberRowMenu({
 // Bug 2 (ADR-0014): the add-member flow picks an EXISTING instance user —
 // account creation moved to the Owner-only Users page.
 import { AddMemberDialog } from "@/pages/AddMemberDialog";
+import { TeamGuestsSection } from "@/pages/TeamGuestsSection";
 
 // ---------------------------------------------------------------------------
 // Guests (team-wide project viewers)

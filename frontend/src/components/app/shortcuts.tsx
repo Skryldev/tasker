@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Keyboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/lib/workspace";
+import { getFullPageHandler, getSettingsHandler } from "./shortcut-refs";
 
 // Phase 12: the cheatsheet dialog is code-split — the eager manager keeps
 // only the trigger button and the global key listener.
@@ -34,17 +35,44 @@ export function useGlobalShortcuts(handlers: {
   onCreateTask: () => void;
   onFocusSearch: () => void;
   onNavigate: (path: string) => void;
+  /** Phase 13 Bug 1: open the quick-view task as a full page. */
+  onOpenFullPage?: () => void;
+  /** Phase 13 Bug 5: open Settings. */
+  onOpenSettings?: () => void;
 }) {
   const gPending = useRef(false);
   const gTimer = useRef<number | null>(null);
+  // Latest-handlers ref (Phase 13): the listener attaches ONCE for the
+  // component's lifetime and reads the freshest handlers through a ref.
+  // The previous effect resubscribed on every `handlers` identity change,
+  // and a popstate-driven change could leave the window with NO listener
+  // (⌘⇧O / ? / G-sequences silently dead after back-navigation).
+  const handlersRef = useRef(handlers);
+  useEffect(() => {
+    handlersRef.current = handlers;
+  }, [handlers]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      const h = handlersRef.current;
       const typing = isTypingTarget(e.target);
       // Cmd/Ctrl+K works everywhere.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        handlers.onPalette();
+        h.onPalette();
+        return;
+      }
+      // Phase 13 Bug 1: ⌘/Ctrl+Shift+O opens the focused task as a full
+      // page (works while the quick view holds a task).
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        h.onOpenFullPage?.();
+        return;
+      }
+      // Phase 13 Bug 5: ⌘/Ctrl+, opens Settings.
+      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+        e.preventDefault();
+        h.onOpenSettings?.();
         return;
       }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -63,7 +91,7 @@ export function useGlobalShortcuts(handlers: {
         if (gTimer.current) window.clearTimeout(gTimer.current);
         if (path) {
           e.preventDefault();
-          handlers.onNavigate(path);
+          h.onNavigate(path);
         }
         return;
       }
@@ -77,18 +105,18 @@ export function useGlobalShortcuts(handlers: {
       }
       if (e.key === "c") {
         e.preventDefault();
-        handlers.onCreateTask();
+        h.onCreateTask();
       } else if (e.key === "/") {
         e.preventDefault();
-        handlers.onFocusSearch();
+        h.onFocusSearch();
       } else if (e.key === "?") {
         e.preventDefault();
-        handlers.onCheatsheet();
+        h.onCheatsheet();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handlers]);
+  }, []);
 }
 
 // The active team id changes per route; shortcuts read it via a ref set by
@@ -138,6 +166,8 @@ export function ShortcutsManager() {
         window.dispatchEvent(new CustomEvent("tasker:focus-search"));
       },
       onNavigate: (path: string) => navigate(path),
+      onOpenFullPage: () => getFullPageHandler()?.(),
+      onOpenSettings: () => getSettingsHandler()?.(),
     }),
     // loadPalette reads state; keep the handlers stable across renders.
     [navigate, teamId],

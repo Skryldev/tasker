@@ -42,6 +42,7 @@ const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
   manager: "Manager",
   member: "Member",
+  guest: "Guest",
 };
 export const roleLabel = (role: string): string => ROLE_LABELS[role] ?? role;
 

@@ -557,3 +557,13 @@
     transform: none !important;
   }
 }
+
+/* Phase 13 Bug 1: one-time discoverability pulse for the panel's expand
+   affordance. Disabled under prefers-reduced-motion (Phase 10 rule). */
+@keyframes tasker-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.85; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[tasker-pulse_150ms_ease-out_2\] { animation: none !important; }
+}

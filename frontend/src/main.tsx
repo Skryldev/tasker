@@ -31,9 +31,6 @@ const TeamSettingsPage = lazy(() =>
 const CreateTeamPage = lazy(() =>
   import("@/pages/CreateTeamPage").then((m) => ({ default: m.CreateTeamPage })),
 );
-const AccountPage = lazy(() =>
-  import("@/pages/AccountPage").then((m) => ({ default: m.AccountPage })),
-);
 const TaskPage = lazy(() => import("@/pages/TaskPage").then((m) => ({ default: m.TaskPage })));
 const WorkloadPage = lazy(() =>
   import("@/pages/WorkloadPage").then((m) => ({ default: m.WorkloadPage })),
@@ -47,8 +44,8 @@ const TimelinePage = lazy(() =>
 const DashboardPage = lazy(() =>
   import("@/pages/DashboardPage").then((m) => ({ default: m.default })),
 );
-const AdminUsersPage = lazy(() =>
-  import("@/pages/AdminUsersPage").then((m) => ({ default: m.default })),
+const SettingsPage = lazy(() =>
+  import("@/pages/SettingsPage").then((m) => ({ default: m.default })),
 );
 const GoalsPage = lazy(() => import("@/pages/GoalsPage").then((m) => ({ default: m.GoalsPage })));
 const GoalDetailPage = lazy(() =>
@@ -85,6 +82,13 @@ const router = createBrowserRouter([
       },
       { path: "projects", element: <ProjectsPage /> },
       { path: "projects/:projectId", element: <ProjectPage /> },
+      { path: "teams/:teamId/projects/:projectId", element: <ProjectPage /> },
+      { path: "teams/:teamId/projects/:projectId/list", element: <ProjectPage /> },
+      { path: "teams/:teamId/projects/:projectId/board", element: <ProjectPage /> },
+      { path: "teams/:teamId/projects/:projectId/timeline", element: <ProjectPage /> },
+      { path: "projects/:projectId/list", element: <ProjectPage /> },
+      { path: "projects/:projectId/board", element: <ProjectPage /> },
+      { path: "projects/:projectId/timeline", element: <ProjectPage /> },
       { path: "projects/:projectId/timeline", element: <TimelinePage /> },
       { path: "teams/new", element: <CreateTeamPage /> },
       { path: "teams/:teamId/workload", element: <WorkloadPage /> },
@@ -99,8 +103,9 @@ const router = createBrowserRouter([
         element: <TaskPage />,
       },
       { path: "tasks/:taskId", element: <TaskPage /> },
-      { path: "users", element: <AdminUsersPage /> },
-      { path: "account", element: <AccountPage /> },
+      { path: "users", element: <Navigate to="/settings#users" replace /> },
+      { path: "account", element: <Navigate to="/settings#account" replace /> },
+      { path: "settings", element: <SettingsPage /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],
   },

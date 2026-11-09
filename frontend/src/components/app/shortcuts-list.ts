@@ -8,6 +8,9 @@ export const SHORTCUTS: { keys: string; action: string }[] = [
   { keys: "G then G", action: "Go to Goals" },
   { keys: "G then C", action: "Go to Capacity" },
   { keys: "⌘/Ctrl + .", action: "Toggle the detail sidebar" },
+  { keys: "⌘/Ctrl + ⇧ + O", action: "Open the focused task as a full page" },
+  { keys: "⌘/Ctrl + B", action: "Toggle the navigation sidebar" },
+  { keys: "⌘/Ctrl + ,", action: "Open Settings" },
   { keys: "?", action: "Keyboard shortcuts cheatsheet" },
   { keys: "Esc", action: "Close dialogs and panels" },
 ];

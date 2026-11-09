@@ -181,16 +181,29 @@ pub async fn require_project_access(
             is_guest: false,
         }
     } else {
+        // Phase 13 team guests (Bug 7, ADR-0018): a non-member with an
+        // explicit `view_project` grant for THIS project (or a team-wide
+        // NULL-scope row) reads the project read-only. Project viewers
+        // (Phase 3) keep their path. Everything else stays 404.
         let mut args = Args::new();
         args.s(project_id).s(user_id);
-        let guest = conn
+        let viewer = conn
             .fetch_optional(
                 "SELECT user_id FROM project_members WHERE project_id = ? AND user_id = ?",
                 args,
             )
             .await?
             .is_some();
-        if !guest {
+        let team_guest = viewer
+            || crate::guests::guest_has(
+                conn,
+                &project.team_id,
+                user_id,
+                "view_project",
+                Some(project_id),
+            )
+            .await?;
+        if !team_guest {
             return Err(AppError::NotFound("project not found"));
         }
         ProjectActor {

@@ -1,10 +1,11 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarRange, KanbanSquare, ListFilter, ListTodo, Plus, Search } from "lucide-react";
 import { api } from "@/api/client";
 import { TemplateManager } from "@/components/app/TemplateManager";
 import { DetailSidebar } from "@/components/app/DetailSidebar";
+import { setOpenFullPageHandler } from "@/components/app/shortcut-refs";
 import { useLabels, useMembers, useBoard, useTasks, useProject, useUpdateTask } from "@/api/hooks";
 import type { Task } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -34,9 +35,21 @@ export function ProjectPage() {
   const [params, setParams] = useSearchParams();
   const updateTask = useUpdateTask();
   const { push } = useToast();
-  const rawView = params.get("view");
+  // Bug 6 (ADR-0019): List / Board / Timeline are separate routes. The view
+  // comes from the URL path (`/projects/:id/board`); `?view=` survives as a
+  // legacy alias for old bookmarks. Default: board (the primary planning
+  // surface — list is for triage, timeline for scheduling).
+  const { pathname } = useLocation();
+  const rawView =
+    pathname.endsWith("/board")
+      ? "board"
+      : pathname.endsWith("/timeline")
+        ? "timeline"
+        : pathname.endsWith("/list")
+          ? "list"
+          : (params.get("view") ?? "board");
   const view: View =
-    rawView === "board" ? "board" : rawView === "timeline" ? "timeline" : "list";
+    rawView === "board" || rawView === "timeline" ? rawView : "list";
   // Swimlane grouping (Phase 11): URL first, localStorage fallback.
   const swimlaneRaw = params.get("swimlane");
   const swimlane = (["none", "assignee", "priority", "label"] as const).includes(
@@ -66,7 +79,22 @@ export function ProjectPage() {
   const [sort, setSort] = useState("created_at");
   const [order, setOrder] = useState("desc");
   const [page, setPage] = useState(1);
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  // Bug 3: the quick-view selection survives the full-page round trip —
+  // the task page is a separate route, so the project page remounts on
+  // back; sessionStorage restores which task was open (drafts live in the
+  // task query cache). `fullPageOpen` is intentionally NOT restored: back
+  // means "show the panel again".
+  const [selectedTask, setSelectedTask] = useState<Task | null>(() => {
+    const stored = sessionStorage.getItem(`tasker.quickview.${projectId ?? ""}`);
+    return stored ? ({ id: stored } as Task) : null;
+  });
+  const [fullPageOpen, setFullPageOpen] = useState(false);
+  const selectTask = (task: Task | null) => {
+    setSelectedTask(task);
+    const key = `tasker.quickview.${projectId ?? ""}`;
+    if (task) sessionStorage.setItem(key, task.id);
+    else sessionStorage.removeItem(key);
+  };
   const [dialogOpen, setDialogOpen] = useState(() => params.get("new") === "task");
   // The `?new=task` param opens the create dialog — including on SPA
   // navigation (the "C" shortcut), where the useState initializer above has
@@ -106,6 +134,20 @@ export function ProjectPage() {
 
   const isGuestProject = project.data?.is_guest === true;
 
+  // Phase 13 (Bug 2, ADR-0017): defensive team-consistency guard. A URL
+  // pointing at a project with a mismatched `?team=` (stale bookmark,
+  // legacy link) would render one team's data under the other's context.
+  // The project's own team wins; the URL is corrected with a redirect.
+  const urlTeam = params.get("team");
+  const projectTeam = project.data?.team_id;
+  useEffect(() => {
+    if (projectTeam && urlTeam && urlTeam !== projectTeam) {
+      const next = new URLSearchParams(params);
+      next.set("team", projectTeam);
+      setParams(next, { replace: true });
+    }
+  }, [projectTeam, urlTeam, params, setParams]);
+
   if (project.isLoading) {
     return (
       <div className="p-6">
@@ -125,11 +167,6 @@ export function ProjectPage() {
     );
   }
 
-  const setView = (v: View) => {
-    const next = new URLSearchParams(params);
-    next.set("view", v);
-    setParams(next, { replace: true });
-  };
 
   const totalPages = tasks.data ? Math.max(1, Math.ceil(tasks.data.total / 25)) : 1;
 
@@ -139,7 +176,7 @@ export function ProjectPage() {
 
   const openTaskDetail = async (task: Task) => {
     // Fetch fresh detail (with subtasks) when selecting.
-    setSelectedTask(task);
+    selectTask(task);
   };
 
   return (
@@ -175,11 +212,14 @@ export function ProjectPage() {
                 ["timeline", "Timeline", <CalendarRange key="c" />],
               ] as const
             ).map(([key, label, icon]) => (
-              <button
+              <Link
                 key={key}
                 role="tab"
                 aria-selected={view === key}
-                onClick={() => setView(key)}
+                to={{
+                  pathname: `${pathname.replace(/\/(list|board|timeline)$/, "")}/${key}`,
+                  search: window.location.search,
+                }}
                 className={cn(
                   "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
                   view === key
@@ -190,7 +230,7 @@ export function ProjectPage() {
               >
                 {icon}
                 {label}
-              </button>
+              </Link>
             ))}
           </div>
         </div>
@@ -427,8 +467,16 @@ export function ProjectPage() {
         </div>
 
         {selectedTask ? (
-          <DetailSidebar>
-            <TaskDetailLoader taskId={selectedTask.id} onClose={() => setSelectedTask(null)} />
+          <DetailSidebar hidden={fullPageOpen}>
+            <TaskDetailLoader
+              taskId={selectedTask.id}
+              hidden={fullPageOpen}
+              onOpenFullPage={() => setFullPageOpen(true)}
+              onClose={() => {
+                selectTask(null);
+                setFullPageOpen(false);
+              }}
+            />
           </DetailSidebar>
         ) : null}
       </div>
@@ -446,12 +494,52 @@ export function ProjectPage() {
 }
 
 /** Load the full task (with subtasks) for the detail panel. */
-function TaskDetailLoader({ taskId, onClose }: { taskId: string; onClose: () => void }) {
+function TaskDetailLoader({
+  taskId,
+  onClose,
+  hidden,
+  onOpenFullPage,
+}: {
+  taskId: string;
+  onClose: () => void;
+  hidden?: boolean;
+  onOpenFullPage?: () => void;
+}) {
   const query = useQuery({
     queryKey: ["task", taskId],
     queryFn: () => api.getTask(taskId),
   });
-  return <TaskDetailPanel task={query.data} onClose={onClose} />;
+  const navigate = useNavigate();
+  const openFullPage = () => {
+    const task = query.data;
+    if (!task) return;
+    // The full page mounts as its own route; the quick view hides (Bug 3)
+    // and history-back restores it.
+    onOpenFullPage?.();
+    navigate(`/teams/${task.team_id}/projects/${task.project_id}/tasks/${task.id}`);
+  };
+  // The ⌘⇧O shortcut handler lives for as long as a task is in the quick
+  // view — registered on mount/data, cleared on unmount (previously it was
+  // only registered on click, which left the shortcut dead after coming
+  // back from the full page).
+  const openTask = query.data;
+  useEffect(() => {
+    if (!openTask) return undefined;
+    setOpenFullPageHandler(() =>
+      navigate(`/teams/${openTask.team_id}/projects/${openTask.project_id}/tasks/${openTask.id}`),
+    );
+    return () => {
+      setOpenFullPageHandler(null);
+    };
+  }, [openTask, navigate]);
+  return (
+    <TaskDetailPanel
+      task={query.data}
+      onClose={onClose}
+      hidden={hidden}
+      onOpenFullPage={openFullPage}
+    />
+  );
 }
 
 function FilterSelect({

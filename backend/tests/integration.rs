@@ -65,6 +65,7 @@ fn test_config(database_url: String) -> Config {
         static_dir: None,
         log_format_json: false,
         rules_worker: tasker::config::RulesWorkerConfig::default(),
+            integrations_key: Some(vec![19u8; 32]),
         attachments: tasker::config::AttachmentsConfig {
             mode: tasker::config::AttachmentsMode::Local,
             local_dir: std::env::temp_dir()
@@ -6726,7 +6727,392 @@ let member = login_as(&app.app, &member_email, "test-password-123").await;
 
 /// Task 6: rules management API — CRUD, authorization matrix, CAS updates,
 /// archive semantics, history access.
+/// Phase 8B Task 1: integration foundation — migrations, tenant isolation
+/// (composite FK), delivery idempotency, event vocabulary, and provenance
+/// columns.
 #[tokio::test]
+async fn integrations_foundation_matrix() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+        let suffix = Uuid::now_v7().simple();
+
+        // ---- Fixtures: two teams with projects, two users ----
+        let admin_email = format!("int-f-{suffix}@test.local");
+        let other_email = format!("int-f-o-{suffix}@test.local");
+        let admin_id = seed_user(&db, &admin_email, "Int Admin").await;
+        let other_id = seed_user(&db, &other_email, "Int Other").await;
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let (code, team) =
+            send_json(&app.app, "POST", "/api/v1/teams", Some(&admin), json!({"name": "INT"})).await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let (code, other_team) =
+            send_json(&app.app, "POST", "/api/v1/teams", Some(&admin), json!({"name": "INT2"})).await;
+        assert_eq!(code, StatusCode::CREATED);
+        let other_team_id = other_team["id"].as_str().unwrap().to_string();
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&admin),
+            json!({"name": "INTP"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+        let (code, other_project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{other_team_id}/projects"),
+            Some(&admin),
+            json!({"name": "INTP2"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let other_project_id = other_project["id"].as_str().unwrap().to_string();
+
+        // ---- Integration create + duplicate name rejection ----
+        let integration_id = {
+            let mut conn = db.conn();
+            let id = Uuid::now_v7().to_string();
+            let mut args = tasker::db::Args::new();
+            args.s(&id)
+                .s(&team_id)
+                .s("github")
+                .s(format!("watcher-{suffix}"))
+                .opt_s(None::<String>)
+                .b(true)
+                .s(&admin_id)
+                .i(tasker::util::now_ms())
+                .i(tasker::util::now_ms())
+                .opt_i(None::<i64>);
+            conn.execute(
+                "INSERT INTO integrations (id, team_id, provider, name, description, enabled, \
+                 created_by, created_at, updated_at, archived_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                args,
+            )
+            .await
+            .unwrap_or_else(|e| panic!("[{engine}] integration insert: {e}"));
+            id
+        };
+        {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(Uuid::now_v7().to_string())
+                .s(&team_id)
+                .s(format!("watcher-{suffix}"))
+                .opt_s(None::<String>)
+                .s("github")
+                .b(true)
+                .s(&admin_id)
+                .i(tasker::util::now_ms())
+                .i(tasker::util::now_ms())
+                .opt_i(None::<i64>);
+            let dup = conn
+                .execute(
+                    "INSERT INTO integrations (id, team_id, provider, name, description, enabled, \
+                     created_by, created_at, updated_at, archived_at) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    args,
+                )
+                .await;
+            assert!(dup.is_err(), "[{engine}] duplicate team+name rejected");
+        }
+        // Same name in another team is allowed.
+        {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(Uuid::now_v7().to_string())
+                .s(&other_team_id)
+                .s("gitlab")
+                .s(format!("watcher-{suffix}"))
+                .opt_s(None::<String>)
+                .b(true)
+                .s(&other_id)
+                .i(tasker::util::now_ms())
+                .i(tasker::util::now_ms())
+                .opt_i(None::<i64>);
+            conn.execute(
+                "INSERT INTO integrations (id, team_id, provider, name, description, enabled, \
+                 created_by, created_at, updated_at, archived_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                args,
+            )
+            .await
+            .unwrap_or_else(|e| panic!("[{engine}] other-team integration insert: {e}"));
+        }
+
+        // ---- Credential: one row per integration, version 1, active ----
+        {
+            let mut conn = db.begin().await.unwrap();
+            let version = tasker::integrations::credentials::provision_credential(
+                &mut conn,
+                &integration_id,
+                "webhook-secret-abc",
+                &[19u8; 32],
+                &admin_id,
+                tasker::util::now_ms(),
+            )
+            .await
+            .expect("provision");
+            assert_eq!(version, 1);
+            conn.commit().await.unwrap();
+            // Duplicate provisioning rejected by the unique constraint.
+            let mut conn = db.begin().await.unwrap();
+            let dup = tasker::integrations::credentials::provision_credential(
+                &mut conn,
+                &integration_id,
+                "second",
+                &[19u8; 32],
+                &admin_id,
+                tasker::util::now_ms(),
+            )
+            .await;
+            conn.rollback().await;
+            assert!(dup.is_err(), "[{engine}] second credential row rejected");
+            // Verification succeeds with the right secret and fails closed
+            // with the wrong one.
+            let mut conn = db.conn();
+            assert!(
+                tasker::integrations::credentials::verify_webhook_secret(
+                    &mut conn,
+                    &integration_id,
+                    "webhook-secret-abc",
+                    &[19u8; 32],
+                )
+                .await
+                .expect("verify"),
+                "[{engine}] correct secret verifies"
+            );
+            assert!(
+                !tasker::integrations::credentials::verify_webhook_secret(
+                    &mut conn,
+                    &integration_id,
+                    "wrong-secret",
+                    &[19u8; 32],
+                )
+                .await
+                .expect("verify wrong"),
+                "[{engine}] wrong secret fails closed"
+            );
+        }
+
+        // ---- Repository registration + M:N project mapping ----
+        let repo_id = {
+            let mut conn = db.conn();
+            let id = Uuid::now_v7().to_string();
+            let mut args = tasker::db::Args::new();
+            args.s(&id)
+                .s(&integration_id)
+                .s(&team_id)
+                .s("987654")
+                .s("octocat/tasker")
+                .i(tasker::util::now_ms());
+            conn.execute(
+                "INSERT INTO integration_repositories (id, integration_id, team_id, \
+                 external_repo_id, full_name, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args,
+            )
+            .await
+            .unwrap_or_else(|e| panic!("[{engine}] repo insert: {e}"));
+            id
+        };
+        // Duplicate external repo id within the integration rejected.
+        {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(Uuid::now_v7().to_string())
+                .s(&integration_id)
+                .s("987654")
+                .s("octocat/tasker")
+                .i(tasker::util::now_ms());
+            let dup = conn
+                .execute(
+                    "INSERT INTO integration_repositories (id, integration_id, team_id, \
+                     external_repo_id, full_name, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    args,
+                )
+                .await;
+            assert!(dup.is_err(), "[{engine}] duplicate external repo rejected");
+        }
+
+        // Map repo → project (same team): accepted.
+        let mapping_id = {
+            let mut conn = db.conn();
+            let id = Uuid::now_v7().to_string();
+            let mut args = tasker::db::Args::new();
+            args.s(&id)
+                .s(&repo_id)
+                .s(&project_id)
+                .s(&team_id)
+                .s(&admin_id)
+                .i(tasker::util::now_ms());
+            conn.execute(
+                "INSERT INTO integration_repository_projects (id, repository_id, project_id, \
+                 team_id, mapped_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args,
+            )
+            .await
+            .unwrap_or_else(|e| panic!("[{engine}] mapping insert: {e}"));
+            id
+        };
+        // Cross-team mapping: rejected by the composite foreign keys.
+        {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(Uuid::now_v7().to_string())
+                .s(&repo_id)
+                .s(&other_project_id)
+                .s(&other_team_id)
+                .s(&admin_id)
+                .i(tasker::util::now_ms());
+            let cross = conn
+                .execute(
+                    "INSERT INTO integration_repository_projects (id, repository_id, project_id, \
+                     team_id, mapped_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    args,
+                )
+                .await;
+            assert!(
+                cross.is_err(),
+                "[{engine}] cross-team mapping must be rejected by the database"
+            );
+        }
+
+        // ---- Delivery idempotency: duplicate delivery id is a no-op ----
+        {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(Uuid::now_v7().to_string())
+                .s(&integration_id)
+                .s("gh-delivery-1")
+                .s("push")
+                .s("{}")
+                .i(tasker::util::now_ms())
+                .i(tasker::util::now_ms())
+                .i(tasker::util::now_ms());
+            conn.execute(
+                "INSERT INTO webhook_deliveries (id, integration_id, delivery_id, \
+                 event_type_raw, payload, status, attempts, next_attempt_at, created_at, \
+                 updated_at) VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)",
+                args,
+            )
+            .await
+            .unwrap_or_else(|e| panic!("[{engine}] delivery insert: {e}"));
+            let mut args = tasker::db::Args::new();
+            args.s(Uuid::now_v7().to_string())
+                .s(&integration_id)
+                .s("gh-delivery-1")
+                .s("push")
+                .s("{}")
+                .i(tasker::util::now_ms())
+                .i(tasker::util::now_ms())
+                .i(tasker::util::now_ms());
+            let dup = conn
+                .execute(
+                    "INSERT INTO webhook_deliveries (id, integration_id, delivery_id, \
+                     event_type_raw, payload, status, attempts, next_attempt_at, created_at, \
+                     updated_at) VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)",
+                    args,
+                )
+                .await;
+            assert!(dup.is_err(), "[{engine}] duplicate delivery rejected");
+            // Invalid status rejected by the CHECK.
+            let mut args = tasker::db::Args::new();
+            args.s(Uuid::now_v7().to_string())
+                .s(&integration_id)
+                .s("gh-delivery-2")
+                .s("push")
+                .s("{}")
+                .i(tasker::util::now_ms())
+                .i(tasker::util::now_ms());
+            let bad_status = conn
+                .execute(
+                    "INSERT INTO webhook_deliveries (id, integration_id, delivery_id, \
+                     event_type_raw, payload, status, attempts, next_attempt_at, created_at, \
+                     updated_at) VALUES (?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?)",
+                    args,
+                )
+                .await;
+            assert!(bad_status.is_err(), "[{engine}] invalid status rejected");
+        }
+
+        // ---- Event vocabulary: integration events accepted, provenance
+        // ---- required, duplicates rejected, unknown types rejected. ----
+        let now = tasker::util::now_ms();
+        {
+            let mut conn = db.conn();
+            let now = tasker::util::now_ms();
+            let mut args = tasker::db::Args::new();
+            args.s(Uuid::now_v7().to_string())
+                .s("git_push")
+                .i(1i64)
+                .s(&team_id)
+                .opt_i(None) // task_id NULL (taskless)
+                .opt_i(None) // actor_id NULL (never impersonates)
+                .opt_s(Some(r#"{"branch":"main"}"#))
+                .opt_s(Some(r#"{"branch":"main"}"#))
+                .s("integration")
+                .opt_i(None)
+                .i(now)
+                .opt_i(None) // causing_execution_id
+                .i(now)
+                .opt_i(None)
+                .i(now);
+            conn.execute(
+                "INSERT INTO domain_events (id, event_type, schema_version, team_id, task_id, \
+                 actor_id, previous_state, new_state, origin, causing_execution_id, \
+                 occurred_at, integration_id, source_delivery_id) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                args,
+            )
+            .await
+            .unwrap_or_else(|e| panic!("[{engine}] integration event insert: {e}"));
+        }
+        // Unknown event type rejected.
+        {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(Uuid::now_v7().to_string())
+                .s("github_pushed")
+                .i(1i64)
+                .s(&team_id)
+                .i(now)
+                .s("integration")
+                .i(now);
+            let unknown = conn
+                .execute(
+                    "INSERT INTO domain_events (id, event_type, schema_version, team_id, \
+                     occurred_at, origin) VALUES (?, ?, ?, ?, ?, ?)",
+                    args,
+                )
+                .await;
+            assert!(unknown.is_err(), "[{engine}] unknown event type rejected");
+        }
+        // Unknown origin rejected.
+        {
+            let mut conn = db.conn();
+            let mut args = tasker::db::Args::new();
+            args.s(Uuid::now_v7().to_string())
+                .s("git_push")
+                .i(1i64)
+                .s(&team_id)
+                .s("provider")
+                .i(now);
+            let unknown_origin = conn
+                .execute(
+                    "INSERT INTO domain_events (id, event_type, schema_version, team_id, \
+                     occurred_at, origin) VALUES (?, ?, ?, ?, ?, ?)",
+                    args,
+                )
+                .await;
+            assert!(unknown_origin.is_err(), "[{engine}] unknown origin rejected");
+        }
+    }
+}
+
 async fn rules_management_api_matrix() {
     for (engine, url) in test_db_urls() {
         let app = spawn_app(&url).await;
@@ -11362,6 +11748,437 @@ async fn password_policy_matrix() {
             response.status(),
             StatusCode::UNAUTHORIZED,
             "[{engine}] old password rejected"
+        );
+    }
+}
+
+/// Phase 13 Bug 2 (ADR-0017): the cross-team isolation matrix. Team A's
+/// member must never observe Team B's resources through any read surface:
+/// direct IDs (404), lists (filtered), board, dashboard, workload,
+/// capacity, search, my-tasks, goals, trash.
+#[tokio::test]
+async fn cross_team_isolation_matrix() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let suffix = Uuid::now_v7();
+        // One USER belongs to both teams — the strongest leak witness: any
+        // scoping bug shows the other team's rows to a legitimate member.
+        let email = format!("p13iso-{suffix}@test.local");
+        seed_user(&app.db, &email, "P13 Iso").await;
+        let member = login_as(&app.app, &email, "test-password-123").await;
+
+        let mut team_ids = Vec::new();
+        let mut project_ids = Vec::new();
+        for label in ["A", "B"] {
+            let (code, team) = send_json(
+                &app.app,
+                "POST",
+                "/api/v1/teams",
+                Some(&member),
+                json!({ "name": format!("Iso {label} {suffix}") }),
+            )
+            .await;
+            assert_eq!(code, StatusCode::CREATED);
+            let team_id = team["id"].as_str().unwrap().to_string();
+            let (code, project) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/teams/{team_id}/projects"),
+                Some(&member),
+                json!({ "name": format!("Iso Project {label} {suffix}") }),
+            )
+            .await;
+            assert_eq!(code, StatusCode::CREATED);
+            let project_id = project["id"].as_str().unwrap().to_string();
+            let (code, task) = send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/projects/{project_id}/tasks"),
+                Some(&member),
+                json!({ "title": format!("Iso task {label}") }),
+            )
+            .await;
+            assert_eq!(code, StatusCode::CREATED);
+            team_ids.push(team_id);
+            project_ids.push(project_id);
+            let _ = task;
+        }
+        let (team_a, team_b) = (team_ids[0].clone(), team_ids[1].clone());
+        let (proj_a, proj_b) = (project_ids[0].clone(), project_ids[1].clone());
+
+        // Team B's task id via its own project (for direct-ID checks).
+        let (code, b_tasks) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{proj_b}/tasks"),
+            &member,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let b_task_id = b_tasks["items"][0]["id"].as_str().unwrap().to_string();
+
+        // -- Lists: only the requested team's rows ----------------------------
+        let (code, projects) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_a}/projects"),
+            &member,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let names: Vec<&str> = projects["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["name"].as_str().unwrap())
+            .collect();
+        assert!(
+            !names.iter().any(|n| n.contains("B")),
+            "[{engine}] Team A project list must not include Team B: {names:?}"
+        );
+
+        // -- Board: Team A's project board shows no Team B tasks ---------------
+        let (code, board) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{proj_a}/board"),
+            &member,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        let board_text = board.to_string();
+        assert!(
+            !board_text.contains("Iso task B"),
+            "[{engine}] Team A board leaked Team B's task"
+        );
+
+        // -- Team-scoped task search: only team A's rows -----------------------
+        let (code, search) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_a}/tasks?q=Iso"),
+            &member,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert!(
+            !search.to_string().contains("Iso task B"),
+            "[{engine}] Team A task search leaked Team B: {search}"
+        );
+        assert!(
+            search.to_string().contains("Iso task A"),
+            "[{engine}] Team A search should include its own task"
+        );
+
+        // -- Team-scoped surfaces: workload / capacity / dashboard -------------
+        for path in [
+            format!("/api/v1/teams/{team_a}/workload"),
+            format!("/api/v1/teams/{team_a}/capacity"),
+            format!("/api/v1/teams/{team_a}/dashboard"),
+        ] {
+            let (code, body) = get_json(&app.app, &path, &member).await;
+            assert_eq!(code, StatusCode::OK, "[{engine}] {path}");
+            assert!(
+                !body.to_string().contains("Iso task B"),
+                "[{engine}] {path} leaked Team B data"
+            );
+        }
+
+        // -- my-tasks: assignee-scoped by design (ADR-0017). It can never
+        //    surface a task the caller is not assigned to; the membership
+        //    EXISTS clause drops rows from teams the caller left. No
+        //    cross-team assertion applies here.
+
+        // -- Goals: Team B's goals are not visible from team A's listing -------
+        let (code, goals_a) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_a}/goals"),
+            &member,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(
+            goals_a["items"].as_array().unwrap().len(),
+            0,
+            "[{engine}] Team A goals listing leaked rows"
+        );
+
+        // -- Trash: scoped to the team ------------------------------------------
+        let (code, trash) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_a}/projects/trash"),
+            &member,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert!(
+            !trash.to_string().contains(&proj_b),
+            "[{engine}] Team A trash leaked Team B's project id"
+        );
+
+        // -- Direct-ID reads of the other team's resources → 404 ----------------
+        // A SECOND user, member of team A only, must get 404 on team B ids.
+        let outsider_email = format!("p13outsider-{suffix}@test.local");
+        seed_user(&app.db, &outsider_email, "P13 Outsider").await;
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_a}/members"),
+            Some(&member),
+            json!({ "email": outsider_email, "role": "member" }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let outsider = login_as(&app.app, &outsider_email, "test-password-123").await;
+
+        for (path, label) in [
+            (format!("/api/v1/projects/{proj_b}"), "project detail"),
+            (format!("/api/v1/projects/{proj_b}/board"), "board"),
+            (format!("/api/v1/projects/{proj_b}/tasks"), "task list"),
+            (format!("/api/v1/tasks/{b_task_id}"), "task detail"),
+        ] {
+            let (code, _) = get_json(&app.app, &path, &outsider).await;
+            assert_eq!(
+                code,
+                StatusCode::NOT_FOUND,
+                "[{engine}] cross-team {label} must 404"
+            );
+        }
+
+        // A team B write through an outsider is equally impossible.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{proj_b}/tasks"),
+            Some(&outsider),
+            json!({ "title": "intrusion" }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] cross-team create");
+    }
+}
+
+/// Phase 13 Bug 7 (ADR-0018): the team guest permission matrix. A guest is
+/// a non-member whose every capability is an explicit grant. Deny by
+/// default; revocation is immediate (row delete → next request 404).
+#[tokio::test]
+async fn guest_role_matrix() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let suffix = Uuid::now_v7();
+        let owner_email = format!("p13g-owner-{suffix}@test.local");
+        let guest_email = format!("p13g-guest-{suffix}@test.local");
+        seed_user(&app.db, &owner_email, "P13G Owner").await;
+        seed_user(&app.db, &guest_email, "P13G Guest").await;
+        let owner = login_as(&app.app, &owner_email, "test-password-123").await;
+        let guest = login_as(&app.app, &guest_email, "test-password-123").await;
+
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&owner),
+            json!({ "name": format!("P13G Team {suffix}") }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let (code, project) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/projects"),
+            Some(&owner),
+            json!({ "name": format!("P13G Project {suffix}") }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let project_id = project["id"].as_str().unwrap().to_string();
+        let (code, task) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&owner),
+            json!({ "title": "P13G task" }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let task_id = task["id"].as_str().unwrap().to_string();
+
+        // A stranger sees NOTHING of the team before the guest invite.
+        for path in [
+            format!("/api/v1/teams/{team_id}"),
+            format!("/api/v1/projects/{project_id}"),
+            format!("/api/v1/tasks/{task_id}"),
+        ] {
+            let (code, _) = get_json(&app.app, &path, &guest).await;
+            assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] pre-invite {path}");
+        }
+
+        // Invite as guest (Owner-only).
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/guests2"),
+            Some(&guest),
+            json!({ "email": guest_email }),
+        )
+        .await;
+        // A non-manager gets 404 (non-disclosure — the guests2 surface is
+        // invisible without Owner/Admin).
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] self-invite");
+        let (code, invited) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/guests2"),
+            Some(&owner),
+            json!({ "email": guest_email }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] invite: {invited}");
+        let guest_id = invited["guest_id"].as_str().unwrap().to_string();
+
+        // Default deny: a registered guest without grants still sees nothing.
+        for path in [
+            format!("/api/v1/teams/{team_id}"),
+            format!("/api/v1/projects/{project_id}"),
+            format!("/api/v1/tasks/{task_id}"),
+        ] {
+            let (code, _) = get_json(&app.app, &path, &guest).await;
+            assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] default-deny {path}");
+        }
+
+        // Grant view_project → project + board + task LIST visible, but the
+        // individual task detail still 404s without view_task.
+        async fn grant(
+            app: &TestApp,
+            owner: &str,
+            team_id: &str,
+            guest_id: &str,
+            project_id: &str,
+            permission: &str,
+        ) -> (StatusCode, Value) {
+            send_json(
+                &app.app,
+                "POST",
+                &format!("/api/v1/teams/{team_id}/guests2/{guest_id}/permissions"),
+                Some(owner),
+                json!({ "permission": permission, "scope_type": "project", "project_id": project_id }),
+            )
+            .await
+        }
+        let (code, _) = grant(&app, &owner, &team_id, &guest_id, &project_id, "view_project").await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] grant view_project");
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}"),
+            &guest,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] view_project grants the project");
+        let (code, board) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/board"),
+            &guest,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] view_project grants the board");
+        assert!(board.to_string().contains("P13G task"));
+        let (code, _) = get_json(&app.app, &format!("/api/v1/tasks/{task_id}"), &guest).await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] task detail requires view_task"
+        );
+
+        // Guest mutation attempts stay denied with the view_project grant.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            Some(&guest),
+            json!({ "title": "guest intrusion" }),
+        )
+        .await;
+        assert!(
+            code == StatusCode::FORBIDDEN || code == StatusCode::NOT_FOUND,
+            "[{engine}] guest create denied: {code}"
+        );
+
+        // view_task → task detail visible.
+        let (code, _) = grant(&app, &owner, &team_id, &guest_id, &project_id, "view_task").await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, _) = get_json(&app.app, &format!("/api/v1/tasks/{task_id}"), &guest).await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] view_task grants the task");
+
+        // comment_task → guest can comment.
+        let (code, _) = grant(&app, &owner, &team_id, &guest_id, &project_id, "comment_task").await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/comments"),
+            Some(&guest),
+            json!({ "body": "guest comment" }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] comment_task grants commenting");
+
+        // view_activity → activity visible.
+        let (code, _) = grant(&app, &owner, &team_id, &guest_id, &project_id, "view_activity").await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/activity"),
+            &guest,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] view_activity grants activity");
+
+        // view_team → team metadata visible (and the switcher lists it).
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/guests2/{guest_id}/permissions"),
+            Some(&owner),
+            json!({ "permission": "view_team", "scope_type": "team" }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, team_view) = get_json(&app.app, &format!("/api/v1/teams/{team_id}"), &guest).await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] view_team grants the team");
+        assert_eq!(team_view["my_role"], "guest", "[{engine}] guest badge role");
+        let (code, teams) = get_json(&app.app, "/api/v1/teams", &guest).await;
+        assert_eq!(code, StatusCode::OK);
+        assert!(
+            teams.to_string().contains(&team_id),
+            "[{engine}] the switcher lists guest teams"
+        );
+
+        // Cross-team isolation: a guest of THIS team cannot see another
+        // team (create one the guest is not invited to).
+        let (code, other) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&owner),
+            json!({ "name": format!("P13G Other {suffix}") }),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let other_id = other["id"].as_str().unwrap().to_string();
+        let (code, _) = get_json(&app.app, &format!("/api/v1/teams/{other_id}"), &guest).await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] cross-team guest");
+
+        // Revocation is immediate: next request → 404.
+        let (code, _) = send_request(
+            &app.app,
+            "DELETE",
+            &format!("/api/v1/teams/{team_id}/guests2/{guest_id}"),
+            Some(&owner),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "[{engine}] revoke guest");
+        let (code, _) = get_json(&app.app, &format!("/api/v1/projects/{project_id}"), &guest).await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] revoked guest loses access immediately"
         );
     }
 }

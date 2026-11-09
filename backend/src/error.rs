@@ -48,6 +48,12 @@ pub enum AppError {
     Internal(String),
 }
 
+impl From<FieldError> for AppError {
+    fn from(err: FieldError) -> Self {
+        Self::Validation(vec![err])
+    }
+}
+
 impl From<crate::rules::RuleError> for AppError {
     fn from(err: crate::rules::RuleError) -> Self {
         // Rule validation failures are client-input problems: surfaced as

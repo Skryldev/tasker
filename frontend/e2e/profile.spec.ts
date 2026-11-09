@@ -41,7 +41,7 @@ test.describe.serial("Profile", () => {
 
   test("edits work identity: username, bio, timezone", async () => {
     await page.getByTestId("user-menu").click();
-    await page.getByRole("menuitem", { name: "Account" }).click();
+    await page.getByRole("menuitem", { name: "Settings" }).click();
     await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
 
     const usernameInput = page.getByTestId("username-input");

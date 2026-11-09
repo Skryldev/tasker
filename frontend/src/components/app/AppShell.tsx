@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode , useRef } from "react";
 
 // Bundle offset (Phase 12.5): the 16-theme picker content is code-split —
 // the eager shell keeps only the trigger button + preview wiring.
@@ -15,10 +15,10 @@ import {
   LogOut,
   Menu,
   Palette,
+  PanelLeftClose,
   Settings,
+  ShieldAlert,
   Target,
-  UserRound,
-  Users,
 } from "lucide-react";
 import { NotificationBell } from "@/components/app/NotificationBell";
 import { Button } from "@/components/ui/button";
@@ -31,9 +31,22 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Avatar, Separator } from "@/components/ui/avatar";
 import { useTheme, type ThemeId } from "@/lib/theme";
+import { setOpenSettingsHandler } from "@/components/app/shortcut-refs";
+
+// Bundle offset (Phase 13): the team switcher menu is code-split — the
+// eager shell keeps the trigger (avatar + name).
+const TeamSwitcherMenu = lazy(() =>
+  import("./TeamSwitcherMenu").then((m) => ({ default: m.TeamSwitcherMenu })),
+);
+
+// Bundle offset (Phase 13 Bug 6): the mobile navigation drawer is
+// code-split — radix Dialog leaves the eager shell; it loads on first open.
+const MobileNav = lazy(() =>
+  import("@/components/app/MobileNav").then((m) => ({ default: m.MobileNav })),
+);
+
 // Bundle offset (Phase 12.5): the shortcuts manager (global listener +
 // cheatsheet trigger) is code-split; the eager shell renders a placeholder
 // button that becomes interactive when the chunk arrives.
@@ -50,57 +63,53 @@ function ShortcutsManagerSlot() {
   );
 }
 import { useAuth, useLogout } from "@/lib/auth";
-import { switchTeamLocation, teamLink, WorkspaceProvider, useWorkspace } from "@/lib/workspace";
-import { roleLabel } from "@/lib/utils";
+import { teamLink, WorkspaceProvider, useWorkspace } from "@/lib/workspace";
+import { teamAvatarUrl } from "@/lib/avatar-version";
+import { cn } from "@/lib/utils";
 
 function TeamSwitcher({ onNavigate }: { onNavigate?: () => void }) {
   const { teams, teamId } = useWorkspace();
-  const navigate = useNavigate();
-  const location = useLocation();
   const [open, setOpen] = useState(false);
+  const [opened, setOpened] = useState(false);
   const active = teams.data?.items.find((t) => t.id === teamId);
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (v) setOpened(true);
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="h-9 w-full justify-start gap-2 px-2" data-testid="team-switcher">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/15 text-2xs font-bold text-primary">
-            {(active?.name ?? "?").charAt(0).toUpperCase()}
-          </span>
+          {teamId ? (
+            <Avatar
+              name={active?.name ?? "?"}
+              size="sm"
+              className="h-6 w-6 rounded-md text-2xs"
+              src={teamAvatarUrl(teamId)}
+            />
+          ) : (
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/15 text-2xs font-bold text-primary">
+              {(active?.name ?? "?").charAt(0).toUpperCase()}
+            </span>
+          )}
           <span className="truncate text-sm font-medium">{active?.name ?? "Select team"}</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-56">
-        <DropdownMenuLabel>Teams</DropdownMenuLabel>
-        {teams.data?.items.map((team) => (
-          <DropdownMenuItem
-            key={team.id}
-            onSelect={() => {
-              // Bug 3: preserve the current section — rewrite the `:teamId`
-              // path segment on team-scoped routes, else replace `?team=`.
-              const next = switchTeamLocation(location.pathname, location.search, team.id);
-              navigate(next);
+      {opened ? (
+        <Suspense fallback={null}>
+          <TeamSwitcherMenu
+            teams={teams.data?.items ?? []}
+            activeTeamId={teamId}
+            onNavigated={() => {
+              setOpen(false);
               onNavigate?.();
             }}
-            className="justify-between"
-          >
-            <span className="truncate">{team.name}</span>
-            <span className="text-2xs text-muted-foreground">{roleLabel(team.my_role ?? "")}</span>
-          </DropdownMenuItem>
-        ))}
-        {teams.data?.items.length === 0 ? (
-          <DropdownMenuItem disabled>No teams yet</DropdownMenuItem>
-        ) : null}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={() => {
-            navigate("/teams/new");
-            onNavigate?.();
-          }}
-        >
-          Create team…
-        </DropdownMenuItem>
-      </DropdownMenuContent>
+          />
+        </Suspense>
+      ) : null}
     </DropdownMenu>
   );
 }
@@ -112,6 +121,8 @@ function SidebarLink({
   end,
   matchPrefix,
   onNavigate,
+  collapsed,
+  linkRef,
 }: {
   to: string;
   icon: ReactNode;
@@ -120,6 +131,9 @@ function SidebarLink({
   /** Treat any route under this prefix (segment boundary) as active. */
   matchPrefix?: string;
   onNavigate?: () => void;
+  /** Bug 4: icon-only rail — the label hides; a title tooltip carries it. */
+  collapsed?: boolean;
+  linkRef?: React.RefObject<HTMLAnchorElement | null>;
 }) {
   const { pathname } = useLocation();
   const prefixActive =
@@ -127,43 +141,41 @@ function SidebarLink({
     (pathname === matchPrefix || pathname.startsWith(`${matchPrefix}/`));
   return (
     <NavLink
+      ref={linkRef as unknown as React.Ref<HTMLAnchorElement>}
       to={to}
       end={end}
       onClick={onNavigate}
+      title={collapsed ? label : undefined}
       aria-current={end || matchPrefix ? (prefixActive ? "page" : undefined) : undefined}
       className={({ isActive }) => {
         const active = matchPrefix !== undefined ? prefixActive : isActive;
         return `flex h-9 items-center gap-2.5 rounded-md px-2 text-sm transition-colors duration-100 hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-          active ? "bg-primary/10 font-medium text-primary" : ""
-        }`;
+          collapsed ? "justify-center" : ""
+        } ${active ? "bg-primary/10 font-medium text-primary" : ""}`;
       }}
     >
       {icon}
-      {label}
+      {collapsed ? null : <span className="truncate">{label}</span>}
     </NavLink>
   );
 }
 
-function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+export function SidebarNav({
+  onNavigate,
+  collapsed,
+  firstLinkRef,
+}: {
+  onNavigate?: () => void;
+  collapsed?: boolean;
+  firstLinkRef?: React.RefObject<HTMLAnchorElement | null>;
+}) {
   const { teamId } = useWorkspace();
-  const { user } = useAuth();
-  // Bug 2: instance user administration is Owner-only.
-  const isInstanceOwner = user?.instance_role === "owner";
   return (
     <>
       <TeamSwitcher onNavigate={onNavigate} />
       <Separator className="my-2" />
       <nav className="flex flex-col gap-0.5" aria-label="Main">
-        <SidebarLink to={teamLink(teamId, "tasks")} icon={<ListTodo className="h-4 w-4" />} label="My Tasks" end onNavigate={onNavigate} />
-        {isInstanceOwner ? (
-          <SidebarLink
-            to="/users"
-            icon={<Users className="h-4 w-4" />}
-            label="Users"
-            matchPrefix="/users"
-            onNavigate={onNavigate}
-          />
-        ) : null}
+        <SidebarLink linkRef={firstLinkRef} to={teamLink(teamId, "tasks")} icon={<ListTodo className="h-4 w-4" />} label="My Tasks" end onNavigate={onNavigate} collapsed={collapsed} />
         {teamId ? (
           <>
             <SidebarLink
@@ -172,6 +184,7 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
               label="Projects"
               matchPrefix="/projects"
               onNavigate={onNavigate}
+              collapsed={collapsed}
             />
             <SidebarLink
               to={`/teams/${teamId}/goals`}
@@ -179,6 +192,7 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
               label="Goals"
               matchPrefix={`/teams/${teamId}/goals`}
               onNavigate={onNavigate}
+              collapsed={collapsed}
             />
             <SidebarLink
               to={`/teams/${teamId}/dashboard`}
@@ -186,6 +200,7 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
               label="Dashboard"
               matchPrefix={`/teams/${teamId}/dashboard`}
               onNavigate={onNavigate}
+              collapsed={collapsed}
             />
             <SidebarLink
               to={`/teams/${teamId}/workload`}
@@ -193,6 +208,7 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
               label="Workload"
               matchPrefix={`/teams/${teamId}/workload`}
               onNavigate={onNavigate}
+              collapsed={collapsed}
             />
             <SidebarLink
               to={`/teams/${teamId}/capacity`}
@@ -200,6 +216,7 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
               label="Capacity"
               matchPrefix={`/teams/${teamId}/capacity`}
               onNavigate={onNavigate}
+              collapsed={collapsed}
             />
             <SidebarLink
               to={`/teams/${teamId}/settings`}
@@ -207,6 +224,7 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
               label="Team Settings"
               matchPrefix={`/teams/${teamId}/settings`}
               onNavigate={onNavigate}
+              collapsed={collapsed}
             />
           </>
         ) : null}
@@ -215,32 +233,85 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+const SIDEBAR_OPEN_KEY = "tasker:sidebar-open";
+
+/** Bug 4: collapsible sidebar. Width transition (200ms ease-out): the rail
+    contains flow content (labels + the team switcher), so a transform
+    slide would need a second paint surface and clip the focus ring — width
+    on a 240px column is a cheap, honest choice. */
 function Sidebar() {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_OPEN_KEY) === "collapsed";
+    } catch {
+      return false;
+    }
+  });
+  const firstLinkRef = useRef<HTMLAnchorElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const mobileNav = useState(false);
+  void mobileNav;
+
+  const toggle = () => {
+    setCollapsed((c) => {
+      const next = !c;
+      try {
+        localStorage.setItem(SIDEBAR_OPEN_KEY, next ? "collapsed" : "open");
+      } catch {
+        // private mode: in-session state still works
+      }
+      // Focus management: collapsing → toggle; expanding → first nav item.
+      requestAnimationFrame(() => {
+        if (next) toggleRef.current?.focus();
+        else firstLinkRef.current?.focus();
+      });
+      return next;
+    });
+  };
+
+  // ⌘/Ctrl+B toggles (global; works while typing — a layout command).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        toggle();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
   return (
-    <aside className="flex h-full w-60 shrink-0 flex-col gap-1 border-r bg-sidebar p-3 text-sidebar-foreground">
-      <SidebarNav />
-      <div className="mt-auto pb-1 pl-2 text-2xs text-muted-foreground">Tasker 0.1</div>
+    <aside
+      className={cn(
+        "flex h-full shrink-0 flex-col gap-1 overflow-hidden border-r bg-sidebar p-3 text-sidebar-foreground transition-[width] duration-200 ease-out",
+        collapsed ? "w-12" : "w-60",
+      )}
+      data-testid="app-sidebar"
+      aria-label="Main navigation"
+    >
+      <button
+        type="button"
+        ref={toggleRef}
+        onClick={toggle}
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? "Expand navigation sidebar" : "Collapse navigation sidebar"}
+        className="mb-1 flex h-8 w-full items-center justify-center gap-2 rounded-md text-sidebar-foreground/70 transition-colors hover:bg-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        data-testid="sidebar-toggle"
+      >
+        <PanelLeftClose className={cn("h-4 w-4 shrink-0 transition-transform duration-200", collapsed && "rotate-180")} />
+        {collapsed ? null : <span className="text-xs font-medium">Collapse</span>}
+      </button>
+      <div className={cn("flex min-h-0 flex-1 flex-col", collapsed && "items-center")}>
+        <SidebarNav collapsed={collapsed} firstLinkRef={firstLinkRef} />
+      </div>
+      {collapsed ? null : (
+        <div className="pb-1 pl-2 text-2xs text-muted-foreground">Tasker 0.1</div>
+      )}
     </aside>
   );
 }
 
-/** Slide-in navigation for widths below `sm`, where the sidebar is hidden. */
-function MobileNav({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="left-0 top-0 h-full max-h-none w-72 max-w-[85vw] translate-x-0 translate-y-0 rounded-none rounded-r-lg border-r p-3 data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left"
-        aria-describedby={undefined}
-      >
-        <DialogTitle className="text-sm font-semibold">Navigation</DialogTitle>
-        <nav className="mt-3 flex flex-col" aria-label="Mobile">
-          <SidebarNav onNavigate={() => onOpenChange(false)} />
-        </nav>
-        <div className="mt-auto pb-1 pl-2 text-2xs text-muted-foreground">Tasker 0.1</div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function ThemeSwitcher() {
   const { theme, setTheme } = useTheme();
@@ -289,15 +360,43 @@ function ThemeSwitcher() {
   );
 }
 
+/** Phase 13 (Bug 7): reminds the user they are acting as a team guest —
+    restricted, explicitly granted access. Only when the active context is
+    a guest membership. */
+function GuestBadge() {
+  const { myRole } = useWorkspace();
+  if (myRole !== "guest") return <NotificationBell />;
+  return (
+    <>
+      <span
+        className="inline-flex items-center gap-1 rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-2xs font-medium text-warning"
+        title="You are a guest of this team — access is limited to what the Owner granted."
+        data-testid="guest-badge"
+      >
+        <ShieldAlert className="h-3 w-3" aria-hidden /> Guest
+      </span>
+      <NotificationBell />
+    </>
+  );
+}
+
 function Topbar() {
   const { user } = useAuth();
   const logout = useLogout();
   const navigate = useNavigate();
   const [navOpen, setNavOpen] = useState(false);
+  // Bug 5: publish the Settings opener for the lazy shortcuts manager
+  // (⌘/Ctrl+,).
+  useEffect(() => {
+    setOpenSettingsHandler(() => navigate("/settings"));
+    return () => setOpenSettingsHandler(null);
+  }, [navigate]);
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b px-4">
-      <MobileNav open={navOpen} onOpenChange={setNavOpen} />
+      <Suspense fallback={null}>
+        <MobileNav open={navOpen} onOpenChange={setNavOpen} />
+      </Suspense>
       <div className="flex items-center gap-2 text-sm font-semibold">
         <Button
           variant="ghost"
@@ -314,7 +413,7 @@ function Topbar() {
         Tasker
       </div>
       <div className="flex items-center gap-1.5">
-        <NotificationBell />
+        <GuestBadge />
         <ShortcutsManagerSlot />
         <ThemeSwitcher />
         <DropdownMenu>
@@ -332,8 +431,8 @@ function Topbar() {
               <div className="truncate text-2xs font-normal">{user?.email}</div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => navigate("/account")}>
-              <UserRound /> Account
+            <DropdownMenuItem onSelect={() => navigate("/settings")} data-testid="menu-settings">
+              <Settings /> Settings
             </DropdownMenuItem>
             <DropdownMenuItem destructive onSelect={() => logout.mutate()} data-testid="logout">
               <LogOut /> Log out

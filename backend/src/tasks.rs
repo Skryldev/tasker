@@ -294,7 +294,19 @@ pub async fn require_task_access(
             membership: Some(membership),
             is_guest: false,
         }
-    } else if crate::projects::is_project_guest(conn, &task.project_id, user_id).await? {
+    } else if crate::projects::is_project_guest(conn, &task.project_id, user_id).await?
+        // Phase 13 team guests (Bug 7): an individual task READ requires
+        // the explicit `view_task` grant (project scope). `view_project`
+        // alone reaches the project surfaces, not the task detail.
+        || crate::guests::guest_has(
+            conn,
+            &task.team_id,
+            user_id,
+            "view_task",
+            Some(&task.project_id),
+        )
+        .await?
+    {
         crate::projects::ProjectActor {
             membership: None,
             is_guest: true,

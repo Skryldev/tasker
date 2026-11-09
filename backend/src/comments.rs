@@ -265,9 +265,29 @@ async fn create_comment(
     let mut conn = state.db.begin().await?;
     let (task, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
     if actor.is_guest() {
-        return Err(AppError::Forbidden(
-            "guests have read-only access and cannot comment",
-        ));
+        // Phase 13 (Bug 7): a team guest may comment only with the
+        // explicit `comment_task` grant for the task's project. Phase 3
+        // project viewers keep the read-only rule.
+        let project_guest = crate::projects::is_project_guest(
+            &mut conn,
+            &task.project_id,
+            &user.id,
+        )
+        .await?;
+        let granted = !project_guest
+            && crate::guests::guest_has(
+                &mut conn,
+                &task.team_id,
+                &user.id,
+                "comment_task",
+                Some(&task.project_id),
+            )
+            .await?;
+        if !granted {
+            return Err(AppError::Forbidden(
+                "guests have read-only access and cannot comment",
+            ));
+        }
     }
     crate::tasks::ensure_task_mutable(&task)?;
     // Internal by default; only team members may publish a guest-visible note.

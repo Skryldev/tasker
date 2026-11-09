@@ -1,0 +1,391 @@
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Globe, Lock, MessageSquare, Search, ShieldCheck, Trash2 } from "lucide-react";
+import { api, ApiError, type GuestPermission } from "@/api/client";
+import { adminApi, type EligibleMember } from "@/api/admin-client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/badge";
+import { Avatar } from "@/components/ui/avatar";
+import { useToast } from "@/components/ui/toast";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
+import { timeAgo } from "@/lib/utils";
+import { Label } from "@/components/ui/input";
+
+/**
+ * Team guests (Phase 13 Bug 7, ADR-0018): non-members with an explicitly
+ * granted permission set. Deny by default; revocation is immediate. This
+ * section coexists with the Phase 3 project-viewer guest list.
+ */
+
+const PERMISSION_LABELS: Record<GuestPermission["permission"], string> = {
+  view_team: "See team name & description",
+  view_project: "See the project",
+  view_task: "Open tasks",
+  comment_task: "Comment on tasks",
+  view_activity: "See task activity",
+};
+
+const GRANTABLE: GuestPermission["permission"][] = [
+  "view_project",
+  "view_task",
+  "comment_task",
+  "view_activity",
+];
+
+export function TeamGuestsSection({
+  teamId,
+  projects,
+  canManage,
+}: {
+  teamId: string;
+  /** The team's projects (for per-project permission scopes). */
+  projects: { id: string; name: string }[];
+  canManage: boolean;
+}) {
+  const qc = useQueryClient();
+  const { push } = useToast();
+  const { confirm, element: confirmElement } = useConfirmDialog();
+  const [inviteOpen, setInviteOpen] = useState(false);
+
+  const guests = useQuery({
+    queryKey: ["team-guests2", teamId],
+    queryFn: () => api.listTeamGuests2(teamId),
+  });
+
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: ["team-guests2", teamId] });
+  };
+
+  const revoke = useMutation({
+    mutationFn: (guestId: string) => api.revokeTeamGuest2(teamId, guestId),
+    onSuccess: () => {
+      push("success", "Guest access revoked");
+      invalidate();
+    },
+    onError: (error) =>
+      push("error", "Could not revoke access", error instanceof Error ? error.message : undefined),
+  });
+
+  const grant = useMutation({
+    mutationFn: (vars: {
+      guestId: string;
+      permission: GuestPermission["permission"];
+      projectId?: string;
+    }) =>
+      api.grantGuestPermission(teamId, vars.guestId, {
+        permission: vars.permission,
+        scope_type: vars.permission === "view_team" ? "team" : "project",
+        project_id: vars.projectId,
+      }),
+    onSuccess: () => {
+      push("success", "Permission granted");
+      invalidate();
+    },
+    onError: (error) =>
+      push("error", "Could not grant permission", error instanceof Error ? error.message : undefined),
+  });
+
+  const revokePermission = useMutation({
+    mutationFn: (vars: { guestId: string; permissionId: string }) =>
+      api.revokeGuestPermission(teamId, vars.guestId, vars.permissionId),
+    onSuccess: () => {
+      push("success", "Permission removed");
+      invalidate();
+    },
+    onError: (error) =>
+      push("error", "Could not remove permission", error instanceof Error ? error.message : undefined),
+  });
+
+  return (
+    <section aria-label="Team guests">
+      {confirmElement}
+      <div className="mb-1 flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Team guests</h2>
+        {canManage ? (
+          <Button size="sm" variant="outline" onClick={() => setInviteOpen(true)} data-testid="invite-guest">
+            <ShieldCheck /> Add guest
+          </Button>
+        ) : null}
+      </div>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Non-members with explicitly granted permissions. Default deny — every capability is a
+        separate grant, revoked instantly.
+      </p>
+      {guests.isLoading ? (
+        <Skeleton className="h-16 w-full" />
+      ) : (guests.data?.items.length ?? 0) === 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="team-guests-empty">
+          No guests yet.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-2" data-testid="team-guest-list">
+          {guests.data!.items.map((guest) => (
+            <li key={guest.guest_id} className="rounded-lg border p-3">
+              <div className="flex items-center gap-3">
+                <Avatar name={guest.user.display_name} size="md" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">
+                    {guest.user.display_name}
+                    <span className="ml-1.5 truncate text-2xs text-muted-foreground">
+                      {guest.user.email}
+                    </span>
+                  </p>
+                  <p className="text-2xs text-muted-foreground">
+                    Guest · granted {timeAgo(guest.created_at)}
+                  </p>
+                </div>
+                {canManage ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={revoke.isPending}
+                    onClick={() =>
+                      confirm({
+                        title: "Revoke guest access?",
+                        description: `${guest.user.display_name} loses every granted permission immediately.`,
+                        confirmLabel: "Revoke access",
+                        action: () => revoke.mutate(guest.guest_id),
+                      })
+                    }
+                    data-testid={`revoke-team-guest-${guest.guest_id}`}
+                  >
+                    <Trash2 /> Revoke
+                  </Button>
+                ) : null}
+              </div>
+              {/* Permission matrix: granted rows + the grant controls. */}
+              <div className="mt-2.5 flex flex-col gap-1.5">
+                {guest.permissions.map((p) => (
+                  <div
+                    key={p.id}
+                    className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-2.5 py-1.5 text-xs"
+                  >
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      {p.permission === "view_team" ? (
+                        <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      ) : p.permission === "comment_task" ? (
+                        <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="truncate">
+                        {PERMISSION_LABELS[p.permission]}
+                        {p.scope_id
+                          ? ` · ${projects.find((pr) => pr.id === p.scope_id)?.name ?? p.scope_id.slice(0, 8)}`
+                          : ""}
+                      </span>
+                    </span>
+                    {canManage ? (
+                      <button
+                        type="button"
+                        aria-label={`Remove permission ${p.permission}`}
+                        onClick={() => revokePermission.mutate({ guestId: guest.guest_id, permissionId: p.id })}
+                        className="shrink-0 text-muted-foreground hover:text-destructive"
+                        data-testid={`remove-permission-${p.id}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+                {canManage ? (
+                  <GuestGrantControls
+                    projects={projects}
+                    onGrant={(permission, projectId) =>
+                      grant.mutate({ guestId: guest.guest_id, permission, projectId })
+                    }
+                    pending={grant.isPending}
+                  />
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {inviteOpen ? (
+        <InviteGuestDialog teamId={teamId} onOpenChange={setInviteOpen} />
+      ) : null}
+    </section>
+  );
+}
+
+function GuestGrantControls({
+  projects,
+  onGrant,
+  pending,
+}: {
+  projects: { id: string; name: string }[];
+  onGrant: (permission: GuestPermission["permission"], projectId?: string) => void;
+  pending: boolean;
+}) {
+  const [permission, setPermission] = useState<GuestPermission["permission"]>("view_project");
+  const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
+  const needsProject = permission !== "view_team";
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-testid="guest-grant-controls">
+      <Label htmlFor={`grant-permission`} className="sr-only">
+        Permission
+      </Label>
+      <select
+        id="grant-permission"
+        value={permission}
+        onChange={(e) => setPermission(e.target.value as GuestPermission["permission"])}
+        className="h-8 rounded-md border bg-background px-2 text-xs"
+        aria-label="Permission to grant"
+      >
+        {["view_team", ...GRANTABLE].map((p) => (
+          <option key={p} value={p}>
+            {PERMISSION_LABELS[p as GuestPermission["permission"]] ?? p}
+          </option>
+        ))}
+      </select>
+      {needsProject && projects.length > 0 ? (
+        <>
+          <Label htmlFor="grant-project" className="sr-only">
+            Project
+          </Label>
+          <select
+            id="grant-project"
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            className="h-8 max-w-[12rem] rounded-md border bg-background px-2 text-xs"
+            aria-label="Project scope"
+          >
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </>
+      ) : null}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={pending || (needsProject && projects.length === 0)}
+        onClick={() =>
+          onGrant(
+            permission,
+            permission === "view_team" ? undefined : projectId || undefined,
+          )
+        }
+        data-testid="grant-permission-submit"
+      >
+        Grant
+      </Button>
+    </div>
+  );
+}
+
+function InviteGuestDialog({
+  teamId,
+  onOpenChange,
+}: {
+  teamId: string;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const { push } = useToast();
+  const qc = useQueryClient();
+  const [query, setQuery] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const eligible = useQuery({
+    queryKey: ["eligible-members", teamId, debounced],
+    queryFn: () => adminApi.eligibleMembers(teamId, { q: debounced || undefined, page_size: 20 }),
+    placeholderData: (prev) => prev,
+  });
+
+  const invite = useMutation({
+    mutationFn: (email: string) => api.inviteTeamGuest2(teamId, email),
+    onSuccess: (_guest, email) => {
+      push("success", "Guest added", email);
+      void qc.invalidateQueries({ queryKey: ["team-guests2", teamId] });
+      void qc.invalidateQueries({ queryKey: ["eligible-members", teamId] });
+      onOpenChange(false);
+    },
+    onError: (err) =>
+      setError(err instanceof ApiError ? err.message : "Could not add the guest."),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div
+        role="dialog"
+        aria-modal
+        aria-label="Add guest"
+        className="w-full max-w-md rounded-lg border bg-popover p-4 shadow-lg"
+      >
+        <h2 className="text-sm font-semibold">Add guest</h2>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Pick an existing Tasker account. Guests get only what you explicitly grant.
+        </p>
+        <div className="relative mb-2">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden />
+          <Input
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setDebounced(e.target.value.trim());
+            }}
+            placeholder="Search by name, email or username…"
+            aria-label="Find a user to invite as guest"
+            className="pl-8"
+            autoFocus
+            data-testid="guest-search-input"
+          />
+        </div>
+        <ul
+          className="max-h-56 overflow-y-auto rounded-md border p-1 scrollbar-thin"
+          role="listbox"
+          aria-label="Eligible users"
+          data-testid="guest-eligible-list"
+        >
+          {eligible.isLoading ? (
+            <li className="flex flex-col gap-1.5 p-1.5">
+              <Skeleton className="h-7 w-full" />
+              <Skeleton className="h-7 w-4/5" />
+            </li>
+          ) : (eligible.data?.items.length ?? 0) === 0 ? (
+            <li className="p-3 text-center text-xs text-muted-foreground" data-testid="guest-eligible-empty">
+              No existing Tasker user matches this search.
+            </li>
+          ) : (
+            eligible.data!.items.map((u: EligibleMember) => (
+              <li key={u.id} role="none">
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  onClick={() => invite.mutate(u.email)}
+                  className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    <span className="font-medium">{u.display_name}</span>{" "}
+                    <span className="text-2xs text-muted-foreground">{u.email}</span>
+                  </span>
+                  {u.username ? (
+                    <span className="shrink-0 text-2xs text-muted-foreground">@{u.username}</span>
+                  ) : null}
+                </button>
+              </li>
+            ))
+          )}
+        </ul>
+        {error ? <p className="mt-2 text-2xs text-destructive" role="alert">{error}</p> : null}
+        <div className="mt-3 flex justify-end">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}

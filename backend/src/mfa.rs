@@ -1026,6 +1026,7 @@ mod tests {
             static_dir: None,
             log_format_json: false,
             rules_worker: crate::config::RulesWorkerConfig::default(),
+            integrations_key: Some(vec![19u8; 32]),
             attachments: crate::config::AttachmentsConfig {
                 mode: crate::config::AttachmentsMode::Disabled,
                 local_dir: "data/attachments".into(),

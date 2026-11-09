@@ -42,6 +42,13 @@ export function teamLink(teamId: string | undefined, section: "tasks" | "project
 /**
  * Switch to `newTeamId` preserving the current section: rewrite the
  * `:teamId` path segment on team-scoped routes, else replace `?team=`.
+ *
+ * Phase 13 (Bug 2): a PROJECT DETAIL path must never be preserved — a
+ * project belongs to exactly one team, so carrying
+ * `/projects/:projectId` into the new team rendered the OLD team's
+ * project (with its tasks) under the new team's `?team=` — reading as a
+ * cross-team data leak. The switch lands on the new team's projects list
+ * instead.
  */
 export function switchTeamLocation(
   pathname: string,
@@ -52,6 +59,10 @@ export function switchTeamLocation(
   if (pathMatch) {
     const rest = pathMatch[2] ?? "/";
     return { pathname: `/teams/${newTeamId}${rest}`, search };
+  }
+  // Project detail (and any nested view of one) belongs to the old team.
+  if (pathname.startsWith("/projects/")) {
+    return { pathname: "/projects", search: `team=${newTeamId}` };
   }
   const next = new URLSearchParams(search);
   next.set("team", newTeamId);

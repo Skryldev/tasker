@@ -24,9 +24,12 @@ function storedWidth(): number {
 export function DetailSidebar({
   children,
   testId = "task-panel",
+  hidden,
 }: {
   children: ReactNode;
   testId?: string;
+  /** Bug 3: the full task page is open — the quick view yields the layout. */
+  hidden?: boolean;
 }) {
   const [width, setWidth] = useState(storedWidth);
   const [collapsed, setCollapsed] = useState(false);
@@ -94,9 +97,13 @@ export function DetailSidebar({
 
   return (
     <aside
-      className="relative hidden shrink-0 border-l lg:block"
+      className={cn(
+        "relative hidden shrink-0 border-l lg:block",
+        hidden && "hidden",
+      )}
       style={{ width: `${width}px` }}
       data-testid={testId}
+      aria-hidden={hidden || undefined}
     >
       {/* Resize handle: 6px interactive strip on the border. */}
       <div

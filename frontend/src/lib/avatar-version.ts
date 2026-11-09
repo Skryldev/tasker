@@ -79,6 +79,23 @@ export function avatarUrl(userId: string): string {
   return version > 0 ? `${base}?v=${version}` : base;
 }
 
+// Phase 13 (Bug 8): the SAME pattern for team avatars — one storage entry
+// per team, versioned identically so uploads bust the max-age=300 cache
+// everywhere (settings preview, switcher) and across tabs.
+const TEAM_KEY_PREFIX = "t:";
+
+/** `/api/v1/teams/{id}/avatar` with the cache-busting `?v=` when known. */
+export function teamAvatarUrl(teamId: string): string {
+  const base = `/api/v1/teams/${teamId}/avatar`;
+  const version = getAvatarVersion(TEAM_KEY_PREFIX + teamId);
+  return version > 0 ? `${base}?v=${version}` : base;
+}
+
+/** Called after a successful team avatar upload. */
+export function setTeamAvatarVersion(teamId: string, version: number): void {
+  setAvatarVersion(TEAM_KEY_PREFIX + teamId, version);
+}
+
 /**
  * Resolves a user-avatar URL reactively: swaps a plain user-avatar path for
  * its versioned form and re-renders when the version changes (same tab via
@@ -87,13 +104,18 @@ export function avatarUrl(userId: string): string {
  * modification.
  */
 export function useAvatarSrc(src: string | undefined): string | undefined {
-  const match = src?.match(/^\/api\/v1\/users\/([^/?]+)\/avatar$/);
-  const userId = match?.[1];
+  const userMatch = src?.match(/^\/api\/v1\/users\/([^/?]+)\/avatar$/);
+  const teamMatch = src?.match(/^\/api\/v1\/teams\/([^/?]+)\/avatar$/);
+  const key = userMatch
+    ? userMatch[1]
+    : teamMatch
+      ? TEAM_KEY_PREFIX + teamMatch[1]
+      : undefined;
   const version = React.useSyncExternalStore(
     subscribe,
-    () => (userId ? getAvatarVersion(userId) : 0),
+    () => (key ? getAvatarVersion(key) : 0),
     () => 0,
   );
-  if (!userId) return src;
+  if (!key) return src;
   return version > 0 ? `${src}?v=${version}` : src;
 }

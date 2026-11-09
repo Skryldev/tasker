@@ -40,6 +40,19 @@ export type CapacityResponse = components["schemas"]["CapacityResponse"];
 export type CapacityMember = components["schemas"]["CapacityMember"];
 export type TrashProject = components["schemas"]["TrashProject"];
 export type AdminUser = components["schemas"]["AdminUser"];
+export interface TeamGuest2 {
+  guest_id: string;
+  user: { id: string; display_name: string; email: string };
+  created_at: number;
+  permissions: GuestPermission[];
+}
+export interface GuestPermission {
+  id: string;
+  permission: "view_team" | "view_project" | "view_task" | "comment_task" | "view_activity";
+  scope_type: "team" | "project";
+  scope_id: string | null;
+  created_at: number;
+}
 export type ChecklistItem = components["schemas"]["ChecklistItem"];
 export type TaskProgress = components["schemas"]["TaskProgress"];
 export type Attachment = components["schemas"]["Attachment"];
@@ -648,6 +661,40 @@ export const api = {
   },
   deleteAttachment(attachmentId: string): Promise<void> {
     return request("delete", `/attachments/${attachmentId}`) as Promise<void>;
+  },
+
+  // team guest role (Phase 13 Bug 7) --------------------------------------
+  listTeamGuests2(teamId: string): Promise<{ items: TeamGuest2[] }> {
+    return request("get", `/teams/${teamId}/guests2`) as Promise<{
+      items: TeamGuest2[];
+    }>;
+  },
+  inviteTeamGuest2(teamId: string, email: string): Promise<TeamGuest2> {
+    return request("post", `/teams/${teamId}/guests2`, {
+      body: { email },
+    }) as Promise<TeamGuest2>;
+  },
+  revokeTeamGuest2(teamId: string, guestId: string): Promise<void> {
+    return request("delete", `/teams/${teamId}/guests2/${guestId}`) as Promise<void>;
+  },
+  grantGuestPermission(
+    teamId: string,
+    guestId: string,
+    body: { permission: string; scope_type: "team" | "project"; project_id?: string },
+  ): Promise<GuestPermission> {
+    return request("post", `/teams/${teamId}/guests2/${guestId}/permissions`, {
+      body,
+    }) as Promise<GuestPermission>;
+  },
+  revokeGuestPermission(
+    teamId: string,
+    guestId: string,
+    permissionId: string,
+  ): Promise<void> {
+    return request(
+      "delete",
+      `/teams/${teamId}/guests2/${guestId}/permissions/${permissionId}`,
+    ) as Promise<void>;
   },
 
   // team dashboard (Phase 12 WS14) ----------------------------------------

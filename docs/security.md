@@ -142,6 +142,27 @@ and what remains out of scope.
   exposes task content beyond the frozen event summary written while the
   recipient had access.
 
+## Team guests (Phase 13, ADR-0018)
+
+A **team guest** is a non-member with an explicitly granted permission
+set — distinct from Phase 3 project viewers (read-only companions on one
+project). Both coexist; the guest check runs only for callers who are
+neither members nor project viewers.
+
+- **Deny by default.** Every capability is a row in
+  `team_guest_permissions`; a guest with zero grants sees nothing.
+  Grantable: `view_team` (team scope), `view_project`, `view_task`,
+  `comment_task`, `view_activity` (project scope).
+- **404 non-disclosure.** Guest requests without the matching grant fail
+  with 404 — indistinguishable from a stranger's request. Management
+  endpoints (`/teams/{id}/guests2*`) are likewise 404 for non-managers.
+- **Immediate revocation.** Deleting the guest row or any permission row
+  takes effect on the next request; no cached grants.
+- **No role-matrix powers.** `Role::Guest.can(_) == false` — guests never
+  create projects, edit tasks, manage members/settings, or read
+  dashboards/capacity, regardless of grants.
+- **Owner/Admin only management**, mirroring member management.
+
 ## Project guests (Phase 3)
 
 Guests are external users granted read-only access to one project. The

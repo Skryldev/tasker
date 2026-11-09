@@ -47,7 +47,7 @@ test.describe.serial("Phase 6 Persian calendar", () => {
   });
 
   test("task dialog shows the Persian calendar and submits the Gregorian day", async () => {
-    await page.getByTestId("create-task").click();
+    await page.getByTestId("create-task-board").first().click();
     await page.getByTestId("task-title-input").fill("Calendar task");
 
     // Open the Doran calendar from the due-date field's icon button.
@@ -66,7 +66,9 @@ test.describe.serial("Phase 6 Persian calendar", () => {
     await expect(dueInput).toHaveValue("۱۴۰۵/۰۸/۱۵");
 
     await page.getByTestId("task-submit").click();
-    await expect(page.getByTestId("task-table")).toContainText("Calendar task");
+    // Bug 6 (ADR-0019): the dialog was opened from the board route — the
+    // new task appears as a board card.
+    await expect(page.getByTestId("main-content").getByText("Calendar task")).toBeVisible();
 
     // The API received the Gregorian ISO day — Aban 15, 1405 = 2026-11-06.
     const res = await page.request.get(
@@ -103,7 +105,8 @@ test.describe.serial("Phase 6 Persian calendar", () => {
     // The task created above has due_date 2026-11-06 = ۱۴۰۵/۰۸/۱۵.
     // Phase 10 §5.1: the list shows a relative due label; the absolute
     // Jalali date is the hover title, and the detail panel renders it inline.
-    await page.goto(`/projects/${projectId}`);
+    // Bug 6 (ADR-0019): the task table lives on the list route.
+    await page.goto(`/projects/${projectId}?team=${teamId}&view=list`);
     await expect(
       page.getByTestId("task-table").getByTitle("Due ۱۴۰۵/۰۸/۱۵"),
     ).toBeVisible();

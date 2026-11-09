@@ -98,13 +98,13 @@ async fn create_user(
     Json(body): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     require_owner(&state, &user).await?;
-    if let Some(role) = body.role.as_deref().map(str::trim) {
-        if !role.is_empty() && role != users::INSTANCE_ROLE_MEMBER {
-            return Err(AppError::validation(
-                "role",
-                "only `member` can be granted over the API; instance owners are minted by bootstrap-admin",
-            ));
-        }
+    if let Some(bad_role) = body.role.as_deref().map(str::trim).filter(|r| {
+        !r.is_empty() && *r != users::INSTANCE_ROLE_MEMBER
+    }) {
+        return Err(AppError::validation(
+            "role",
+            "only `member` can be granted over the API; instance owners are minted by bootstrap-admin",
+        ));
     }
     let mut conn = state.db.begin().await?;
     let created = users::create_validated(

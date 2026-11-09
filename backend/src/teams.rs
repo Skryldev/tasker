@@ -298,9 +298,14 @@ async fn list_teams(
     args.s(&user.id);
     let rows = conn
         .fetch_all(
-            "SELECT t.id, t.name, t.description, t.timezone, t.archived_at, t.created_at, t.updated_at, tm.role \
-             FROM teams t JOIN team_members tm ON tm.team_id = t.id \
-             WHERE tm.user_id = ? ORDER BY t.created_at",
+            "SELECT t.id, t.name, t.description, t.timezone, t.archived_at, t.created_at, t.updated_at, \
+                    COALESCE(tm.role, 'guest') AS role \
+             FROM teams t \
+             LEFT JOIN team_members tm ON tm.team_id = t.id AND tm.user_id = ?1 \
+             WHERE tm.user_id = ?1 \
+                OR EXISTS (SELECT 1 FROM team_guests g \
+                           WHERE g.team_id = t.id AND g.user_id = ?1 AND g.revoked_at IS NULL) \
+             ORDER BY t.created_at",
             args,
         )
         .await?;
@@ -326,9 +331,18 @@ async fn get_team(
     Path(team_id): Path<String>,
 ) -> Result<Json<Team>, AppError> {
     let mut conn = state.db.conn();
-    let membership = require_membership(&mut conn, &team_id, &user.id).await?;
     let mut team = find_team(&mut conn, &team_id).await?;
-    team.my_role = Some(membership.role);
+    let membership =
+        crate::authorization::get_membership(&mut conn, &team_id, &user.id).await?;
+    if let Some(membership) = membership {
+        team.my_role = Some(membership.role);
+    } else if crate::guests::guest_has(&mut conn, &team_id, &user.id, "view_team", None).await? {
+        // Phase 13 (Bug 7): a team guest reads the metadata with the
+        // explicit view_team grant; the switcher shows the Guest badge.
+        team.my_role = Some(Role::Guest);
+    } else {
+        return Err(AppError::NotFound("team not found"));
+    }
     Ok(Json(team))
 }
 

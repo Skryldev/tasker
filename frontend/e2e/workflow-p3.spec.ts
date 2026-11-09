@@ -63,11 +63,15 @@ test.describe.serial("Phase 3 guests, dependencies, workload, templates", () => 
     await page.getByRole("link", { name: /P3 Project/ }).first().click();
     projectId = new URL(await page.url()).pathname.split("/").pop() ?? "";
 
+    // Bug 6 (ADR-0019): views are routes — pin the list view once and use
+    // its create button for both tasks.
+    await page.getByTestId("view-list").click();
+    await expect(page.getByTestId("task-filters")).toBeVisible();
     for (const title of ["Foundation work", "Dependent work"]) {
-      await page.getByTestId("create-task").click();
+      await page.getByTestId("create-task").first().click();
       await page.getByTestId("task-title-input").fill(title);
       await page.getByTestId("task-submit").click();
-      await page.getByTestId("view-list").click();
+      await expect(page.getByTestId("task-table")).toContainText(title);
     }
     const listResponse = await page.request.get(`/api/v1/projects/${projectId}/tasks`);
     const list = await listResponse.json();
@@ -133,7 +137,7 @@ test.describe.serial("Phase 3 guests, dependencies, workload, templates", () => 
     await expect(gp.getByTestId("guest-banner")).toContainText("read-only guest access");
     await expect(gp.getByTestId("view-list")).toBeVisible();
     // No create controls.
-    expect(await gp.getByTestId("create-task").count()).toBe(0);
+    expect(await gp.getByTestId("create-task-board").count()).toBe(0);
     expect(await gp.getByTestId("create-task-board").count()).toBe(0);
 
     // Server-side enforcement: mutations rejected.

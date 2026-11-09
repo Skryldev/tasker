@@ -4816,6 +4816,238 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/teams/{team_id}/guests2": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List team guests with their grants (Owner/Admin) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Active guests, oldest first. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamGuest2List"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /** Invite an existing instance user as a team guest (Owner/Admin) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["InviteGuestRequest"];
+                };
+            };
+            responses: {
+                /** @description Guest created (no permissions — deny by default). */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamGuest2"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/guests2/{guest_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: components["parameters"]["TeamId"];
+                guest_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a team guest (Owner/Admin)
+         * @description Soft-revokes (revoked_at set); every permission dies with it. Immediate: the guest's next request gets 404.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    guest_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Revoked. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/guests2/{guest_id}/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: components["parameters"]["TeamId"];
+                guest_id: string;
+            };
+            cookie?: never;
+        };
+        /** List a guest's permission grants (Owner/Admin) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    guest_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Grants. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["GuestPermissionRow"][];
+                        };
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /** Grant a permission (Owner/Admin) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    guest_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["GrantGuestPermissionRequest"];
+                };
+            };
+            responses: {
+                /** @description Granted. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GuestPermissionRow"];
+                    };
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/guests2/{guest_id}/permissions/{permission_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: components["parameters"]["TeamId"];
+                guest_id: string;
+                permission_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke one permission grant (Owner/Admin) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    guest_id: string;
+                    permission_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Revoked (immediate). */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Problem401"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4911,7 +5143,7 @@ export interface components {
             created_at: number;
             updated_at: number;
             /** @enum {string|null} */
-            my_role?: "owner" | "admin" | "manager" | "member" | null;
+            my_role?: "owner" | "admin" | "manager" | "member" | "guest" | null;
             /** @description Archive timestamp. */
             archived_at?: number | null;
             /** @description Default timezone. */
@@ -5731,6 +5963,51 @@ export interface components {
             page: number;
             page_size: number;
             total: number;
+        };
+        GuestUser: {
+            /** Format: uuid */
+            id: string;
+            display_name: string;
+            email: string;
+        };
+        GuestPermissionRow: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            permission: "view_team" | "view_project" | "view_task" | "comment_task" | "view_activity";
+            /** @enum {string} */
+            scope_type: "team" | "project";
+            /** @description project_id for project-scoped grants; null for team scope. */
+            scope_id?: string | null;
+            created_at: number;
+        };
+        TeamGuest2: {
+            /** Format: uuid */
+            guest_id: string;
+            user: components["schemas"]["GuestUser"];
+            created_at: number;
+            permissions: components["schemas"]["GuestPermissionRow"][];
+        };
+        TeamGuest2List: {
+            items: components["schemas"]["TeamGuest2"][];
+        };
+        InviteGuestRequest: {
+            /**
+             * Format: email
+             * @description An existing instance user (Bug 2); members cannot be guests.
+             */
+            email: string;
+        };
+        GrantGuestPermissionRequest: {
+            /** @enum {string} */
+            permission: "view_team" | "view_project" | "view_task" | "comment_task" | "view_activity";
+            /** @enum {string} */
+            scope_type: "team" | "project";
+            /**
+             * Format: uuid
+             * @description Required for project-scoped permissions; the project must belong to this team.
+             */
+            project_id?: string;
         };
     };
     responses: {

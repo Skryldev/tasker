@@ -94,6 +94,28 @@ async fn list_task_activity(
     let (task, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
     require_project_access(&mut conn, &task.project_id, &user.id).await?;
 
+    // Phase 13 (Bug 7): a team guest reads activity only with the explicit
+    // `view_activity` grant for the task's project. Phase 3 project viewers
+    // keep their existing read access.
+    if actor.is_guest() {
+        let project_guest =
+            crate::projects::is_project_guest(&mut conn, &task.project_id, &user.id).await?;
+        // Phase 3 project viewers keep their existing whitelist access;
+        // team guests (Bug 7) need the explicit `view_activity` grant.
+        let granted = project_guest
+            || crate::guests::guest_has(
+                &mut conn,
+                &task.team_id,
+                &user.id,
+                "view_activity",
+                Some(&task.project_id),
+            )
+            .await?;
+        if !granted {
+            return Err(AppError::NotFound("task not found"));
+        }
+    }
+
     // Guests see only non-sensitive workflow events. Internal collaboration
     // detail (comment events, description updates, rejection reasons,
     // deletions) stays internal: the whitelist is enforced in SQL.

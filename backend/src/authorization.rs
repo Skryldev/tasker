@@ -18,6 +18,7 @@ use crate::error::AppError;
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     Member,
+    Guest,
     Manager,
     Admin,
     Owner,
@@ -30,9 +31,10 @@ impl Role {
             "admin" => Ok(Self::Admin),
             "manager" => Ok(Self::Manager),
             "member" => Ok(Self::Member),
+            "guest" => Ok(Self::Guest),
             other => Err(AppError::validation(
                 "role",
-                format!("unknown role `{other}`; expected owner, admin, manager or member"),
+                format!("unknown role `{other}`; expected owner, admin, manager, member or guest"),
             )),
         }
     }
@@ -44,6 +46,7 @@ impl Role {
             Self::Admin => "admin",
             Self::Manager => "manager",
             Self::Member => "member",
+            Self::Guest => "guest",
         }
     }
 }
@@ -77,6 +80,9 @@ pub enum Capability {
     /// and Admin only: rules act team-wide with external-delivery reach.
     /// Managers read execution history through a separate role check.
     ManageRules,
+    /// Create and manage Git provider integrations (webhook secrets,
+    /// repository wiring, project mappings). Owner and Admin only.
+    ManageIntegrations,
 }
 
 impl Role {
@@ -87,7 +93,7 @@ impl Role {
     pub fn can(self, capability: Capability) -> bool {
         use Capability::{
             AddMember, CreateLabel, CreateTask, DeleteAnyComment, DeleteAnyTask, EditAnyComment,
-            ManageGoals, ManageProjects, ManageRules, UpdateAnyTask, UpdateTeam,
+            ManageGoals, ManageIntegrations, ManageProjects, ManageRules, UpdateAnyTask, UpdateTeam,
         };
         match self {
             Self::Owner => true,
@@ -104,6 +110,7 @@ impl Role {
                     | DeleteAnyComment
                     | ManageGoals
                     | ManageRules
+                    | ManageIntegrations
             ),
             Self::Manager => matches!(
                 capability,
@@ -116,6 +123,10 @@ impl Role {
                     | ManageGoals
             ),
             Self::Member => matches!(capability, CreateTask),
+            // Phase 13 (Bug 7): a team Guest holds NO capabilities from the
+            // role matrix — every guest capability is an explicit grant row
+            // (team_guest_permissions), resolved by guests::guest_has.
+            Self::Guest => false,
         }
     }
 }

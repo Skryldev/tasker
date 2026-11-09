@@ -112,7 +112,7 @@ test.describe.serial("Phase 11 features", () => {
     await expect(page.getByTestId("template-list")).toContainText("Bug report");
 
     // New task via picker: selecting the template prefills title/description.
-    await page.goto(`/projects/${projectId}?team=${teamId}&new=task`);
+    await page.goto(`/projects/${projectId}?team=${teamId}&view=list&new=task`);
     await page.getByTestId("template-picker").click();
     await page.getByRole("option", { name: "Bug report" }).click();
     await expect(page.getByTestId("task-title-input")).toHaveValue("Bug:");
@@ -162,9 +162,13 @@ test.describe.serial("Phase 11 features", () => {
     await expect(page.getByTestId("timeline-view")).toBeVisible();
     await expect(page.getByTestId("timeline-today")).toBeVisible();
     await expect(page.locator('[data-testid^="timeline-bar"]').first()).toBeVisible();
-    await page.getByTestId("timeline-zoom").click();
-    await page.getByRole("option", { name: "Month" }).click();
+    // Phase 13 redesign: zoom is a segmented control (day/week/month).
+    await page.getByTestId("timeline-zoom-month").click();
     await expect(page.getByTestId("timeline-grid")).toBeVisible();
+    await expect(page.getByTestId(`timeline-zoom-month`)).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 
   test("list reorder: keyboard Alt+Up persists via the position API", async ({ page }) => {

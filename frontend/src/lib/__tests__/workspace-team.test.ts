@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { switchTeamLocation, teamLink } from "../workspace";
-import { avatarUrl, getAvatarVersion, setAvatarVersion } from "../avatar-version";
+import {
+  avatarUrl,
+  getAvatarVersion,
+  setAvatarVersion,
+  setTeamAvatarVersion,
+  teamAvatarUrl,
+} from "../avatar-version";
 
 // Bug 3: the URL is the team's single source of truth. These pure helpers
 // are the link/switch surface the sidebar and switcher build on.
@@ -30,10 +36,15 @@ describe("team link + switch helpers", () => {
     ).toEqual({ pathname: "/projects", search: "team=b&view=board" });
   });
 
-  it("switchTeamLocation keeps deep project paths intact", () => {
+  it("switchTeamLocation does NOT carry a project detail into the new team (Bug 2)", () => {
+    // A project belongs to exactly one team: preserving its path rendered
+    // the old team's data under the new team's ?team= (cross-team leak).
     expect(
       switchTeamLocation("/projects/p1", "?team=a", "b"),
-    ).toEqual({ pathname: "/projects/p1", search: "team=b" });
+    ).toEqual({ pathname: "/projects", search: "team=b" });
+    expect(
+      switchTeamLocation("/projects/p1/board", "?team=a", "b"),
+    ).toEqual({ pathname: "/projects", search: "team=b" });
   });
 });
 
@@ -57,5 +68,19 @@ describe("avatar version store", () => {
     expect(avatarUrl(id)).toBe(`/api/v1/users/${id}/avatar`);
     setAvatarVersion(id, 7);
     expect(avatarUrl(id)).toBe(`/api/v1/users/${id}/avatar?v=7`);
+  });
+});
+
+describe("team avatar version store (Bug 8)", () => {
+  it("bumps the team version without touching user entries", () => {
+    const id = "t-avatar-team";
+    expect(teamAvatarUrl(id)).toBe(`/api/v1/teams/${id}/avatar`);
+    setTeamAvatarVersion(id, 1000);
+    expect(teamAvatarUrl(id)).toBe(`/api/v1/teams/${id}/avatar?v=1000`);
+    // A second upload always advances (never goes backwards).
+    setTeamAvatarVersion(id, 400);
+    expect(teamAvatarUrl(id)).toBe(`/api/v1/teams/${id}/avatar?v=1001`);
+    // User and team namespaces are independent.
+    expect(getAvatarVersion(id)).toBe(0);
   });
 });

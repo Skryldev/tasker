@@ -84,13 +84,64 @@ impl TriggerType {
     }
 }
 
+/// The Phase 8B integration trigger vocabulary (Git events). These persist
+/// into the shared `domain_events` store with `origin = 'integration'` and
+/// are the only trigger values integration-scoped rules may use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntegrationTriggerType {
+    GitPush,
+    GitPullRequestOpened,
+    GitPullRequestMerged,
+    GitPullRequestClosed,
+    GitBranchCreated,
+    GitBranchDeleted,
+    GitReleasePublished,
+}
+
+impl IntegrationTriggerType {
+    /// Parse the serialized trigger name (API input validation).
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "git_push" => Some(Self::GitPush),
+            "git_pull_request_opened" => Some(Self::GitPullRequestOpened),
+            "git_pull_request_merged" => Some(Self::GitPullRequestMerged),
+            "git_pull_request_closed" => Some(Self::GitPullRequestClosed),
+            "git_branch_created" => Some(Self::GitBranchCreated),
+            "git_branch_deleted" => Some(Self::GitBranchDeleted),
+            "git_release_published" => Some(Self::GitReleasePublished),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::GitPush => "git_push",
+            Self::GitPullRequestOpened => "git_pull_request_opened",
+            Self::GitPullRequestMerged => "git_pull_request_merged",
+            Self::GitPullRequestClosed => "git_pull_request_closed",
+            Self::GitBranchCreated => "git_branch_created",
+            Self::GitBranchDeleted => "git_branch_deleted",
+            Self::GitReleasePublished => "git_release_published",
+        }
+    }
+}
+
 /// Where an event came from. `Automation` events must carry their causing
-/// execution id; they are never evaluated by rules in Phase 8A.
+/// execution id; they are never evaluated by rules (Phase 8B policy).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventOrigin {
     User,
+    /// Events the Rules Engine itself produced. Never evaluated by rules
+    /// (loop prevention); recorded for audit.
     Automation,
+    /// Externally originated (Phase 8B: Git providers). Evaluated by rules
+    /// (never impersonating a user); the provider login stays in the
+    /// normalized payload as `external_actor` and never enters `users`.
+    Integration,
 }
 
 impl EventOrigin {
@@ -99,6 +150,7 @@ impl EventOrigin {
         match self {
             Self::User => "user",
             Self::Automation => "automation",
+            Self::Integration => "integration",
         }
     }
 }
@@ -187,6 +239,28 @@ impl DomainEvent {
 // Trigger classification (pure; the Task 3 mutation hooks call these)
 // ---------------------------------------------------------------------------
 
+/// Which field namespace a trigger's condition may reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TriggerNamespace {
+    /// Task-scoped triggers reference `task.*` / `event.*` fields.
+    Task,
+    /// Integration triggers reference `integration.*` fields only.
+    Integration,
+}
+
+/// Resolve the condition-field namespace for a trigger string (checks both
+/// vocabularies; unknown triggers are rejected upstream).
+#[must_use]
+pub fn trigger_namespace(trigger: &str) -> Option<TriggerNamespace> {
+    if TriggerType::parse(trigger).is_some() {
+        Some(TriggerNamespace::Task)
+    } else if IntegrationTriggerType::parse(trigger).is_some() {
+        Some(TriggerNamespace::Integration)
+    } else {
+        None
+    }
+}
+
 /// Classification of an assignee change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssignmentDelta {
@@ -219,12 +293,13 @@ pub fn value_changed(previous: &str, new: &str) -> bool {
     previous != new
 }
 
-/// Loop-prevention policy: only user-origin events are evaluated. Determined
-/// at rule selection; automation-origin events are recorded for audit and
-/// skipped.
+/// Rules-evaluation policy per origin (Phase 8B amendment): user-origin and
+/// integration-origin events are evaluated; automation-origin events (events
+/// the engine itself produced) are recorded for audit and skipped — they can
+/// never trigger recursive evaluation. Determined at rule selection.
 #[must_use]
 pub fn should_evaluate(origin: EventOrigin) -> bool {
-    matches!(origin, EventOrigin::User)
+    matches!(origin, EventOrigin::User | EventOrigin::Integration)
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +360,36 @@ mod tests {
     fn only_user_origin_events_are_evaluated() {
         assert!(should_evaluate(EventOrigin::User));
         assert!(!should_evaluate(EventOrigin::Automation));
+    }
+
+    #[test]
+    fn integration_origin_events_are_evaluated_phase8b() {
+        // Phase 8B policy amendment: integration-origin events participate
+        // in Rules Evaluation (never impersonating users; provider logins
+        // stay in the normalized payload).
+        assert!(should_evaluate(EventOrigin::Integration));
+    }
+
+    #[test]
+    fn integration_trigger_vocabulary_parses() {
+        for trigger in [
+            "git_push",
+            "git_pull_request_opened",
+            "git_pull_request_merged",
+            "git_pull_request_closed",
+            "git_branch_created",
+            "git_branch_deleted",
+            "git_release_published",
+        ] {
+            assert!(IntegrationTriggerType::parse(trigger).is_some(), "{trigger}");
+            assert_eq!(
+                IntegrationTriggerType::parse(trigger)
+                    .expect("parse")
+                    .as_str(),
+                trigger
+            );
+        }
+        assert!(IntegrationTriggerType::parse("github_pushed").is_none());
     }
 
     // -- event state serialization -------------------------------------------

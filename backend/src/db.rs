@@ -254,6 +254,18 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
         "0015_instance_users_timezone",
         include_str!("../migrations/postgres/0015_instance_users_timezone.sql"),
     ),
+    (
+        "0016_integrations",
+        include_str!("../migrations/postgres/0016_integrations.sql"),
+    ),
+    (
+        "0017_integration_event_vocabulary",
+        include_str!("../migrations/postgres/0017_integration_event_vocabulary.sql"),
+    ),
+    (
+        "0018_team_guests",
+        include_str!("../migrations/postgres/0018_team_guests.sql"),
+    ),
 ];
 const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -312,6 +324,18 @@ const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
         "0015_instance_users_timezone",
         include_str!("../migrations/mysql/0015_instance_users_timezone.sql"),
     ),
+    (
+        "0016_integrations",
+        include_str!("../migrations/mysql/0016_integrations.sql"),
+    ),
+    (
+        "0017_integration_event_vocabulary",
+        include_str!("../migrations/mysql/0017_integration_event_vocabulary.sql"),
+    ),
+    (
+        "0018_team_guests",
+        include_str!("../migrations/mysql/0018_team_guests.sql"),
+    ),
 ];
 const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -365,6 +389,18 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
         "0015_instance_users_timezone",
         include_str!("../migrations/sqlite/0015_instance_users_timezone.sql"),
+    ),
+    (
+        "0016_integrations",
+        include_str!("../migrations/sqlite/0016_integrations.sql"),
+    ),
+    (
+        "0017_integration_event_vocabulary",
+        include_str!("../migrations/sqlite/0017_integration_event_vocabulary.sql"),
+    ),
+    (
+        "0018_team_guests",
+        include_str!("../migrations/sqlite/0018_team_guests.sql"),
     ),
 ];
 
@@ -908,6 +944,7 @@ mod tests {
             static_dir: None,
             log_format_json: false,
             rules_worker: crate::config::RulesWorkerConfig::default(),
+            integrations_key: Some(vec![19u8; 32]),
             attachments: crate::config::AttachmentsConfig {
                 mode: crate::config::AttachmentsMode::Disabled,
                 local_dir: "data/attachments".into(),
@@ -933,7 +970,7 @@ mod tests {
         .await
         .unwrap();
         let migrations = migrations_for(Driver::Sqlite);
-        assert_eq!(migrations.len(), 13, "expected migrations 0001..0015");
+        assert_eq!(migrations.len(), 16, "expected migrations 0001..0018");
         // Build the PRE-0005 schema: 0001..0004 only.
         for (version, sql) in &migrations[..4] {
             for statement in split_statements(sql) {

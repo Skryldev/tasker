@@ -75,7 +75,7 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
     // The admin assigns the member at creation so the member can work it.
     // The admin stays the reporter: one person must not be both assignee
     // and reporter (identity invariant).
-    await page.getByTestId("create-task").click();
+    await page.getByTestId("create-task-board").first().click();
     await page.getByTestId("task-title-input").fill("Workflow task");
     await page.request.get(`/api/v1/teams/${teamId}/members`);
     await page.getByRole("combobox", { name: "Assignee" }).click();

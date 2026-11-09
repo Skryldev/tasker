@@ -191,7 +191,7 @@ pub async fn require_instance_owner(
         Ok(())
     } else {
         Err(AppError::Forbidden(
-            "only an instance Owner can manage Tasker accounts".into(),
+            "only an instance Owner can manage Tasker accounts",
         ))
     }
 }

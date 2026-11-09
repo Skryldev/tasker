@@ -62,6 +62,12 @@ pub enum Field {
     EventNewStatus,
     EventPreviousPriority,
     EventNewPriority,
+    IntegrationProvider,
+    IntegrationEventType,
+    IntegrationBranch,
+    IntegrationRepository,
+    IntegrationActor,
+    IntegrationCommitCount,
 }
 
 impl Field {
@@ -76,6 +82,12 @@ impl Field {
             "event.new_status" => Some(Self::EventNewStatus),
             "event.previous_priority" => Some(Self::EventPreviousPriority),
             "event.new_priority" => Some(Self::EventNewPriority),
+            "integration.provider" => Some(Self::IntegrationProvider),
+            "integration.event_type" => Some(Self::IntegrationEventType),
+            "integration.branch" => Some(Self::IntegrationBranch),
+            "integration.repository" => Some(Self::IntegrationRepository),
+            "integration.actor" => Some(Self::IntegrationActor),
+            "integration.commit_count" => Some(Self::IntegrationCommitCount),
             _ => None,
         }
     }
@@ -92,7 +104,27 @@ impl Field {
             Self::EventNewStatus => "event.new_status",
             Self::EventPreviousPriority => "event.previous_priority",
             Self::EventNewPriority => "event.new_priority",
+            Self::IntegrationProvider => "integration.provider",
+            Self::IntegrationEventType => "integration.event_type",
+            Self::IntegrationBranch => "integration.branch",
+            Self::IntegrationRepository => "integration.repository",
+            Self::IntegrationActor => "integration.actor",
+            Self::IntegrationCommitCount => "integration.commit_count",
         }
+    }
+
+    /// Whether the field belongs to the integration namespace.
+    #[must_use]
+    pub fn is_integration(self) -> bool {
+        matches!(
+            self,
+            Self::IntegrationProvider
+                | Self::IntegrationEventType
+                | Self::IntegrationBranch
+                | Self::IntegrationRepository
+                | Self::IntegrationActor
+                | Self::IntegrationCommitCount
+        )
     }
 
     /// The value domain a field draws from; operands are type-checked
@@ -106,6 +138,12 @@ impl Field {
                 ValueKind::Priority
             }
             Self::TaskAssigneeId | Self::TaskReporterId | Self::EventActorId => ValueKind::Uuid,
+            Self::IntegrationProvider
+            | Self::IntegrationEventType
+            | Self::IntegrationBranch
+            | Self::IntegrationRepository
+            | Self::IntegrationActor
+            | Self::IntegrationCommitCount => ValueKind::Text,
         }
     }
 }
@@ -115,6 +153,7 @@ enum ValueKind {
     Status,
     Priority,
     Uuid,
+    Text,
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +169,7 @@ pub enum Scalar {
     Status(&'static str),
     Priority(&'static str),
     Uuid(String),
+    Text(String),
 }
 
 impl Scalar {
@@ -137,7 +177,7 @@ impl Scalar {
         match self {
             Self::Null => None,
             Self::Status(s) | Self::Priority(s) => Some(s),
-            Self::Uuid(u) => Some(u),
+            Self::Uuid(u) | Self::Text(u) => Some(u),
         }
     }
 }
@@ -304,6 +344,17 @@ fn scalar_from_string(s: &str, kind: ValueKind) -> Result<Scalar, String> {
         ValueKind::Uuid => Uuid::parse_str(s)
             .map(|u| Scalar::Uuid(u.to_string()))
             .map_err(|_| format!("malformed UUID `{s}`")),
+        // Integration condition fields are free text (provider names,
+        // branches, repositories, actor logins, event types).
+        ValueKind::Text => {
+            // Bounded per the Task 1 architecture: integration text operands
+            // (provider names, branches, repos, actor logins) cap at 255
+            // characters — mirroring the users table convention.
+            if s.chars().count() > 255 {
+                return Err(format!("text operand exceeds 255 characters"));
+            }
+            Ok(Scalar::Text(s.to_string()))
+        }
     }
 }
 
@@ -315,10 +366,32 @@ fn scalar_from_value(raw: &Value, kind: ValueKind) -> Result<Scalar, String> {
     }
 }
 
-fn build_compare(raw: &CompareRaw) -> Result<Compare, FieldError> {
+fn build_compare(raw: &CompareRaw, namespace: super::events::TriggerNamespace) -> Result<Compare, FieldError> {
     let fe = |message: String| FieldError::new("condition", message);
     let field = Field::parse(&raw.field)
         .ok_or_else(|| fe(format!("unknown condition field `{}`", raw.field)))?;
+    // Namespace consistency: task triggers validate against task fields,
+    // integration triggers against integration fields. A mixed condition is
+    // rejected at write time — it could never be evaluated.
+    let field_namespace = if field.is_integration() {
+        super::events::TriggerNamespace::Integration
+    } else {
+        super::events::TriggerNamespace::Task
+    };
+    if field_namespace != namespace {
+        return Err(fe(format!(
+            "field `{}` belongs to the {} namespace and cannot be used by a {} rule",
+            raw.field,
+            match field_namespace {
+                super::events::TriggerNamespace::Task => "task",
+                super::events::TriggerNamespace::Integration => "integration",
+            },
+            match namespace {
+                super::events::TriggerNamespace::Task => "task",
+                super::events::TriggerNamespace::Integration => "integration",
+            },
+        )));
+    }
     let op_name = raw.op.as_str();
     let operand = match raw.op {
         CmpOpRaw::Eq | CmpOpRaw::Neq => {
@@ -391,6 +464,7 @@ fn build_condition(
     raw: &ConditionRaw,
     depth: usize,
     nodes: &mut usize,
+    namespace: super::events::TriggerNamespace,
 ) -> Result<Condition, FieldError> {
     if depth > limits::CONDITION_MAX_DEPTH {
         return Err(FieldError::new(
@@ -422,7 +496,7 @@ fn build_condition(
             let inner = r
                 .all
                 .iter()
-                .map(|c| build_condition(c, depth + 1, nodes))
+                .map(|c| build_condition(c, depth + 1, nodes, namespace))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Condition::All(inner))
         }
@@ -436,15 +510,15 @@ fn build_condition(
             let inner = r
                 .any
                 .iter()
-                .map(|c| build_condition(c, depth + 1, nodes))
+                .map(|c| build_condition(c, depth + 1, nodes, namespace))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Condition::Any(inner))
         }
         ConditionRaw::Not(r) => {
-            let inner = build_condition(&r.not, depth + 1, nodes)?;
+            let inner = build_condition(&r.not, depth + 1, nodes, namespace)?;
             Ok(Condition::Not(Box::new(inner)))
         }
-        ConditionRaw::Cmp(r) => build_compare(r).map(Condition::Compare),
+        ConditionRaw::Cmp(r) => build_compare(r, namespace).map(Condition::Compare),
     }
 }
 
@@ -453,13 +527,29 @@ fn build_condition(
 // ---------------------------------------------------------------------------
 
 impl Condition {
-    /// Parse and fully validate a serialized condition.
+    /// Parse and fully validate a serialized condition for a **task** rule
+    /// (task/event fields only). See [`Self::from_json_str_for`] for the
+    /// namespace selection contract.
     ///
     /// The serialized-size gate runs *before* parsing so oversized input can
     /// never reach the deserializer; `serde_json`'s default 128-level
     /// recursion limit additionally bounds parser stack depth for deep
     /// nesting, after which the tree limits take over.
     pub fn from_json_str(json: &str) -> Result<Self, RuleError> {
+        Self::from_json_str_for(json, crate::rules::events::TriggerNamespace::Task)
+    }
+
+    /// Parse and fully validate a serialized condition bound to a trigger
+    /// namespace: task triggers validate against task/event fields,
+    /// integration triggers against integration fields. Mixed conditions are
+    /// rejected at write time — they could never be evaluated.
+    ///
+    /// The serialized-size gate runs *before* parsing so oversized input can
+    /// never reach the deserializer.
+    pub fn from_json_str_for(
+        json: &str,
+        namespace: super::events::TriggerNamespace,
+    ) -> Result<Self, RuleError> {
         if json.chars().count() > limits::CONDITION_JSON_MAX_CHARS {
             return Err(RuleError(vec![FieldError::new(
                 "condition",
@@ -472,7 +562,7 @@ impl Condition {
         let raw: ConditionRaw = serde_json::from_str(json)
             .map_err(|e| RuleError(vec![FieldError::new("condition", e.to_string())]))?;
         let mut nodes = 0usize;
-        let condition = build_condition(&raw, 1, &mut nodes).map_err(RuleError::from)?;
+        let condition = build_condition(&raw, 1, &mut nodes, namespace).map_err(RuleError::from)?;
         // The canonical (compact, key-ordered) form is stored at rest; it
         // must itself respect the cap. Canonical output is derived from the
         // same input that passed the gate, so this is a defensive check.
@@ -551,6 +641,7 @@ fn scalar_to_value(scalar: &Scalar) -> Value {
         Scalar::Null => Value::Null,
         Scalar::Status(s) | Scalar::Priority(s) => Value::String((*s).into()),
         Scalar::Uuid(u) => Value::String(u.clone()),
+        Scalar::Text(t) => Value::String(t.clone()),
     }
 }
 
@@ -560,6 +651,7 @@ impl Compare {
             Scalar::Null => value.is_none(),
             Scalar::Status(s) | Scalar::Priority(s) => value.is_some_and(|v| v == *s),
             Scalar::Uuid(u) => value.is_some_and(|v| v == u),
+            Scalar::Text(t) => value.is_some_and(|v| v == t),
         }
     }
 
@@ -623,6 +715,15 @@ impl EvalContext<'_> {
             Field::EventNewStatus => self.event_new_status,
             Field::EventPreviousPriority => self.event_previous_priority,
             Field::EventNewPriority => self.event_new_priority,
+            // Integration fields (Phase 8B) are resolved from the
+            // normalized event payload on the integration trigger path; the
+            // rules-engine context carries no value for them yet.
+            Field::IntegrationProvider
+            | Field::IntegrationEventType
+            | Field::IntegrationBranch
+            | Field::IntegrationRepository
+            | Field::IntegrationActor
+            | Field::IntegrationCommitCount => None,
         }
     }
 }
@@ -867,10 +968,10 @@ mod tests {
             })
         };
         let mut nodes = 0usize;
-        let ok = build_condition(&build_raw(limits::CONDITION_MAX_NODES - 1), 1, &mut nodes);
+        let ok = build_condition(&build_raw(limits::CONDITION_MAX_NODES - 1), 1, &mut nodes, crate::rules::events::TriggerNamespace::Task);
         assert!(ok.is_ok());
         let mut nodes = 0usize;
-        let err = build_condition(&build_raw(limits::CONDITION_MAX_NODES), 1, &mut nodes)
+        let err = build_condition(&build_raw(limits::CONDITION_MAX_NODES), 1, &mut nodes, crate::rules::events::TriggerNamespace::Task)
             .expect_err("exceeds node cap");
         assert!(err.message.contains("maximum of 100 nodes"));
     }
@@ -964,5 +1065,67 @@ mod tests {
         assert_eq!(c, reparsed);
         // Canonical form is compact: strictly shorter than the spaced input.
         assert!(canonical.chars().count() < json.chars().count());
+    }
+}
+
+#[cfg(test)]
+mod namespace_tests {
+    use super::*;
+    use crate::rules::events::{IntegrationTriggerType, TriggerNamespace};
+
+    #[test]
+    fn integration_conditions_validate_with_integration_namespace() {
+        let json = r#"{"field":"integration.provider","op":"EQ","value":"github"}"#;
+        let c = Condition::from_json_str_for(json, TriggerNamespace::Integration)
+            .expect("integration condition valid");
+        assert!(c.to_json_str().contains("integration.provider"));
+    }
+
+    #[test]
+    fn task_fields_rejected_on_integration_triggers() {
+        let json = r#"{"field":"task.status","op":"EQ","value":"todo"}"#;
+        let err = Condition::from_json_str_for(json, TriggerNamespace::Integration)
+            .expect_err("task field on integration trigger");
+        assert!(err.0[0].message.contains("namespace"), "{err}");
+    }
+
+    #[test]
+    fn integration_fields_rejected_on_task_triggers() {
+        // The default from_json_str is task-scoped.
+        let json = r#"{"field":"integration.provider","op":"EQ","value":"github"}"#;
+        let err = Condition::from_json_str(json).expect_err("integration field on task trigger");
+        assert!(err.0[0].message.contains("namespace"), "{err}");
+    }
+
+    #[test]
+    fn integration_text_values_bounded() {
+        let long = "a".repeat(256);
+        let json = format!(
+            r#"{{"field":"integration.branch","op":"EQ","value":"{long}"}}"#
+        );
+        assert!(
+            Condition::from_json_str_for(&json, TriggerNamespace::Integration).is_err(),
+            "text operand over 255 chars rejected"
+        );
+        let exact = "a".repeat(255);
+        let json = format!(
+            r#"{{"field":"integration.branch","op":"EQ","value":"{exact}"}}"#
+        );
+        assert!(
+            Condition::from_json_str_for(&json, TriggerNamespace::Integration).is_ok(),
+            "255-char operand accepted"
+        );
+    }
+
+    #[test]
+    fn integration_in_lists_use_text_operands() {
+        let json = r#"{"field":"integration.repository","op":"IN",
+                       "values":["octocat/hello-world","group/project"]}"#;
+        let c = Condition::from_json_str_for(
+            json,
+            TriggerNamespace::Integration,
+        )
+        .expect("valid IN list");
+        assert!(c.to_json_str().contains("octocat/hello-world"));
     }
 }

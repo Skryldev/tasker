@@ -100,9 +100,16 @@ function eventDetail(field: string | null, oldValue: string | null | undefined, 
 export function TaskDetailPanel({
   task,
   onClose,
+  hidden,
+  onOpenFullPage,
 }: {
   task: Task | undefined;
   onClose: () => void;
+  /** Bug 3: when the full page is open the panel stays MOUNTED but out of
+      view and out of the tab order — state survives the round trip. */
+  hidden?: boolean;
+  /** Bug 1: navigate to the full page (the panel does not own the route). */
+  onOpenFullPage?: () => void;
 }) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -114,6 +121,25 @@ export function TaskDetailPanel({
   const isClosed = task?.status === "closed";
   const deleteTask = useDeleteTask();
   const updateTaskBody = useUpdateTaskBody();
+  // Bug 1: first-visit discoverability — the expand affordance pulses once
+  // (150ms), never again (localStorage flag). Respects reduced motion via
+  // the Phase 10 global rule (animations disabled there).
+  const [pulseOnce, setPulseOnce] = useState(
+    () => localStorage.getItem("tasker.fullPageHintShown") !== "1",
+  );
+  const markHintShown = () => {
+    if (pulseOnce) {
+      localStorage.setItem("tasker.fullPageHintShown", "1");
+      setPulseOnce(false);
+    }
+  };
+  const openFullPage = () => {
+    markHintShown();
+    if (task) {
+      if (onOpenFullPage) onOpenFullPage();
+      else navigate(`/teams/${task.team_id}/projects/${task.project_id}/tasks/${task.id}`);
+    }
+  };
 
   if (!task) {
     return (
@@ -145,7 +171,11 @@ export function TaskDetailPanel({
   };
 
   return (
-    <div className="flex h-full flex-col" data-testid="task-detail">
+    <div
+      className={cn("flex h-full flex-col", hidden && "hidden")}
+      data-testid="task-detail"
+      aria-hidden={hidden || undefined}
+    >
       {/* Sticky header: identity, title, overflow actions. */}
       <header className="shrink-0 border-b p-4">
         <div className="flex items-start justify-between gap-2">
@@ -165,19 +195,26 @@ export function TaskDetailPanel({
               {task.title}
             </h2>
           </div>
-          <DropdownMenu>
+          <div className="flex items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Open task as full page"
+              title="Open full page (⌘⇧O)"
+              onClick={openFullPage}
+              data-testid="expand-full-page"
+              className={pulseOnce ? "animate-[tasker-pulse_150ms_ease-out_2]" : undefined}
+            >
+              <Maximize2 />
+            </Button>
+            <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon-sm" aria-label="Task actions" data-testid="task-actions">
                 <MoreHorizontal />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuItem
-                onSelect={() =>
-                  navigate(`/teams/${task.team_id}/projects/${task.project_id}/tasks/${task.id}`)
-                }
-                data-testid="open-full-page"
-              >
+              <DropdownMenuItem onSelect={openFullPage} data-testid="open-full-page">
                 <Maximize2 /> Open full page
               </DropdownMenuItem>
               {isClosed ? null : (
@@ -197,7 +234,8 @@ export function TaskDetailPanel({
                 <Trash2 /> Delete task
               </DropdownMenuItem>
             </DropdownMenuContent>
-          </DropdownMenu>
+            </DropdownMenu>
+          </div>
         </div>
       </header>
 

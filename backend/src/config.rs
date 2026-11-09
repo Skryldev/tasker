@@ -67,6 +67,10 @@ pub struct Config {
     /// deployments that do not use MFA). Present-but-malformed => startup
     /// fails: a broken key must never degrade silently to plaintext.
     pub mfa_encryption_key: Option<Vec<u8>>,
+    /// AES-256-GCM key encrypting integration webhook secrets. Same rules
+    /// as the MFA key: 64 hex characters = 32 bytes; absent => integration
+    /// credential operations fail closed; malformed => startup fails.
+    pub integrations_key: Option<Vec<u8>>,
     /// Independent HMAC-SHA-256 pepper keying recovery-code digests
     /// (ADR-0012). Never derived from `mfa_encryption_key`; never stored in
     /// or derivable from the database. Absent => recovery-code flows fail
@@ -282,6 +286,28 @@ impl Config {
             Err(_) => None,
         };
 
+        let integrations_key = match std::env::var("TASKER_INTEGRATIONS_KEY") {
+            Ok(raw) => {
+                let hex_key = raw.trim();
+                if hex_key.len() != 64 || !hex_key.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return Err(crate::error::ConfigError(
+                        "TASKER_INTEGRATIONS_KEY must be exactly 64 hex characters (32 bytes)"
+                            .to_string(),
+                    ));
+                }
+                let bytes = (0..32)
+                    .map(|i| u8::from_str_radix(&hex_key[i * 2..i * 2 + 2], 16))
+                    .collect::<Result<Vec<u8>, _>>()
+                    .map_err(|e| {
+                        crate::error::ConfigError(format!(
+                            "TASKER_INTEGRATIONS_KEY is not valid hex: {e}"
+                        ))
+                    })?;
+                Some(bytes)
+            }
+            Err(_) => None,
+        };
+
         let allowed_origins = env_or("TASKER_ALLOWED_ORIGINS", String::new())?
             .split(',')
             .map(str::trim)
@@ -330,6 +356,7 @@ impl Config {
             login_rate_limit_per_min,
             mfa_encryption_key,
             mfa_recovery_pepper,
+            integrations_key,
             body_limit_bytes,
             static_dir,
             log_format_json,
