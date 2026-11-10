@@ -227,24 +227,39 @@ export default function DashboardPage({ teamId: teamIdProp }: { teamId?: string 
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Throughput — current vs previous
           </h2>
-          <svg viewBox="0 0 220 90" className="h-24 w-full" role="img" aria-label={`Bar chart: ${k.throughput} closed in this window versus ${k.throughput_prev} in the previous one`}>
-            {[k.throughput, k.throughput_prev].map((v, i) => {
-              const max = Math.max(1, k.throughput, k.throughput_prev);
-              const h = (v / max) * 60;
-              const x = 40 + i * 90;
-              return (
-                <g key={i}>
-                  <rect x={x} y={70 - h} width={44} height={h} rx={4} className="fill-primary" opacity={i === 0 ? 1 : 0.45} />
-                  <text x={x + 22} y={82} textAnchor="middle" className="fill-muted-foreground text-[8px]">
-                    {i === 0 ? "current" : "previous"}
-                  </text>
-                  <text x={x + 22} y={70 - h - 4} textAnchor="middle" className="fill-foreground text-[9px] font-semibold">
-                    {v}
-                  </text>
-                </g>
-              );
-            })}
-          </svg>
+          {/* Bug 6 (Phase 13.5): all-zero data renders an honest empty state —
+              baseline axis + muted label — instead of invisible zero bars. */}
+          {k.throughput === 0 && k.throughput_prev === 0 ? (
+            <div
+              className="flex h-24 flex-col items-center justify-center gap-1"
+              data-testid="throughput-empty"
+            >
+              <svg viewBox="0 0 220 24" className="h-6 w-full" role="img" aria-label="No tasks were closed in this period or the previous one">
+                <line x1={10} y1={18} x2={210} y2={18} className="stroke-border" strokeWidth={1} />
+              </svg>
+              <p className="text-2xs text-muted-foreground">No data for this period</p>
+            </div>
+          ) : (
+            <svg viewBox="0 0 220 90" className="h-24 w-full" role="img" aria-label={`Bar chart: ${k.throughput} closed in this window versus ${k.throughput_prev} in the previous one`}>
+              <line x1={10} y1={70.5} x2={210} y2={70.5} className="stroke-border" strokeWidth={1} />
+              {[k.throughput, k.throughput_prev].map((v, i) => {
+                const max = Math.max(1, k.throughput, k.throughput_prev);
+                const h = (v / max) * 60;
+                const x = 40 + i * 90;
+                return (
+                  <g key={i}>
+                    <rect x={x} y={70 - h} width={44} height={Math.max(h, v > 0 ? 2 : 0)} rx={4} className="fill-primary" opacity={i === 0 ? 1 : 0.45} />
+                    <text x={x + 22} y={82} textAnchor="middle" className="fill-muted-foreground text-[8px]">
+                      {i === 0 ? "current" : "previous"}
+                    </text>
+                    <text x={x + 22} y={70 - h - 4} textAnchor="middle" className="fill-foreground text-[9px] font-semibold">
+                      {v}
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+          )}
         </section>
 
         {/* Priority mix: horizontal bars. */}

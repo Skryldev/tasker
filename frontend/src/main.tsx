@@ -38,9 +38,6 @@ const WorkloadPage = lazy(() =>
 const CapacityPage = lazy(() =>
   import("@/pages/CapacityPage").then((m) => ({ default: m.CapacityPage })),
 );
-const TimelinePage = lazy(() =>
-  import("@/pages/TimelinePage").then((m) => ({ default: m.TimelinePage })),
-);
 const DashboardPage = lazy(() =>
   import("@/pages/DashboardPage").then((m) => ({ default: m.default })),
 );
@@ -89,7 +86,6 @@ const router = createBrowserRouter([
       { path: "projects/:projectId/list", element: <ProjectPage /> },
       { path: "projects/:projectId/board", element: <ProjectPage /> },
       { path: "projects/:projectId/timeline", element: <ProjectPage /> },
-      { path: "projects/:projectId/timeline", element: <TimelinePage /> },
       { path: "teams/new", element: <CreateTeamPage /> },
       { path: "teams/:teamId/workload", element: <WorkloadPage /> },
       { path: "teams/:teamId/capacity", element: <CapacityPage /> },

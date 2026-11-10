@@ -1,17 +1,19 @@
-import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { KeyRound, UserRound, Users } from "lucide-react";
 import { lazy, Suspense } from "react";
 import { useAuth } from "@/lib/auth";
 import { Skeleton } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 /**
- * Phase 13 Bug 5: a coherent Settings hub. Instance-scoped (team
- * independent): Account / Security live here (moved from /account);
- * Users (Owner-only) relocates from the left sidebar.
+ * Settings hub (Phase 13 Bug 5; Phase 13.5 Bug 2): hash-driven sections.
  *
- * Sections render in-page (anchors), so ⌘, lands on the hub and every
- * section has a stable URL (#account, #security, #users).
+ * Scroll mechanism: the page scrolls inside AppShell's `main` container
+ * (`#main-content`), not the window, so native `#hash` anchors do nothing.
+ * Menu items scroll the target section into view within that container
+ * (smooth, instant under prefers-reduced-motion), update the hash, and a
+ * scroll spy highlights the active section while scrolling.
  */
 
 const AccountPage = lazy(() =>
@@ -34,19 +36,82 @@ const SECTIONS: SettingsSection[] = [
   { id: "users", label: "Users", icon: Users, ownerOnly: true },
 ];
 
+function scrollToSection(id: string): void {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
+}
+
 export default function SettingsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const isOwner = user?.instance_role === "owner";
-
-  // Default hash → #account on mount (no scroll hijack afterwards).
-  useEffect(() => {
-    if (!window.location.hash) {
-      navigate("/settings#account", { replace: true });
-    }
-  }, [navigate]);
+  const [active, setActive] = useState("account");
+  const spyLock = useRef(false);
+  const spyTimer = useRef<number | null>(null);
 
   const visible = SECTIONS.filter((s) => !s.ownerOnly || isOwner);
+
+  const go = useCallback(
+    (id: string) => {
+      scrollToSection(id);
+      navigate(`/settings#${id}`, { replace: true });
+    },
+    [navigate],
+  );
+
+  // Direct navigation to /settings#users scrolls on mount (and after the
+  // lazy sections have rendered).
+  useEffect(() => {
+    const hash = location.hash.replace("#", "");
+    if (!hash) return undefined;
+    const t = window.setTimeout(() => scrollToSection(hash), 250);
+    return () => window.clearTimeout(t);
+  }, [location.hash]);
+
+  // Scroll spy: the section intersecting the upper band of the scroll
+  // container becomes the active menu item.
+  useEffect(() => {
+    const container = document.getElementById("main-content");
+    if (!container) return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (spyLock.current) return;
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setActive(entry.target.id);
+          }
+        }
+      },
+      { root: container, rootMargin: "-20% 0px -60% 0px" },
+    );
+    for (const s of visible) {
+      const el = document.getElementById(s.id);
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [isOwner]);
+
+  // Manual scrolling suppresses spy updates for a moment so a scrolled-to
+  // section stays highlighted through intermediate sections.
+  useEffect(() => {
+    const container = document.getElementById("main-content");
+    if (!container) return undefined;
+    const onScroll = () => {
+      spyLock.current = true;
+      if (spyTimer.current) window.clearTimeout(spyTimer.current);
+      spyTimer.current = window.setTimeout(() => {
+        spyLock.current = false;
+      }, 600);
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      container.removeEventListener("scroll", onScroll);
+      if (spyTimer.current) window.clearTimeout(spyTimer.current);
+    };
+  }, []);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl gap-6 p-4" data-testid="settings-page">
@@ -55,13 +120,21 @@ export default function SettingsPage() {
         <ul className="sticky top-4 flex flex-col gap-0.5">
           {visible.map((s) => (
             <li key={s.id}>
-              <a
-                href={`#/settings#${s.id}`}
-                className="flex h-9 items-center gap-2.5 rounded-md px-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              <button
+                type="button"
+                onClick={() => go(s.id)}
+                aria-current={active === s.id ? "true" : undefined}
+                className={cn(
+                  "flex h-9 w-full items-center gap-2.5 rounded-md px-2 text-sm transition-colors duration-100",
+                  active === s.id
+                    ? "bg-primary/10 font-medium text-primary"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                )}
+                data-testid={`settings-nav-${s.id}`}
               >
                 <s.icon className="h-4 w-4" />
                 {s.label}
-              </a>
+              </button>
             </li>
           ))}
         </ul>
@@ -75,7 +148,7 @@ export default function SettingsPage() {
           </p>
         </header>
 
-        <section id="account" aria-label="Account" className="scroll-mt-16">
+        <section id="account" aria-label="Account" className="scroll-mt-4">
           <Suspense fallback={<Skeleton className="h-64 w-full" />}>
             <AccountPage />
           </Suspense>
@@ -85,7 +158,7 @@ export default function SettingsPage() {
           <section
             id="users"
             aria-label="Users"
-            className="mt-10 border-t pt-8 scroll-mt-16"
+            className="mt-10 border-t pt-8 scroll-mt-4"
           >
             <div className="mb-4 flex items-center gap-2">
               <Users className="h-4 w-4 text-muted-foreground" />

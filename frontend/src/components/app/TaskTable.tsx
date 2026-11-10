@@ -4,7 +4,8 @@ import type { Task } from "@/api/client";
 import { useUserInfo } from "@/api/hooks";
 import { Avatar } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
-import { LabelIcon, PriorityBadge, StatusBadge } from "./TaskBadges";
+import { PriorityBadge, StatusBadge } from "./TaskBadges";
+import { LabelChip } from "./LabelChip";
 import { cn, STATUS_LABELS, TASK_STATUSES, type TaskStatus } from "@/lib/utils";
 import { formatJalaliDate } from "@/lib/jalali";
 
@@ -235,14 +236,13 @@ export function TaskTable({
             ) : null}
             {/* WS5: pastel label chips tinted with the label color. */}
             {task.labels.slice(0, 2).map((l) => (
-              <span
+              <LabelChip
                 key={l.id}
-                className="hidden shrink-0 items-center gap-1 rounded-full border px-1.5 py-px text-2xs md:inline-flex"
-                style={{ backgroundColor: `${l.color}1f`, borderColor: `${l.color}55` }}
-              >
-                {l.icon ? <LabelIcon icon={l.icon} /> : null}
-                <span className="max-w-[6rem] truncate">{l.name}</span>
-              </span>
+                name={l.name}
+                color={l.color}
+                icon={l.icon}
+                className="hidden md:inline-flex max-w-[6rem]"
+              />
             ))}
           </span>
         </td>

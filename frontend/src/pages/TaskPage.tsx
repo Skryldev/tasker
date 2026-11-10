@@ -334,6 +334,10 @@ function TaskPageInner({
           />
           <dl className="mt-5 flex flex-col gap-1.5 text-2xs text-muted-foreground">
             <div className="flex justify-between gap-2">
+              <dt>Status</dt>
+              <dd className="text-foreground">{initialTask.status.replaceAll("_", " ")}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
               <dt>Created</dt>
               <dd className="text-foreground"><Timestamp value={initialTask.created_at} /></dd>
             </div>

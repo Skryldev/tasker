@@ -55,6 +55,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { LabelIcon, StatusBadge } from "./TaskBadges";
+import { LabelChip } from "./LabelChip";
 // Phase 10: the edit dialog pulls the Doran calendar stack; it is loaded on
 // first open so the eager task views do not carry it.
 const TaskDialog = lazy(() => import("./TaskDialog").then((m) => ({ default: m.TaskDialog })));
@@ -890,14 +891,7 @@ export function MetadataBand({
         task.labels.length > 0 ? (
           <span className="inline-flex items-center gap-1">
             {task.labels.map((l) => (
-              <span
-                key={l.id}
-                className={staticChipClass}
-                style={{ backgroundColor: `${l.color}1f`, borderColor: `${l.color}55` }}
-              >
-                {l.icon ? <LabelIcon icon={l.icon} /> : <span className="h-2 w-2 rounded-full" style={{ backgroundColor: l.color }} aria-hidden />}
-                {l.name}
-              </span>
+              <LabelChip key={l.id} name={l.name} color={l.color} icon={l.icon} />
             ))}
           </span>
         ) : null

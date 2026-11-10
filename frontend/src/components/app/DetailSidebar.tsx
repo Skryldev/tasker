@@ -97,11 +97,14 @@ export function DetailSidebar({
 
   return (
     <aside
-      className={cn(
-        "relative hidden shrink-0 border-l lg:block",
-        hidden && "hidden",
-      )}
-      style={{ width: `${width}px` }}
+      className="relative shrink-0 border-l lg:block"
+      style={{
+        width: `${width}px`,
+        // Bug 8 (Phase 13.5): an inline display wins over Tailwind's
+        // `lg:block`, which previously re-showed the panel on the full page
+        // despite the `hidden` class.
+        display: hidden ? "none" : undefined,
+      }}
       data-testid={testId}
       aria-hidden={hidden || undefined}
     >

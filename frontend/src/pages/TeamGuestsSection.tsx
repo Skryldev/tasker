@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Globe, Lock, MessageSquare, Search, ShieldCheck, Trash2 } from "lucide-react";
-import { api, ApiError, type GuestPermission } from "@/api/client";
+import { Search, ShieldCheck, Trash2 } from "lucide-react";
+import { api, ApiError, type TeamGuest2 } from "@/api/client";
+import { GuestPermissionDrawer } from "./GuestPermissionDrawer";
+import { PermissionBadge } from "./GuestPermissionDrawer";
 import { adminApi, type EligibleMember } from "@/api/admin-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,28 +12,12 @@ import { Avatar } from "@/components/ui/avatar";
 import { useToast } from "@/components/ui/toast";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { timeAgo } from "@/lib/utils";
-import { Label } from "@/components/ui/input";
 
 /**
  * Team guests (Phase 13 Bug 7, ADR-0018): non-members with an explicitly
  * granted permission set. Deny by default; revocation is immediate. This
  * section coexists with the Phase 3 project-viewer guest list.
  */
-
-const PERMISSION_LABELS: Record<GuestPermission["permission"], string> = {
-  view_team: "See team name & description",
-  view_project: "See the project",
-  view_task: "Open tasks",
-  comment_task: "Comment on tasks",
-  view_activity: "See task activity",
-};
-
-const GRANTABLE: GuestPermission["permission"][] = [
-  "view_project",
-  "view_task",
-  "comment_task",
-  "view_activity",
-];
 
 export function TeamGuestsSection({
   teamId,
@@ -47,6 +33,7 @@ export function TeamGuestsSection({
   const { push } = useToast();
   const { confirm, element: confirmElement } = useConfirmDialog();
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [drawerGuest, setDrawerGuest] = useState<TeamGuest2 | null>(null);
 
   const guests = useQuery({
     queryKey: ["team-guests2", teamId],
@@ -67,24 +54,6 @@ export function TeamGuestsSection({
       push("error", "Could not revoke access", error instanceof Error ? error.message : undefined),
   });
 
-  const grant = useMutation({
-    mutationFn: (vars: {
-      guestId: string;
-      permission: GuestPermission["permission"];
-      projectId?: string;
-    }) =>
-      api.grantGuestPermission(teamId, vars.guestId, {
-        permission: vars.permission,
-        scope_type: vars.permission === "view_team" ? "team" : "project",
-        project_id: vars.projectId,
-      }),
-    onSuccess: () => {
-      push("success", "Permission granted");
-      invalidate();
-    },
-    onError: (error) =>
-      push("error", "Could not grant permission", error instanceof Error ? error.message : undefined),
-  });
 
   const revokePermission = useMutation({
     mutationFn: (vars: { guestId: string; permissionId: string }) =>
@@ -155,48 +124,38 @@ export function TeamGuestsSection({
                 ) : null}
               </div>
               {/* Permission matrix: granted rows + the grant controls. */}
-              <div className="mt-2.5 flex flex-col gap-1.5">
-                {guest.permissions.map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-2.5 py-1.5 text-xs"
-                  >
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      {p.permission === "view_team" ? (
-                        <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      ) : p.permission === "comment_task" ? (
-                        <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      ) : (
-                        <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      )}
-                      <span className="truncate">
-                        {PERMISSION_LABELS[p.permission]}
-                        {p.scope_id
-                          ? ` · ${projects.find((pr) => pr.id === p.scope_id)?.name ?? p.scope_id.slice(0, 8)}`
-                          : ""}
-                      </span>
-                    </span>
-                    {canManage ? (
-                      <button
-                        type="button"
-                        aria-label={`Remove permission ${p.permission}`}
-                        onClick={() => revokePermission.mutate({ guestId: guest.guest_id, permissionId: p.id })}
-                        className="shrink-0 text-muted-foreground hover:text-destructive"
-                        data-testid={`remove-permission-${p.id}`}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
+              <div className="mt-2.5 flex flex-col gap-2">
+                <div className="flex flex-wrap gap-1.5" data-testid={`guest-badges-${guest.guest_id}`}>
+                  {guest.permissions.map((p) => (
+                    <PermissionBadge
+                      key={p.id}
+                      permission={p}
+                      onRemove={
+                        canManage
+                          ? () =>
+                              revokePermission.mutate({
+                                guestId: guest.guest_id,
+                                permissionId: p.id,
+                              })
+                          : undefined
+                      }
+                    />
+                  ))}
+                  {guest.permissions.length === 0 ? (
+                    <span className="text-2xs text-muted-foreground">No permissions granted.</span>
+                  ) : null}
+                </div>
                 {canManage ? (
-                  <GuestGrantControls
-                    projects={projects}
-                    onGrant={(permission, projectId) =>
-                      grant.mutate({ guestId: guest.guest_id, permission, projectId })
-                    }
-                    pending={grant.isPending}
-                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="self-start"
+                    onClick={() => setDrawerGuest(guest)}
+                    data-testid={`edit-permissions-${guest.guest_id}`}
+                  >
+                    <ShieldCheck /> Edit permissions
+                  </Button>
                 ) : null}
               </div>
             </li>
@@ -206,78 +165,18 @@ export function TeamGuestsSection({
       {inviteOpen ? (
         <InviteGuestDialog teamId={teamId} onOpenChange={setInviteOpen} />
       ) : null}
+      {drawerGuest ? (
+        <GuestPermissionDrawer
+          teamId={teamId}
+          guest={drawerGuest}
+          projects={projects}
+          onClose={() => setDrawerGuest(null)}
+        />
+      ) : null}
     </section>
   );
 }
 
-function GuestGrantControls({
-  projects,
-  onGrant,
-  pending,
-}: {
-  projects: { id: string; name: string }[];
-  onGrant: (permission: GuestPermission["permission"], projectId?: string) => void;
-  pending: boolean;
-}) {
-  const [permission, setPermission] = useState<GuestPermission["permission"]>("view_project");
-  const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
-  const needsProject = permission !== "view_team";
-  return (
-    <div className="flex flex-wrap items-center gap-2" data-testid="guest-grant-controls">
-      <Label htmlFor={`grant-permission`} className="sr-only">
-        Permission
-      </Label>
-      <select
-        id="grant-permission"
-        value={permission}
-        onChange={(e) => setPermission(e.target.value as GuestPermission["permission"])}
-        className="h-8 rounded-md border bg-background px-2 text-xs"
-        aria-label="Permission to grant"
-      >
-        {["view_team", ...GRANTABLE].map((p) => (
-          <option key={p} value={p}>
-            {PERMISSION_LABELS[p as GuestPermission["permission"]] ?? p}
-          </option>
-        ))}
-      </select>
-      {needsProject && projects.length > 0 ? (
-        <>
-          <Label htmlFor="grant-project" className="sr-only">
-            Project
-          </Label>
-          <select
-            id="grant-project"
-            value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
-            className="h-8 max-w-[12rem] rounded-md border bg-background px-2 text-xs"
-            aria-label="Project scope"
-          >
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </>
-      ) : null}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={pending || (needsProject && projects.length === 0)}
-        onClick={() =>
-          onGrant(
-            permission,
-            permission === "view_team" ? undefined : projectId || undefined,
-          )
-        }
-        data-testid="grant-permission-submit"
-      >
-        Grant
-      </Button>
-    </div>
-  );
-}
 
 function InviteGuestDialog({
   teamId,

@@ -141,8 +141,9 @@ test.describe.serial("Phase 13 fixes", () => {
 
     await panel.getByTestId("expand-full-page").click();
     await expect(page.getByTestId("task-page")).toBeVisible();
-    // The quick view is out of the layout: no task-panel aside.
-    await expect(page.getByTestId("task-panel")).toHaveCount(0);
+    // The quick view is out of the layout: display:none (present in DOM
+    // but hidden — inline style beats lg:block).
+    await expect(page.getByTestId("task-panel")).not.toBeVisible();
     // The page's own metadata rail is present.
     await expect(page.getByTestId("task-page-rail")).toBeVisible();
 

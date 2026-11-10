@@ -67,11 +67,72 @@ import { teamLink, WorkspaceProvider, useWorkspace } from "@/lib/workspace";
 import { teamAvatarUrl } from "@/lib/avatar-version";
 import { cn } from "@/lib/utils";
 
-function TeamSwitcher({ onNavigate }: { onNavigate?: () => void }) {
+function TeamSwitcher({
+  onNavigate,
+  collapsed,
+}: {
+  onNavigate?: () => void;
+  collapsed?: boolean;
+}) {
   const { teams, teamId } = useWorkspace();
   const [open, setOpen] = useState(false);
   const [opened, setOpened] = useState(false);
   const active = teams.data?.items.find((t) => t.id === teamId);
+
+  // Phase 13.5 Bug 1: in the collapsed rail the switcher renders the avatar
+  // ONLY — centered like every other nav icon, clipped to a 24px circle
+  // (overflow-hidden) so nothing bleeds into the main content, and the
+  // focus ring is inset so it stays within the rail.
+  const avatar = teamId ? (
+    <span className="relative flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full">
+      <Avatar
+        name={active?.name ?? "?"}
+        size="sm"
+        className="h-6 w-6 rounded-full text-2xs"
+        src={teamAvatarUrl(teamId)}
+      />
+    </span>
+  ) : (
+    <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/15 text-2xs font-bold text-primary">
+      {(active?.name ?? "?").charAt(0).toUpperCase()}
+    </span>
+  );
+
+  if (collapsed) {
+    return (
+      <DropdownMenu
+        open={open}
+        onOpenChange={(v) => {
+          setOpen(v);
+          if (v) setOpened(true);
+        }}
+      >
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            className="h-9 w-full justify-center px-0 focus-visible:ring-inset"
+            title={active?.name ?? "Select team"}
+            aria-label={`Team: ${active?.name ?? "none"}`}
+            data-testid="team-switcher"
+          >
+            {avatar}
+          </Button>
+        </DropdownMenuTrigger>
+        {opened ? (
+          <Suspense fallback={null}>
+            <TeamSwitcherMenu
+              teams={teams.data?.items ?? []}
+              activeTeamId={teamId}
+              onNavigated={() => {
+                setOpen(false);
+                onNavigate?.();
+              }}
+            />
+          </Suspense>
+        ) : null}
+      </DropdownMenu>
+    );
+  }
 
   return (
     <DropdownMenu
@@ -83,18 +144,7 @@ function TeamSwitcher({ onNavigate }: { onNavigate?: () => void }) {
     >
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="h-9 w-full justify-start gap-2 px-2" data-testid="team-switcher">
-          {teamId ? (
-            <Avatar
-              name={active?.name ?? "?"}
-              size="sm"
-              className="h-6 w-6 rounded-md text-2xs"
-              src={teamAvatarUrl(teamId)}
-            />
-          ) : (
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/15 text-2xs font-bold text-primary">
-              {(active?.name ?? "?").charAt(0).toUpperCase()}
-            </span>
-          )}
+          {avatar}
           <span className="truncate text-sm font-medium">{active?.name ?? "Select team"}</span>
         </Button>
       </DropdownMenuTrigger>
@@ -172,7 +222,7 @@ export function SidebarNav({
   const { teamId } = useWorkspace();
   return (
     <>
-      <TeamSwitcher onNavigate={onNavigate} />
+      <TeamSwitcher onNavigate={onNavigate} collapsed={collapsed} />
       <Separator className="my-2" />
       <nav className="flex flex-col gap-0.5" aria-label="Main">
         <SidebarLink linkRef={firstLinkRef} to={teamLink(teamId, "tasks")} icon={<ListTodo className="h-4 w-4" />} label="My Tasks" end onNavigate={onNavigate} collapsed={collapsed} />
@@ -284,8 +334,8 @@ function Sidebar() {
   return (
     <aside
       className={cn(
-        "flex h-full shrink-0 flex-col gap-1 overflow-hidden border-r bg-sidebar p-3 text-sidebar-foreground transition-[width] duration-200 ease-out",
-        collapsed ? "w-12" : "w-60",
+        "flex h-full shrink-0 flex-col gap-1 overflow-hidden border-r bg-sidebar text-sidebar-foreground transition-[width] duration-200 ease-out",
+        collapsed ? "w-12 px-1.5 py-3" : "w-60 p-3",
       )}
       data-testid="app-sidebar"
       aria-label="Main navigation"
@@ -296,7 +346,7 @@ function Sidebar() {
         onClick={toggle}
         aria-expanded={!collapsed}
         aria-label={collapsed ? "Expand navigation sidebar" : "Collapse navigation sidebar"}
-        className="mb-1 flex h-8 w-full items-center justify-center gap-2 rounded-md text-sidebar-foreground/70 transition-colors hover:bg-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="mb-1 flex h-8 w-full items-center justify-center gap-2 rounded-md text-sidebar-foreground/70 transition-colors hover:bg-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         data-testid="sidebar-toggle"
       >
         <PanelLeftClose className={cn("h-4 w-4 shrink-0 transition-transform duration-200", collapsed && "rotate-180")} />

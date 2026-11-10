@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarRange, KanbanSquare, ListFilter, ListTodo, Plus, Search } from "lucide-react";
@@ -18,7 +18,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { KanbanBoard } from "@/components/app/KanbanBoard";
-import { TimelinePage as TimelinePageInner } from "@/pages/TimelinePage";
+// Bug 5 (ADR-0019): the timeline is its own lazy chunk — it mounts only
+// on the /timeline route and stays out of the project chunk entirely.
+const TimelinePageInner = lazy(() =>
+  import("@/pages/TimelinePage").then((m) => ({ default: m.TimelinePage })),
+);
 import type { SwimlaneMode } from "@/components/app/KanbanBoard";
 import { TaskTable } from "@/components/app/TaskTable";
 import { TaskDetailPanel } from "@/components/app/TaskDetailPanel";
@@ -396,6 +400,7 @@ export function ProjectPage() {
               </>
             )
           ) : (
+            <div className="min-h-0 flex-1" data-testid="board-view">
             <KanbanBoard
               projectId={projectId!}
               columns={board.data?.columns}
@@ -455,10 +460,13 @@ export function ProjectPage() {
                 }
               }}
             />
+            </div>
           )}
           {view === "timeline" ? (
             <div className="min-h-0 flex-1">
-              <TimelinePageInner projectId={projectId!} />
+              <Suspense fallback={<div className="p-6 animate-pulse rounded-lg bg-muted" />}>
+                <TimelinePageInner projectId={projectId!} />
+              </Suspense>
             </div>
           ) : null}
           {isGuestProject ? null : (

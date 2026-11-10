@@ -98,7 +98,7 @@ export function AccountPage() {
 
       <Separator className="my-8" />
 
-      <section aria-label="Security" className="mb-8">
+      <section id="security" aria-label="Security" className="mb-8 scroll-mt-16">
         <h2 className="mb-3 text-sm font-semibold">Security</h2>
         <div className="mb-6">
           <MfaSettings enabled={Boolean(user?.mfa_enabled)} />

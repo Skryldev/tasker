@@ -19,7 +19,8 @@ import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Badge, Skeleton } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
-import { LabelIcon, PriorityBadge } from "./TaskBadges";
+import { PriorityBadge } from "./TaskBadges";
+import { LabelChip } from "./LabelChip";
 import { cn, PRIORITY_LABELS, STATUS_LABELS, type TaskStatus } from "@/lib/utils";
 
 function statusToClass(status: string): string {
@@ -99,14 +100,13 @@ const TaskCard = memo(function TaskCard({
           </span>
         ) : null}
         {task.labels.slice(0, 2).map((l) => (
-          <span
+          <LabelChip
             key={l.id}
-            className="inline-flex max-w-[7rem] items-center gap-1 rounded-full border px-1.5 py-0.5 text-2xs"
-            style={{ backgroundColor: `${l.color}1f`, borderColor: `${l.color}55` }}
-          >
-            {l.icon ? <LabelIcon icon={l.icon} /> : null}
-            <span className="truncate">{l.name}</span>
-          </span>
+            name={l.name}
+            color={l.color}
+            icon={l.icon}
+            className="max-w-[7rem]"
+          />
         ))}
         {task.labels.length > 2 ? (
           <span className="text-2xs text-muted-foreground">+{task.labels.length - 2}</span>
