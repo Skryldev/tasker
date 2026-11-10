@@ -145,7 +145,10 @@ pub async fn guest_has(
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/teams/{team_id}/guests2", get(list_guests).post(invite_guest))
+        .route(
+            "/teams/{team_id}/guests2",
+            get(list_guests).post(invite_guest),
+        )
         .route(
             "/teams/{team_id}/guests2/{guest_id}",
             axum::routing::delete(revoke_guest),
@@ -168,7 +171,10 @@ async fn require_guest_manager(
     user_id: &str,
 ) -> Result<crate::authorization::Membership, AppError> {
     let membership = crate::teams::require_membership(conn, team_id, user_id).await?;
-    if !matches!(membership.role, crate::authorization::Role::Owner | crate::authorization::Role::Admin) {
+    if !matches!(
+        membership.role,
+        crate::authorization::Role::Owner | crate::authorization::Role::Admin
+    ) {
         return Err(AppError::NotFound("team not found"));
     }
     Ok(membership)

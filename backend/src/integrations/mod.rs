@@ -32,6 +32,7 @@ pub enum Provider {
 }
 
 impl Provider {
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "github" => Some(Self::GitHub),
@@ -49,8 +50,8 @@ impl Provider {
     }
 }
 
-/// Limits for the integration subsystem (mirrors `rules::limits` style:
-/// application-enforced, database columns sized for the MySQL worst case).
+/// Limits for the integration subsystem (mirrors the `rules::limits` style:
+/// application-enforced, database columns sized for the `MySQL` worst case).
 pub mod limits {
     /// Maximum integration name length.
     pub const INTEGRATION_NAME_MAX_CHARS: usize = 120;
@@ -78,7 +79,10 @@ pub fn validate_integration_name(name: &str) -> Result<String, FieldError> {
     let trimmed = name.trim();
     let len = trimmed.chars().count();
     if len == 0 {
-        return Err(FieldError::new("name", "integration name must not be empty"));
+        return Err(FieldError::new(
+            "name",
+            "integration name must not be empty",
+        ));
     }
     if len > limits::INTEGRATION_NAME_MAX_CHARS {
         return Err(FieldError::new(
@@ -132,7 +136,10 @@ pub fn validate_external_repo_id(raw: &str) -> Result<String, FieldError> {
             ),
         ));
     }
-    if !trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         return Err(FieldError::new(
             "external_repo_id",
             "external repository id must be alphanumeric with `-`/`_` only",
@@ -162,10 +169,7 @@ pub fn validate_repo_full_name(raw: &str) -> Result<String, FieldError> {
             ),
         ));
     }
-    if trimmed
-        .chars()
-        .any(|c| c.is_whitespace() || c.is_control())
-    {
+    if trimmed.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return Err(FieldError::new(
             "full_name",
             "repository full name must not contain whitespace or control characters",

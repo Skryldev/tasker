@@ -268,12 +268,8 @@ async fn create_comment(
         // Phase 13 (Bug 7): a team guest may comment only with the
         // explicit `comment_task` grant for the task's project. Phase 3
         // project viewers keep the read-only rule.
-        let project_guest = crate::projects::is_project_guest(
-            &mut conn,
-            &task.project_id,
-            &user.id,
-        )
-        .await?;
+        let project_guest =
+            crate::projects::is_project_guest(&mut conn, &task.project_id, &user.id).await?;
         let granted = !project_guest
             && crate::guests::guest_has(
                 &mut conn,

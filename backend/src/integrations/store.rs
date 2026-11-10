@@ -16,9 +16,7 @@ use crate::db::{Args, Conn};
 use crate::error::AppError;
 use crate::util;
 
-use super::{
-    validate_external_repo_id, validate_repo_full_name, Integration, Provider,
-};
+use super::{Integration, Provider, validate_external_repo_id, validate_repo_full_name};
 
 /// A registered external repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,19 +190,18 @@ pub async fn register_repository(
     external_repo_id: &str,
     full_name: &str,
 ) -> Result<String, AppError> {
-    let validated_id = validate_external_repo_id(external_repo_id).map_err(crate::error::AppError::from)?;
-    let validated_name = validate_repo_full_name(full_name).map_err(crate::error::AppError::from)?;
+    let validated_id =
+        validate_external_repo_id(external_repo_id).map_err(crate::error::AppError::from)?;
+    let validated_name =
+        validate_repo_full_name(full_name).map_err(crate::error::AppError::from)?;
     // The repository's team comes from the integration row (database truth,
     // never a caller-supplied value) and anchors the composite tenant FK.
     let mut args = Args::new();
     args.s(integration_id);
     let team_id: String = conn
-        .fetch_optional(
-            "SELECT team_id FROM integrations WHERE id = ?",
-            args,
-        )
+        .fetch_optional("SELECT team_id FROM integrations WHERE id = ?", args)
         .await?
-        .ok_or_else(|| AppError::NotFound("integration not found"))?
+        .ok_or(AppError::NotFound("integration not found"))?
         .try_get("team_id")?;
     let id = util::new_id();
     let mut args = Args::new();
@@ -244,17 +241,14 @@ pub async fn map_repository_to_project(
             args,
         )
         .await?
-        .ok_or_else(|| AppError::NotFound("repository not found"))?
+        .ok_or(AppError::NotFound("repository not found"))?
         .try_get("team_id")?;
     // Verify the project belongs to the same team (service-level re-check so
     // the user sees a clean 404 instead of a constraint violation).
     let mut args = Args::new();
     args.s(project_id).s(&repo_team);
     let project_matches = conn
-        .fetch_optional(
-            "SELECT id FROM projects WHERE id = ? AND team_id = ?",
-            args,
-        )
+        .fetch_optional("SELECT id FROM projects WHERE id = ? AND team_id = ?", args)
         .await?
         .is_some();
     if !project_matches {

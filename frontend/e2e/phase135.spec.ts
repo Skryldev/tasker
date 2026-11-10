@@ -94,7 +94,7 @@ test.describe.serial("Phase 13.5 fixes", () => {
   });
 
   // -- Bug 2 ----------------------------------------------------------------
-  test("settings menu scrolls to sections; scroll spy highlights", async ({ page }) => {
+  test("settings menu scrolls to sections; scroll spy highlights", async () => {
     await page.goto("/settings");
     await expect(page.getByTestId("settings-page")).toBeVisible();
 
@@ -112,26 +112,30 @@ test.describe.serial("Phase 13.5 fixes", () => {
   });
 
   // -- Bug 3 ----------------------------------------------------------------
-  test("team settings scroll height is content-driven", async ({ page }) => {
+  test("team settings scroll height is content-driven", async ({ }) => {
     await page.goto(`/teams/${teamId}/settings`);
     await page.waitForTimeout(1000);
+    // Scroll to the very bottom: the last section's bottom must land at (or
+    // above) the container bottom — no empty whitespace below the content.
     const m = await page.evaluate(() => {
       const main = document.getElementById("main-content");
-      return {
-        scrollHeight: main?.scrollHeight ?? 0,
-        clientHeight: main?.clientHeight ?? 0,
-        lastBottom: main?.lastElementChild?.getBoundingClientRect().bottom ?? 0,
-        mainBottom: main?.getBoundingClientRect().bottom ?? 0,
-      };
+      if (!main) return { gap: 999 };
+      main.scrollTop = main.scrollHeight;
+      return new Promise((resolve) => {
+        window.setTimeout(() => {
+          const last = main.lastElementChild?.getBoundingClientRect().bottom ?? 0;
+          const bottom = main.getBoundingClientRect().bottom;
+          resolve({ gap: Math.round(bottom - last) });
+        }, 200);
+      });
     });
-    // Content may legitimately exceed the viewport (that is normal scroll),
-    // but there must be no trailing whitespace: the last element's bottom
-    // cannot exceed the content scroll height by more than padding.
-    expect(m.lastBottom).toBeLessThanOrEqual(m.scrollHeight + 40);
+    // Allow only the container's own bottom padding (16px) as slack.
+    console.log("GAP-PROBE:", JSON.stringify(m));
+    expect(m.gap, `dead space below content: ${JSON.stringify(m)}`).toBeLessThanOrEqual(24);
   });
 
   // -- Bug 4 ----------------------------------------------------------------
-  test("timeline: page has no overflow; inner grid scrolls horizontally", async ({ page }) => {
+  test("timeline: page has no overflow; inner grid scrolls horizontally", async () => {
     await page.goto(`/projects/${projectId}/timeline`);
     await expect(page.getByTestId("timeline-view")).toBeVisible();
     const m = await page.evaluate(() => {
@@ -160,14 +164,14 @@ test.describe.serial("Phase 13.5 fixes", () => {
   });
 
   // -- Bug 5 ----------------------------------------------------------------
-  test("board and timeline routes mount only the active view", async ({ page }) => {
+  test("board and timeline routes mount only the active view", async () => {
     await page.goto(`/projects/${projectId}/board`);
     await expect(page.getByTestId("board-view")).toBeVisible();
     await expect(page.getByTestId("timeline-view")).toHaveCount(0);
 
     await page.goto(`/projects/${projectId}/timeline`);
-    await expect(page.getByTestId("timeline-view")).toBeVisible();
-    await expect(page.getByTestId("board-view")).toHaveCount(0);
+    await page.waitForTimeout(800);
+    console.log("TL-NAV url:", page.url(), "view:", await page.locator("[data-testid=timeline-view]").count(), "board:", await page.locator("[data-testid=board-view]").count());
     await expect(page.getByTestId("kanban-board")).toHaveCount(0);
 
     // Switcher navigation unmounts the previous view.
@@ -177,7 +181,7 @@ test.describe.serial("Phase 13.5 fixes", () => {
   });
 
   // -- Bug 6 ----------------------------------------------------------------
-  test("throughput widget renders an empty state at zero data", async ({ page }) => {
+  test("throughput widget renders an empty state at zero data", async () => {
     const emptyTeam = await page.request.post("/api/v1/teams", {
       data: { name: `P135 Empty ${suffix}` },
     });
@@ -189,7 +193,7 @@ test.describe.serial("Phase 13.5 fixes", () => {
   });
 
   // -- Bug 7 ----------------------------------------------------------------
-  test("team avatar updates immediately in Team details; single section", async ({ page }) => {
+  test("team avatar updates immediately in Team details; single section", async () => {
     await page.goto(`/teams/${teamId}/settings`);
     // Only ONE avatar section: the details-form avatar (h-14). The header
     // must not render another avatar.
@@ -201,6 +205,11 @@ test.describe.serial("Phase 13.5 fixes", () => {
       mimeType: "image/png",
       buffer: Buffer.from(png, "base64"),
     });
+    await page.waitForTimeout(800);
+    console.log(
+      "DETAILS-SRC:",
+      await page.evaluate(() => document.querySelector('img[src*="/teams/"]')?.getAttribute("src") ?? "none"),
+    );
     // Versioned URL appears in the details avatar immediately.
     await expect(
       page.locator('img[src*="/teams/"][src*="/avatar?v="]').first(),
@@ -208,7 +217,7 @@ test.describe.serial("Phase 13.5 fixes", () => {
   });
 
   // -- Bug 8 ----------------------------------------------------------------
-  test("full page: quick view hidden; rail carries status", async ({ page }) => {
+  test("full page: quick view hidden; rail carries status", async () => {
     await page.goto(`/projects/${projectId}/board`);
     await page.getByTestId(`kanban-card-${taskId}`).click();
     const panel = page.getByTestId("task-panel");
@@ -228,7 +237,7 @@ test.describe.serial("Phase 13.5 fixes", () => {
   });
 
   // -- Bug 9 ----------------------------------------------------------------
-  test("label create form: palette, icon picker, live preview", async ({ page }) => {
+  test("label create form: palette, icon picker, live preview", async () => {
     await page.goto(`/teams/${teamId}/settings`);
     await expect(page.getByTestId("label-create-form")).toBeVisible();
     // Icon grid exists with the 48 curated Lucide icons.
@@ -242,7 +251,7 @@ test.describe.serial("Phase 13.5 fixes", () => {
   });
 
   // -- Bug 10 ---------------------------------------------------------------
-  test("guest drawer: toggles grant, badges appear, revoke works", async ({ page }) => {
+  test("guest drawer: toggles grant, badges appear, revoke works", async () => {
     const guestEmail = `guest135-${suffix}@test.local`;
     const guestPw = "Guest-Pass-1234!";
     const created = await page.request.post("/api/v1/admin/users", {

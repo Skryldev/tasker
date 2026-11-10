@@ -1,6 +1,6 @@
 //! Teams: creation, settings, membership management, and labels.
 
-use axum::extract::{Query, Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -35,10 +35,7 @@ pub fn routes() -> Router<AppState> {
             "/teams/{team_id}/members",
             get(list_members).post(add_member),
         )
-        .route(
-            "/teams/{team_id}/members/eligible",
-            get(eligible_members),
-        )
+        .route("/teams/{team_id}/members/eligible", get(eligible_members))
         .route(
             "/teams/{team_id}/members/{user_id}",
             axum::routing::patch(change_member_role).delete(remove_member),
@@ -332,8 +329,7 @@ async fn get_team(
 ) -> Result<Json<Team>, AppError> {
     let mut conn = state.db.conn();
     let mut team = find_team(&mut conn, &team_id).await?;
-    let membership =
-        crate::authorization::get_membership(&mut conn, &team_id, &user.id).await?;
+    let membership = crate::authorization::get_membership(&mut conn, &team_id, &user.id).await?;
     if let Some(membership) = membership {
         team.my_role = Some(membership.role);
     } else if crate::guests::guest_has(&mut conn, &team_id, &user.id, "view_team", None).await? {
@@ -567,8 +563,7 @@ async fn eligible_members(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let mut conn = state.db.conn();
     require_membership(&mut conn, &team_id, &user.id).await?;
-    authorization::require_capability(&mut conn, &team_id, &user.id, Capability::AddMember)
-        .await?;
+    authorization::require_capability(&mut conn, &team_id, &user.id, Capability::AddMember).await?;
 
     let page = query.page.unwrap_or(1).max(1);
     let page_size = query.page_size.unwrap_or(20).clamp(1, 100);
@@ -609,7 +604,10 @@ async fn eligible_members(
     let rows = match &like {
         Some(pattern) => {
             let mut args = Args::new();
-            args.s(&team_id).s(pattern.clone()).s(pattern.clone()).s(pattern.clone());
+            args.s(&team_id)
+                .s(pattern.clone())
+                .s(pattern.clone())
+                .s(pattern.clone());
             args.i(page_size).i(offset);
             conn.fetch_all(
                 &format!(

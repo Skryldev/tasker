@@ -65,7 +65,7 @@ fn test_config(database_url: String) -> Config {
         static_dir: None,
         log_format_json: false,
         rules_worker: tasker::config::RulesWorkerConfig::default(),
-            integrations_key: Some(vec![19u8; 32]),
+        integrations_key: Some(vec![19u8; 32]),
         attachments: tasker::config::AttachmentsConfig {
             mode: tasker::config::AttachmentsMode::Local,
             local_dir: std::env::temp_dir()
@@ -3960,7 +3960,7 @@ async fn rules_capture_evaluates_matching_rules_transactionally() {
         seed_user(&db, &member_email, "Rules Member").await;
         seed_user(&db, &outsider_email, "Rules Outsider").await;
         let admin = login_as(&app.app, &admin_email, "test-password-123").await;
-let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
         let outsider = login_as(&app.app, &outsider_email, "test-password-123").await;
 
         let (code, team) = send_json(
@@ -4724,7 +4724,7 @@ async fn rules_internal_actions_end_to_end() {
         seed_user(&db, &member_email, "Act Member").await;
         let outsider_id = seed_user(&db, &outsider_email, "Act Outsider").await;
         let admin = login_as(&app.app, &admin_email, "test-password-123").await;
-let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
         let (code, team) = send_json(
             &app.app,
             "POST",
@@ -5345,7 +5345,7 @@ async fn rules_internal_actions_ledger_failure_atomicity() {
         let admin_id = seed_user(&db, &admin_email, "Ledger Admin").await;
         seed_user(&db, &member_email, "Ledger Member").await;
         let admin = login_as(&app.app, &admin_email, "test-password-123").await;
-let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
         let (code, team) = send_json(
             &app.app,
             "POST",
@@ -5534,7 +5534,7 @@ async fn rules_capture_insert_failure_atomicity() {
             let admin_id = seed_user(&db, &admin_email, "Rules Inject").await;
             seed_user(&db, &member_email, "Rules Inject Member").await;
             let admin = login_as(&app.app, &admin_email, "test-password-123").await;
-let member = login_as(&app.app, &member_email, "test-password-123").await;
+            let member = login_as(&app.app, &member_email, "test-password-123").await;
             let (code, team) = send_json(
                 &app.app,
                 "POST",
@@ -5800,7 +5800,7 @@ async fn rules_dispatcher_claims_and_executes() {
         let admin_id = seed_user(&db, &admin_email, "Dsp Admin").await;
         seed_user(&db, &member_email, "Dsp Member").await;
         let admin = login_as(&app.app, &admin_email, "test-password-123").await;
-let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
         let (code, team) = send_json(
             &app.app,
             "POST",
@@ -6030,7 +6030,7 @@ async fn rules_dispatcher_fencing_and_recovery() {
         let admin_id = seed_user(&db, &admin_email, "Fen Admin").await;
         seed_user(&db, &member_email, "Fen Member").await;
         let admin = login_as(&app.app, &admin_email, "test-password-123").await;
-let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
         let (code, team) = send_json(
             &app.app,
             "POST",
@@ -6208,7 +6208,7 @@ async fn rules_dispatcher_retry_and_dead_letter() {
         let admin_id = seed_user(&db, &admin_email, "Retry Admin").await;
         seed_user(&db, &member_email, "Retry Member").await;
         let admin = login_as(&app.app, &admin_email, "test-password-123").await;
-let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
         let (code, team) = send_json(
             &app.app,
             "POST",
@@ -6443,7 +6443,7 @@ async fn rules_dispatcher_shutdown_and_concurrent_claims() {
         let admin_id = seed_user(&db, &admin_email, "Shut Admin").await;
         seed_user(&db, &member_email, "Shut Member").await;
         let admin = login_as(&app.app, &admin_email, "test-password-123").await;
-let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
         let (code, team) = send_json(
             &app.app,
             "POST",
@@ -6610,7 +6610,7 @@ async fn rules_dispatcher_email_conflict_dead_letters_immediately() {
     let admin_id = seed_user(&db, &admin_email, "Conf Admin").await;
     seed_user(&db, &member_email, "Conf Member").await;
     let admin = login_as(&app.app, &admin_email, "test-password-123").await;
-let member = login_as(&app.app, &member_email, "test-password-123").await;
+    let member = login_as(&app.app, &member_email, "test-password-123").await;
     let (code, team) = send_json(
         &app.app,
         "POST",
@@ -6743,12 +6743,24 @@ async fn integrations_foundation_matrix() {
         let admin_id = seed_user(&db, &admin_email, "Int Admin").await;
         let other_id = seed_user(&db, &other_email, "Int Other").await;
         let admin = login_as(&app.app, &admin_email, "test-password-123").await;
-        let (code, team) =
-            send_json(&app.app, "POST", "/api/v1/teams", Some(&admin), json!({"name": "INT"})).await;
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name": "INT"}),
+        )
+        .await;
         assert_eq!(code, StatusCode::CREATED);
         let team_id = team["id"].as_str().unwrap().to_string();
-        let (code, other_team) =
-            send_json(&app.app, "POST", "/api/v1/teams", Some(&admin), json!({"name": "INT2"})).await;
+        let (code, other_team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name": "INT2"}),
+        )
+        .await;
         assert_eq!(code, StatusCode::CREATED);
         let other_team_id = other_team["id"].as_str().unwrap().to_string();
         let (code, project) = send_json(
@@ -7055,12 +7067,10 @@ async fn integrations_foundation_matrix() {
                 .opt_s(Some(r#"{"branch":"main"}"#))
                 .opt_s(Some(r#"{"branch":"main"}"#))
                 .s("integration")
-                .opt_i(None)
-                .i(now)
                 .opt_i(None) // causing_execution_id
-                .i(now)
-                .opt_i(None)
-                .i(now);
+                .i(now) // occurred_at
+                .opt_i(None) // integration_id (Task 5 delivery wires it)
+                .opt_i(None); // source_delivery_id (Task 5 delivery wires it)
             conn.execute(
                 "INSERT INTO domain_events (id, event_type, schema_version, team_id, task_id, \
                  actor_id, previous_state, new_state, origin, causing_execution_id, \
@@ -7108,7 +7118,10 @@ async fn integrations_foundation_matrix() {
                     args,
                 )
                 .await;
-            assert!(unknown_origin.is_err(), "[{engine}] unknown origin rejected");
+            assert!(
+                unknown_origin.is_err(),
+                "[{engine}] unknown origin rejected"
+            );
         }
     }
 }
@@ -7135,7 +7148,7 @@ async fn rules_management_api_matrix() {
         let owner = login_as(&app.app, &owner_email, "test-password-123").await;
         let admin = login_as(&app.app, &admin_email, "test-password-123").await;
         let manager = login_as(&app.app, &manager_email, "test-password-123").await;
-let member = login_as(&app.app, &member_email, "test-password-123").await;
+        let member = login_as(&app.app, &member_email, "test-password-123").await;
         let guest = login_as(&app.app, &guest_email, "test-password-123").await;
         let outsider = login_as(&app.app, &outsider_email, "test-password-123").await;
 
@@ -11340,7 +11353,11 @@ async fn checklist_progress_matrix() {
                 json!({"title": title}),
             )
             .await;
-            assert_eq!(code, StatusCode::CREATED, "[{engine}] create {title}: {item}");
+            assert_eq!(
+                code,
+                StatusCode::CREATED,
+                "[{engine}] create {title}: {item}"
+            );
             item_ids.push(item["id"].as_str().unwrap().to_string());
         }
 
@@ -11352,7 +11369,11 @@ async fn checklist_progress_matrix() {
         )
         .await;
         assert_eq!(code, StatusCode::OK);
-        assert_eq!(list["items"].as_array().unwrap().len(), 2, "[{engine}] {list}");
+        assert_eq!(
+            list["items"].as_array().unwrap().len(),
+            2,
+            "[{engine}] {list}"
+        );
 
         // Toggle one: 1/2 = 50%.
         let (code, _) = send_json(
@@ -11419,7 +11440,11 @@ async fn checklist_progress_matrix() {
             json!({"title": "late"}),
         )
         .await;
-        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] closed create: {err}");
+        assert_eq!(
+            code,
+            StatusCode::CONFLICT,
+            "[{engine}] closed create: {err}"
+        );
         let (code, _) = send_request(
             &app.app,
             "DELETE",
@@ -11458,7 +11483,11 @@ async fn admin_users_matrix() {
             }),
         )
         .await;
-        assert_eq!(code, StatusCode::FORBIDDEN, "[{engine}] manager create: {body}");
+        assert_eq!(
+            code,
+            StatusCode::FORBIDDEN,
+            "[{engine}] manager create: {body}"
+        );
 
         // Owner creates an instance user — no team membership attached.
         let new_email = format!("new-{suffix}@test.local");
@@ -11475,7 +11504,11 @@ async fn admin_users_matrix() {
             }),
         )
         .await;
-        assert_eq!(code, StatusCode::CREATED, "[{engine}] owner create: {created}");
+        assert_eq!(
+            code,
+            StatusCode::CREATED,
+            "[{engine}] owner create: {created}"
+        );
         let new_user_id = created["id"].as_str().unwrap().to_string();
         assert_eq!(created["instance_role"], "member");
         assert_eq!(created["active"], true);
@@ -11495,7 +11528,11 @@ async fn admin_users_matrix() {
             }),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] weak: {body}");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] weak: {body}"
+        );
         assert!(
             body.to_string().contains("uppercase"),
             "[{engine}] expected the specific class message: {body}"
@@ -11507,7 +11544,11 @@ async fn admin_users_matrix() {
         let (code, list) = get_json(&app.app, "/api/v1/admin/users?q=new", &owner).await;
         assert_eq!(code, StatusCode::OK);
         assert!(
-            list["items"].as_array().unwrap().iter().any(|u| u["id"] == created["id"]),
+            list["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|u| u["id"] == created["id"]),
             "[{engine}] search finds the new user: {list}"
         );
 
@@ -11533,7 +11574,12 @@ async fn admin_users_matrix() {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|t| t["name"].as_str().unwrap_or("").contains(&suffix.to_string()))
+            .filter(|t| {
+                t["name"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains(&suffix.to_string())
+            })
             .map(|t| t["id"].as_str().unwrap().to_string())
             .collect();
         assert_eq!(team_ids.len(), 2, "[{engine}] {teams}");
@@ -11557,9 +11603,14 @@ async fn admin_users_matrix() {
             json!({ "email": format!("ghost-{suffix}@test.local"), "role": "member" }),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] ghost: {err}");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] ghost: {err}"
+        );
         assert!(
-            err.to_string().contains("Ask an Owner to create the account first"),
+            err.to_string()
+                .contains("Ask an Owner to create the account first"),
             "[{engine}] actionable message: {err}"
         );
 
@@ -11581,7 +11632,11 @@ async fn admin_users_matrix() {
         .await;
         assert_eq!(code, StatusCode::OK);
         let teams_of = &listing["items"][0]["teams"];
-        assert_eq!(teams_of.as_array().unwrap().len(), 2, "[{engine}] {listing}");
+        assert_eq!(
+            teams_of.as_array().unwrap().len(),
+            2,
+            "[{engine}] {listing}"
+        );
 
         // Deactivate → sign-in refused; reactivate → allowed again.
         let (code, _) = send_json(
@@ -11608,7 +11663,11 @@ async fn admin_users_matrix() {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "[{engine}] deactivated login");
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "[{engine}] deactivated login"
+        );
         let (code, _) = send_json(
             &app.app,
             "PATCH",
@@ -11631,7 +11690,11 @@ async fn admin_users_matrix() {
             }),
         )
         .await;
-        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] guarded delete: {err}");
+        assert_eq!(
+            code,
+            StatusCode::CONFLICT,
+            "[{engine}] guarded delete: {err}"
+        );
     }
 }
 
@@ -11648,11 +11711,7 @@ async fn password_policy_matrix() {
         seed_user(&app.db, &admin_email, "Px Admin").await;
         let admin = login_as(&app.app, &admin_email, "test-password-123").await;
 
-        async fn change(
-            app: &TestApp,
-            cookie: &str,
-            body: Value,
-        ) -> (StatusCode, Value) {
+        async fn change(app: &TestApp, cookie: &str, body: Value) -> (StatusCode, Value) {
             let response = app
                 .app
                 .clone()
@@ -11677,8 +11736,15 @@ async fn password_policy_matrix() {
             json!({"current_password": "test-password-123", "new_password": "test-password-123"}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] same: {err}");
-        assert!(err.to_string().contains("must be different"), "[{engine}] {err}");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] same: {err}"
+        );
+        assert!(
+            err.to_string().contains("must be different"),
+            "[{engine}] {err}"
+        );
 
         // Too short.
         let (code, err) = change(
@@ -11687,7 +11753,11 @@ async fn password_policy_matrix() {
             json!({"current_password": "test-password-123", "new_password": "Sh0rt!x"}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] short: {err}");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] short: {err}"
+        );
         assert!(
             err.to_string().contains("at least 12 characters"),
             "[{engine}] {err}"
@@ -11700,7 +11770,11 @@ async fn password_policy_matrix() {
             json!({"current_password": "test-password-123", "new_password": "FreshTrail42x"}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] class: {err}");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] class: {err}"
+        );
         assert!(
             err.to_string().contains("special character"),
             "[{engine}] {err}"
@@ -11713,7 +11787,11 @@ async fn password_policy_matrix() {
             json!({"current_password": "test-password-123", "new_password": &admin_email}),
         )
         .await;
-        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "[{engine}] identity: {err}");
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] identity: {err}"
+        );
         assert!(
             err.to_string().contains("must not match your email"),
             "[{engine}] {err}"
@@ -11886,12 +11964,8 @@ async fn cross_team_isolation_matrix() {
         //    cross-team assertion applies here.
 
         // -- Goals: Team B's goals are not visible from team A's listing -------
-        let (code, goals_a) = get_json(
-            &app.app,
-            &format!("/api/v1/teams/{team_a}/goals"),
-            &member,
-        )
-        .await;
+        let (code, goals_a) =
+            get_json(&app.app, &format!("/api/v1/teams/{team_a}/goals"), &member).await;
         assert_eq!(code, StatusCode::OK);
         assert_eq!(
             goals_a["items"].as_array().unwrap().len(),
@@ -12040,7 +12114,11 @@ async fn guest_role_matrix() {
             format!("/api/v1/tasks/{task_id}"),
         ] {
             let (code, _) = get_json(&app.app, &path, &guest).await;
-            assert_eq!(code, StatusCode::NOT_FOUND, "[{engine}] default-deny {path}");
+            assert_eq!(
+                code,
+                StatusCode::NOT_FOUND,
+                "[{engine}] default-deny {path}"
+            );
         }
 
         // Grant view_project → project + board + task LIST visible, but the
@@ -12062,22 +12140,33 @@ async fn guest_role_matrix() {
             )
             .await
         }
-        let (code, _) = grant(&app, &owner, &team_id, &guest_id, &project_id, "view_project").await;
-        assert_eq!(code, StatusCode::CREATED, "[{engine}] grant view_project");
-        let (code, _) = get_json(
-            &app.app,
-            &format!("/api/v1/projects/{project_id}"),
-            &guest,
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "view_project",
         )
         .await;
-        assert_eq!(code, StatusCode::OK, "[{engine}] view_project grants the project");
+        assert_eq!(code, StatusCode::CREATED, "[{engine}] grant view_project");
+        let (code, _) = get_json(&app.app, &format!("/api/v1/projects/{project_id}"), &guest).await;
+        assert_eq!(
+            code,
+            StatusCode::OK,
+            "[{engine}] view_project grants the project"
+        );
         let (code, board) = get_json(
             &app.app,
             &format!("/api/v1/projects/{project_id}/board"),
             &guest,
         )
         .await;
-        assert_eq!(code, StatusCode::OK, "[{engine}] view_project grants the board");
+        assert_eq!(
+            code,
+            StatusCode::OK,
+            "[{engine}] view_project grants the board"
+        );
         assert!(board.to_string().contains("P13G task"));
         let (code, _) = get_json(&app.app, &format!("/api/v1/tasks/{task_id}"), &guest).await;
         assert_eq!(
@@ -12107,7 +12196,15 @@ async fn guest_role_matrix() {
         assert_eq!(code, StatusCode::OK, "[{engine}] view_task grants the task");
 
         // comment_task → guest can comment.
-        let (code, _) = grant(&app, &owner, &team_id, &guest_id, &project_id, "comment_task").await;
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "comment_task",
+        )
+        .await;
         assert_eq!(code, StatusCode::CREATED);
         let (code, _) = send_json(
             &app.app,
@@ -12117,10 +12214,22 @@ async fn guest_role_matrix() {
             json!({ "body": "guest comment" }),
         )
         .await;
-        assert_eq!(code, StatusCode::CREATED, "[{engine}] comment_task grants commenting");
+        assert_eq!(
+            code,
+            StatusCode::CREATED,
+            "[{engine}] comment_task grants commenting"
+        );
 
         // view_activity → activity visible.
-        let (code, _) = grant(&app, &owner, &team_id, &guest_id, &project_id, "view_activity").await;
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "view_activity",
+        )
+        .await;
         assert_eq!(code, StatusCode::CREATED);
         let (code, _) = get_json(
             &app.app,
@@ -12128,7 +12237,11 @@ async fn guest_role_matrix() {
             &guest,
         )
         .await;
-        assert_eq!(code, StatusCode::OK, "[{engine}] view_activity grants activity");
+        assert_eq!(
+            code,
+            StatusCode::OK,
+            "[{engine}] view_activity grants activity"
+        );
 
         // view_team → team metadata visible (and the switcher lists it).
         let (code, _) = send_json(
@@ -12140,7 +12253,8 @@ async fn guest_role_matrix() {
         )
         .await;
         assert_eq!(code, StatusCode::CREATED);
-        let (code, team_view) = get_json(&app.app, &format!("/api/v1/teams/{team_id}"), &guest).await;
+        let (code, team_view) =
+            get_json(&app.app, &format!("/api/v1/teams/{team_id}"), &guest).await;
         assert_eq!(code, StatusCode::OK, "[{engine}] view_team grants the team");
         assert_eq!(team_view["my_role"], "guest", "[{engine}] guest badge role");
         let (code, teams) = get_json(&app.app, "/api/v1/teams", &guest).await;

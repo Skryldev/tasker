@@ -56,6 +56,15 @@ export default function SettingsPage() {
 
   const go = useCallback(
     (id: string) => {
+      // Optimistic: the clicked item is the active one for the duration of
+      // the smooth scroll (the spy's 600ms scroll-lock would otherwise
+      // leave the previous item highlighted mid-animation and after it).
+      setActive(id);
+      spyLock.current = true;
+      if (spyTimer.current) window.clearTimeout(spyTimer.current);
+      spyTimer.current = window.setTimeout(() => {
+        spyLock.current = false;
+      }, 900);
       scrollToSection(id);
       navigate(`/settings#${id}`, { replace: true });
     },

@@ -135,6 +135,9 @@ export function TeamSettingsPage() {
           <DangerZoneSection teamId={teamId} teamName={team.data?.name ?? ""} archived={archived} />
         </>
       ) : null}
+      {/* Trailing spacer eats escaped margins so the scroll height is
+          content-driven (Phase 13.5 Bug 3). */}
+      <div aria-hidden className="h-0 overflow-hidden" data-testid="settings-tail" />
     </div>
   );
 }

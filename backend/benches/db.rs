@@ -37,7 +37,7 @@ fn bench_config(url: String) -> Config {
         static_dir: None,
         log_format_json: false,
         rules_worker: tasker::config::RulesWorkerConfig::default(),
-            integrations_key: Some(vec![19u8; 32]),
+        integrations_key: Some(vec![19u8; 32]),
     }
 }
 

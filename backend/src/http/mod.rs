@@ -23,7 +23,8 @@ use tracing::Instrument;
 use crate::error::AppError;
 use crate::state::AppState;
 use crate::{
-    activity, admin, attachments, auth, checklists, comments, dashboard, guests, profile, projects, tasks, teams,
+    activity, admin, attachments, auth, checklists, comments, dashboard, guests, profile, projects,
+    tasks, teams,
 };
 
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);

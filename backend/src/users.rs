@@ -129,22 +129,20 @@ pub async fn create_validated(
         ));
     }
     let username = match username {
-        Some(raw) if !raw.trim().is_empty() => {
-            match crate::profile::validate_username(raw) {
-                Ok(v) => Some(v),
-                Err(e) => {
-                    if let crate::error::AppError::Validation(fields) = e {
-                        field_errors.extend(fields);
-                    } else {
-                        field_errors.push(crate::error::FieldError::new(
-                            "username",
-                            "username must be 3-32 characters of a-z, 0-9 or _",
-                        ));
-                    }
-                    None
+        Some(raw) if !raw.trim().is_empty() => match crate::profile::validate_username(raw) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                if let crate::error::AppError::Validation(fields) = e {
+                    field_errors.extend(fields);
+                } else {
+                    field_errors.push(crate::error::FieldError::new(
+                        "username",
+                        "username must be 3-32 characters of a-z, 0-9 or _",
+                    ));
                 }
+                None
             }
-        }
+        },
         _ => None,
     };
     if let Err(message) = crate::security::password::validate_for_identity(
@@ -176,10 +174,7 @@ pub async fn create_validated(
 
 /// The calling user must be an instance owner (Bug 2). Instance owners
 /// manage every Tasker account; team roles do not confer instance powers.
-pub async fn require_instance_owner(
-    conn: &mut Conn<'_>,
-    user_id: &str,
-) -> Result<(), AppError> {
+pub async fn require_instance_owner(conn: &mut Conn<'_>, user_id: &str) -> Result<(), AppError> {
     let mut args = Args::new();
     args.s(user_id);
     let row = conn
@@ -214,7 +209,9 @@ pub async fn list_admin_users(
     let total: i64 = match &like {
         Some(pattern) => {
             let mut args = Args::new();
-            args.s(pattern.clone()).s(pattern.clone()).s(pattern.clone());
+            args.s(pattern.clone())
+                .s(pattern.clone())
+                .s(pattern.clone());
             conn.fetch_optional(
                 "SELECT COUNT(*) AS n FROM users \
                  WHERE email LIKE ? ESCAPE '|' \
@@ -321,17 +318,16 @@ pub async fn set_active(conn: &mut Conn<'_>, id: &str, active: bool) -> Result<b
     let mut args = Args::new();
     args.b(active).i(util::now_ms()).s(id);
     let n = conn
-        .execute("UPDATE users SET is_active = ?, updated_at = ? WHERE id = ?", args)
+        .execute(
+            "UPDATE users SET is_active = ?, updated_at = ? WHERE id = ?",
+            args,
+        )
         .await?;
     Ok(n != 0)
 }
 
 /// Instance-owner promotion used by bootstrap (Bug 2).
-pub async fn set_instance_role(
-    conn: &mut Conn<'_>,
-    id: &str,
-    role: &str,
-) -> Result<(), AppError> {
+pub async fn set_instance_role(conn: &mut Conn<'_>, id: &str, role: &str) -> Result<(), AppError> {
     let mut args = Args::new();
     args.s(role).i(util::now_ms()).s(id);
     conn.execute(

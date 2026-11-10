@@ -55,22 +55,128 @@ pub mod password {
     /// the lowercased password — the class rules make exotic variants rare
     /// enough that character-class checks remain the primary defense.
     const COMMON_PASSWORDS: [&str; 122] = [
-        "123456", "password", "123456789", "12345678", "12345", "qwerty", "1234567890", "1234567",
-        "111111", "123123", "abc123", "1234", "password1", "iloveyou", "000000", "qwerty123",
-        "1q2w3e", "aa12345678", "654321", "555555", "dragon", "qwertyuiop", "monkey", "sunshine",
-        "princess", "letmein", "welcome", "admin", "admin123", "administrator", "root", "toor",
-        "pass123", "passw0rd", "p@ssw0rd", "p@ssword", "pass@word1", "password!", "password123",
-        "password123!", "password1!", "abcd1234", "qwe123", "1qaz2wsx", "zaq12wsx", "qwerty1",
-        "qwerty12", "asdfgh", "asdfghjkl", "zxcvbnm", "1q2w3e4r", "1q2w3e4r5t", "qazwsx",
-        "qazwsxedc", "trustno1", "hunter2", "hunter", "baseball", "football", "soccer",
-        "hockey", "superman", "batman", "spiderman", "pokemon", "samsung", "google", "facebook",
-        "nissan", "mercedes", "corvette", "ferrari", "porsche", "mustang", "starwars",
-        "master", "master123", "michael", "jennifer", "jordan", "harley", "ranger", "buster",
-        "thomas", "tigger", "robert", "soccer1", "jordan23", "harley1", "ranger1", "buster1",
-        "summer", "winter", "spring", "autumn", "secret", "freedom", "whatever", "computer",
-        "internet", "matrix", "cookie", "lovely", "hello", "hello123", "welcome1", "welcome123",
-        "changeme", "changeme1", "letmein123", "test123", "test1234", "guest", "guest123",
-        "user", "user123", "default", "example", "sample", "tasker", "tasker123", "zaq1@wsx",
+        "123456",
+        "password",
+        "123456789",
+        "12345678",
+        "12345",
+        "qwerty",
+        "1234567890",
+        "1234567",
+        "111111",
+        "123123",
+        "abc123",
+        "1234",
+        "password1",
+        "iloveyou",
+        "000000",
+        "qwerty123",
+        "1q2w3e",
+        "aa12345678",
+        "654321",
+        "555555",
+        "dragon",
+        "qwertyuiop",
+        "monkey",
+        "sunshine",
+        "princess",
+        "letmein",
+        "welcome",
+        "admin",
+        "admin123",
+        "administrator",
+        "root",
+        "toor",
+        "pass123",
+        "passw0rd",
+        "p@ssw0rd",
+        "p@ssword",
+        "pass@word1",
+        "password!",
+        "password123",
+        "password123!",
+        "password1!",
+        "abcd1234",
+        "qwe123",
+        "1qaz2wsx",
+        "zaq12wsx",
+        "qwerty1",
+        "qwerty12",
+        "asdfgh",
+        "asdfghjkl",
+        "zxcvbnm",
+        "1q2w3e4r",
+        "1q2w3e4r5t",
+        "qazwsx",
+        "qazwsxedc",
+        "trustno1",
+        "hunter2",
+        "hunter",
+        "baseball",
+        "football",
+        "soccer",
+        "hockey",
+        "superman",
+        "batman",
+        "spiderman",
+        "pokemon",
+        "samsung",
+        "google",
+        "facebook",
+        "nissan",
+        "mercedes",
+        "corvette",
+        "ferrari",
+        "porsche",
+        "mustang",
+        "starwars",
+        "master",
+        "master123",
+        "michael",
+        "jennifer",
+        "jordan",
+        "harley",
+        "ranger",
+        "buster",
+        "thomas",
+        "tigger",
+        "robert",
+        "soccer1",
+        "jordan23",
+        "harley1",
+        "ranger1",
+        "buster1",
+        "summer",
+        "winter",
+        "spring",
+        "autumn",
+        "secret",
+        "freedom",
+        "whatever",
+        "computer",
+        "internet",
+        "matrix",
+        "cookie",
+        "lovely",
+        "hello",
+        "hello123",
+        "welcome1",
+        "welcome123",
+        "changeme",
+        "changeme1",
+        "letmein123",
+        "test123",
+        "test1234",
+        "guest",
+        "guest123",
+        "user",
+        "user123",
+        "default",
+        "example",
+        "sample",
+        "tasker",
+        "tasker123",
+        "zaq1@wsx",
     ];
 
     /// Strength scoring for the UI meter (0-4): counts satisfied policy
@@ -89,13 +195,9 @@ pub mod password {
         let has_lower = password.chars().any(|c| c.is_ascii_lowercase());
         let has_upper = password.chars().any(|c| c.is_ascii_uppercase());
         let has_digit = password.chars().any(|c| c.is_ascii_digit());
-        let has_special = password
-            .chars()
-            .any(|c| !c.is_ascii_alphanumeric());
-        let classes = u8::from(has_lower)
-            + u8::from(has_upper)
-            + u8::from(has_digit)
-            + u8::from(has_special);
+        let has_special = password.chars().any(|c| !c.is_ascii_alphanumeric());
+        let classes =
+            u8::from(has_lower) + u8::from(has_upper) + u8::from(has_digit) + u8::from(has_special);
         if classes >= 3 {
             score += 1;
         }
@@ -165,9 +267,7 @@ pub mod password {
             || username.is_some_and(|u| !u.is_empty() && lowered == u)
             || (!display.is_empty() && lowered == display);
         if matches_identity {
-            return Err(
-                "password must not match your email, username or display name".into(),
-            );
+            return Err("password must not match your email, username or display name".into());
         }
         if COMMON_PASSWORDS.contains(&lowered.as_str()) {
             return Err("this password is too common".into());

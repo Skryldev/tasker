@@ -351,7 +351,7 @@ fn scalar_from_string(s: &str, kind: ValueKind) -> Result<Scalar, String> {
             // (provider names, branches, repos, actor logins) cap at 255
             // characters — mirroring the users table convention.
             if s.chars().count() > 255 {
-                return Err(format!("text operand exceeds 255 characters"));
+                return Err("text operand exceeds 255 characters".to_string());
             }
             Ok(Scalar::Text(s.to_string()))
         }
@@ -366,7 +366,10 @@ fn scalar_from_value(raw: &Value, kind: ValueKind) -> Result<Scalar, String> {
     }
 }
 
-fn build_compare(raw: &CompareRaw, namespace: super::events::TriggerNamespace) -> Result<Compare, FieldError> {
+fn build_compare(
+    raw: &CompareRaw,
+    namespace: super::events::TriggerNamespace,
+) -> Result<Compare, FieldError> {
     let fe = |message: String| FieldError::new("condition", message);
     let field = Field::parse(&raw.field)
         .ok_or_else(|| fe(format!("unknown condition field `{}`", raw.field)))?;
@@ -968,11 +971,21 @@ mod tests {
             })
         };
         let mut nodes = 0usize;
-        let ok = build_condition(&build_raw(limits::CONDITION_MAX_NODES - 1), 1, &mut nodes, crate::rules::events::TriggerNamespace::Task);
+        let ok = build_condition(
+            &build_raw(limits::CONDITION_MAX_NODES - 1),
+            1,
+            &mut nodes,
+            crate::rules::events::TriggerNamespace::Task,
+        );
         assert!(ok.is_ok());
         let mut nodes = 0usize;
-        let err = build_condition(&build_raw(limits::CONDITION_MAX_NODES), 1, &mut nodes, crate::rules::events::TriggerNamespace::Task)
-            .expect_err("exceeds node cap");
+        let err = build_condition(
+            &build_raw(limits::CONDITION_MAX_NODES),
+            1,
+            &mut nodes,
+            crate::rules::events::TriggerNamespace::Task,
+        )
+        .expect_err("exceeds node cap");
         assert!(err.message.contains("maximum of 100 nodes"));
     }
 
@@ -1071,7 +1084,7 @@ mod tests {
 #[cfg(test)]
 mod namespace_tests {
     use super::*;
-    use crate::rules::events::{IntegrationTriggerType, TriggerNamespace};
+    use crate::rules::events::TriggerNamespace;
 
     #[test]
     fn integration_conditions_validate_with_integration_namespace() {
@@ -1100,17 +1113,13 @@ mod namespace_tests {
     #[test]
     fn integration_text_values_bounded() {
         let long = "a".repeat(256);
-        let json = format!(
-            r#"{{"field":"integration.branch","op":"EQ","value":"{long}"}}"#
-        );
+        let json = format!(r#"{{"field":"integration.branch","op":"EQ","value":"{long}"}}"#);
         assert!(
             Condition::from_json_str_for(&json, TriggerNamespace::Integration).is_err(),
             "text operand over 255 chars rejected"
         );
         let exact = "a".repeat(255);
-        let json = format!(
-            r#"{{"field":"integration.branch","op":"EQ","value":"{exact}"}}"#
-        );
+        let json = format!(r#"{{"field":"integration.branch","op":"EQ","value":"{exact}"}}"#);
         assert!(
             Condition::from_json_str_for(&json, TriggerNamespace::Integration).is_ok(),
             "255-char operand accepted"
@@ -1121,11 +1130,8 @@ mod namespace_tests {
     fn integration_in_lists_use_text_operands() {
         let json = r#"{"field":"integration.repository","op":"IN",
                        "values":["octocat/hello-world","group/project"]}"#;
-        let c = Condition::from_json_str_for(
-            json,
-            TriggerNamespace::Integration,
-        )
-        .expect("valid IN list");
+        let c = Condition::from_json_str_for(json, TriggerNamespace::Integration)
+            .expect("valid IN list");
         assert!(c.to_json_str().contains("octocat/hello-world"));
     }
 }

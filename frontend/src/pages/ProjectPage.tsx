@@ -221,8 +221,14 @@ export function ProjectPage() {
                 role="tab"
                 aria-selected={view === key}
                 to={{
+                  // The legacy ?view= alias must NOT ride along: it would
+                  // override the new path segment (Bug 5 regression).
                   pathname: `${pathname.replace(/\/(list|board|timeline)$/, "")}/${key}`,
-                  search: window.location.search,
+                  search: (() => {
+                    const next = new URLSearchParams(window.location.search);
+                    next.delete("view");
+                    return next.toString();
+                  })(),
                 }}
                 className={cn(
                   "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
@@ -351,7 +357,7 @@ export function ProjectPage() {
 
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1 overflow-y-auto scrollbar-thin p-4">
-          {view === "list" ? (
+          {view === "timeline" ? null : view === "list" ? (
             tasks.isError ? (
               <ErrorState title="Could not load tasks" onRetry={() => void tasks.refetch()} />
             ) : (tasks.data?.items.length ?? 0) === 0 && !tasks.isLoading ? (
@@ -469,9 +475,9 @@ export function ProjectPage() {
               </Suspense>
             </div>
           ) : null}
-          {isGuestProject ? null : (
+          {view !== "timeline" && !isGuestProject ? (
             <TemplateManager projectId={projectId!} />
-          )}
+          ) : null}
         </div>
 
         {selectedTask ? (

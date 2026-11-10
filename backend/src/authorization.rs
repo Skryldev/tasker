@@ -93,7 +93,8 @@ impl Role {
     pub fn can(self, capability: Capability) -> bool {
         use Capability::{
             AddMember, CreateLabel, CreateTask, DeleteAnyComment, DeleteAnyTask, EditAnyComment,
-            ManageGoals, ManageIntegrations, ManageProjects, ManageRules, UpdateAnyTask, UpdateTeam,
+            ManageGoals, ManageIntegrations, ManageProjects, ManageRules, UpdateAnyTask,
+            UpdateTeam,
         };
         match self {
             Self::Owner => true,

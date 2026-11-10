@@ -47,7 +47,9 @@ pub fn resolve_key(config: &Config) -> Option<Vec<u8>> {
 
 fn seal(key: &[u8], plaintext: &str) -> Result<String, AppError> {
     if plaintext.chars().count() > limits::WEBHOOK_SECRET_MAX_CHARS {
-        return Err(AppError::internal("integration secret exceeds the size limit"));
+        return Err(AppError::internal(
+            "integration secret exceeds the size limit",
+        ));
     }
     crate::mfa::encrypt_secret(key, plaintext.as_bytes())
 }
@@ -153,7 +155,7 @@ pub async fn verify_webhook_secret(
     presented: &str,
     key: &[u8],
 ) -> Result<bool, AppError> {
-    let Some((version, envelope)) = load_active_envelope(conn, integration_id).await? else {
+    let Some((_version, envelope)) = load_active_envelope(conn, integration_id).await? else {
         return Ok(false);
     };
     let stored = open(key, &envelope)?;
@@ -181,8 +183,6 @@ pub async fn rotate_credential(
     new_plaintext: &str,
     key: &[u8],
     expected_version: i64,
-    actor_id: &str,
-    now: i64,
 ) -> Result<i64, AppError> {
     let secret_encrypted = seal(key, new_plaintext)?;
     let mut args = Args::new();
@@ -336,7 +336,4 @@ mod tests {
         let long = "a".repeat(limits::WEBHOOK_SECRET_MAX_CHARS + 1);
         assert!(seal(KEY, &long).is_err());
     }
-
-
-
 }

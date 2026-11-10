@@ -381,7 +381,10 @@ mod tests {
             "git_branch_deleted",
             "git_release_published",
         ] {
-            assert!(IntegrationTriggerType::parse(trigger).is_some(), "{trigger}");
+            assert!(
+                IntegrationTriggerType::parse(trigger).is_some(),
+                "{trigger}"
+            );
             assert_eq!(
                 IntegrationTriggerType::parse(trigger)
                     .expect("parse")

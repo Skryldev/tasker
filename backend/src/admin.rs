@@ -26,10 +26,7 @@ use crate::users;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route(
-            "/admin/users",
-            get(list_users).post(create_user),
-        )
+        .route("/admin/users", get(list_users).post(create_user))
         .route(
             "/admin/users/{user_id}",
             patch(update_user).delete(delete_user),
@@ -98,9 +95,12 @@ async fn create_user(
     Json(body): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     require_owner(&state, &user).await?;
-    if let Some(bad_role) = body.role.as_deref().map(str::trim).filter(|r| {
-        !r.is_empty() && *r != users::INSTANCE_ROLE_MEMBER
-    }) {
+    if let Some(bad_role) = body
+        .role
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty() && *r != users::INSTANCE_ROLE_MEMBER)
+    {
         return Err(AppError::validation(
             "role",
             "only `member` can be granted over the API; instance owners are minted by bootstrap-admin",
@@ -321,10 +321,7 @@ async fn delete_user(
     let mut hash_args = Args::new();
     hash_args.s(&user.id);
     let hash_row = conn
-        .fetch_optional(
-            "SELECT password_hash FROM users WHERE id = ?",
-            hash_args,
-        )
+        .fetch_optional("SELECT password_hash FROM users WHERE id = ?", hash_args)
         .await?;
     let stored_hash: String = hash_row
         .map(|r| r.try_get("password_hash").unwrap_or_default())
@@ -354,9 +351,15 @@ async fn delete_user(
             },
         )
         .await?;
-    let memberships: i64 = counts.as_ref().map_or(0, |r| r.try_get("memberships").unwrap_or(0));
-    let created_tasks: i64 = counts.as_ref().map_or(0, |r| r.try_get("created_tasks").unwrap_or(0));
-    let comments: i64 = counts.as_ref().map_or(0, |r| r.try_get("comments").unwrap_or(0));
+    let memberships: i64 = counts
+        .as_ref()
+        .map_or(0, |r| r.try_get("memberships").unwrap_or(0));
+    let created_tasks: i64 = counts
+        .as_ref()
+        .map_or(0, |r| r.try_get("created_tasks").unwrap_or(0));
+    let comments: i64 = counts
+        .as_ref()
+        .map_or(0, |r| r.try_get("comments").unwrap_or(0));
     if memberships > 0 || created_tasks > 0 || comments > 0 {
         return Err(AppError::Conflict(format!(
             "this account still has {memberships} team membership(s), {created_tasks} created task(s) and {comments} comment(s); deactivate it instead, or reassign and remove its data first"
@@ -366,9 +369,7 @@ async fn delete_user(
     crate::auth::revoke_other_sessions(&mut conn, &user_id, None).await?;
     let mut args = Args::new();
     args.s(&user_id);
-    let deleted = conn
-        .execute("DELETE FROM users WHERE id = ?", args)
-        .await?;
+    let deleted = conn.execute("DELETE FROM users WHERE id = ?", args).await?;
     if deleted == 0 {
         return Err(AppError::NotFound("user not found"));
     }

@@ -249,7 +249,6 @@ async fn run_bootstrap(
         return 2;
     }
 
-
     let mut conn = match db.begin().await {
         Ok(c) => c,
         Err(e) => {
