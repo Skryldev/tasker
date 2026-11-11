@@ -236,15 +236,36 @@ test.describe.serial("Phase 13 fixes", () => {
     });
     expect(created.status()).toBe(201);
 
-    await page.goto(`/teams/${guestTeamId}/settings`);
-    await page.getByTestId("invite-guest").click();
-    await page.getByTestId("guest-search-input").fill(guestEmail);
-    await page.getByTestId("guest-eligible-list").getByRole("option").first().click();
-
-    // Grant view_project + view_task via the settings permission editor.
-    await page.locator("#grant-permission").selectOption("view_project");
-    await page.locator("#grant-project").selectOption(projectId);
-    await page.getByTestId("grant-permission-submit").first().click();
+    // Bug 2 (ADR-0014): Owner-created account. Grant via API — the drawer
+    // UI flow is covered in phase135.
+    const createdGuest = await page.request.post(`/api/v1/teams/${guestTeamId}/guests2`, {
+      data: { email: guestEmail },
+    });
+    expect([201, 422]).toContain(createdGuest.status());
+    if (createdGuest.status() === 201) {
+      const g = (await createdGuest.json()) as { guest_id: string };
+      for (const permission of ["view_project", "view_task"]) {
+        const granted = await page.request.post(
+          `/api/v1/teams/${guestTeamId}/guests2/${g.guest_id}/permissions`,
+          { data: { permission, scope_type: "project", project_id: projectId } },
+        );
+        expect(granted.status()).toBe(201);
+      }
+    } else {
+      // Already a guest from an earlier run: grant through the API by id.
+      const guests = await (
+        await page.request.get(`/api/v1/teams/${guestTeamId}/guests2`)
+      ).json();
+      const gid = guests.items.find(
+        (g: { user: { email: string } }) => g.user.email === guestEmail,
+      ).guest_id as string;
+      for (const permission of ["view_project", "view_task"]) {
+        await page.request.post(
+          `/api/v1/teams/${guestTeamId}/guests2/${gid}/permissions`,
+          { data: { permission, scope_type: "project", project_id: projectId } },
+        );
+      }
+    }
 
     // Guest logs in: the switcher lists the team; the project is visible.
     const guestContext = await context.browser()!.newContext();

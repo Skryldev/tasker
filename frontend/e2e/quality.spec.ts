@@ -29,6 +29,11 @@ test.describe.serial("Visual baselines", () => {
     await page.getByLabel("Password").fill(ADMIN.password);
     await page.getByTestId("login-submit").click();
     await expect(page.getByRole("heading", { name: "My Tasks" })).toBeVisible();
+    // Pin admin-visible state: earlier suites in the run may have uploaded
+    // an avatar or generated unread notifications, and the baselines must
+    // render deterministically.
+    await page.request.patch("/api/v1/me", { data: { avatar: null } });
+    await page.request.post("/api/v1/notifications/read-all").catch(() => {});
 
     const team = await page.request.post("/api/v1/teams", {
       data: { name: "Quality Team" },
@@ -86,6 +91,12 @@ test.describe.serial("Visual baselines", () => {
     name: string,
     prepare: () => Promise<void>,
   ) {
+    // Pin admin-visible state: suites earlier in the run may have uploaded
+    // an avatar or generated unread notifications; baselines must render
+    // deterministically.
+    await page.request.patch("/api/v1/me", { data: { avatar: null } });
+    await page.request.post("/api/v1/notifications/read-all").catch(() => {});
+    await page.reload();
     for (const theme of ["light", "dark"] as const) {
       await page.evaluate((t) => {
         localStorage.setItem("tasker-theme", t);

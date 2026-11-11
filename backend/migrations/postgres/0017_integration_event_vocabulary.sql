@@ -23,6 +23,10 @@ ALTER TABLE domain_events
     ADD COLUMN integration_id TEXT REFERENCES integrations (id) ON DELETE RESTRICT ON UPDATE RESTRICT,
     ADD COLUMN source_delivery_id TEXT REFERENCES webhook_deliveries (id) ON DELETE RESTRICT ON UPDATE RESTRICT;
 
+ALTER TABLE domain_events ADD CONSTRAINT domain_events_provenance_consistency
+    CHECK ((origin = 'integration')
+           = (integration_id IS NOT NULL AND source_delivery_id IS NOT NULL));
+
 CREATE UNIQUE INDEX uq_domain_events_delivery ON domain_events (source_delivery_id);
 
 ALTER TABLE rules DROP CONSTRAINT rules_trigger_type_check;

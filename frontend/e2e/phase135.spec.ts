@@ -112,7 +112,7 @@ test.describe.serial("Phase 13.5 fixes", () => {
   });
 
   // -- Bug 3 ----------------------------------------------------------------
-  test("team settings scroll height is content-driven", async ({ }) => {
+  test("team settings scroll height is content-driven", async () => {
     await page.goto(`/teams/${teamId}/settings`);
     await page.waitForTimeout(1000);
     // Scroll to the very bottom: the last section's bottom must land at (or
@@ -198,18 +198,13 @@ test.describe.serial("Phase 13.5 fixes", () => {
     // Only ONE avatar section: the details-form avatar (h-14). The header
     // must not render another avatar.
     await expect(page.getByTestId("team-avatar-pick")).toBeVisible();
-    const png =
-      "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAMElEQVR4nO3BMQEAAADCoPVLb0o/8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4GvkQEAAT4FA6oAAAAASUVORK5CYII=";
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAeUlEQVR4nO3PQQkAMAzAwCqpfymTNRF7HINABFxm93zdcEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFj12JbEDxwwbwKgAAAABJRU5ErkJggg==";
     await page.locator("#team-avatar-upload").setInputFiles({
       name: "team.png",
       mimeType: "image/png",
       buffer: Buffer.from(png, "base64"),
     });
-    await page.waitForTimeout(800);
-    console.log(
-      "DETAILS-SRC:",
-      await page.evaluate(() => document.querySelector('img[src*="/teams/"]')?.getAttribute("src") ?? "none"),
-    );
+
     // Versioned URL appears in the details avatar immediately.
     await expect(
       page.locator('img[src*="/teams/"][src*="/avatar?v="]').first(),
@@ -287,7 +282,8 @@ test.describe.serial("Phase 13.5 fixes", () => {
     await gp.goto(`/projects/${projectId}`);
     await expect(gp.getByTestId("main-content")).toContainText("P135 seed task");
 
-    // Badge remove action revokes immediately.
+    // Badge remove actions revoke immediately: remove both badges.
+    await page.locator("[data-testid^=perm-remove-]").first().click();
     await page.locator("[data-testid^=perm-remove-]").first().click();
     await expect(page.getByTestId(`guest-badges-${guestId}`)).toContainText(
       "No permissions granted",

@@ -23,7 +23,10 @@ ALTER TABLE domain_events
         REFERENCES integrations (id) ON DELETE RESTRICT ON UPDATE RESTRICT,
     ADD CONSTRAINT fk_domain_events_delivery FOREIGN KEY (source_delivery_id)
         REFERENCES webhook_deliveries (id) ON DELETE RESTRICT ON UPDATE RESTRICT,
-    ADD UNIQUE INDEX uq_domain_events_delivery (source_delivery_id);
+    ADD UNIQUE INDEX uq_domain_events_delivery (source_delivery_id),
+    ADD CONSTRAINT chk_domain_events_provenance
+        CHECK ((origin = 'integration')
+               = (integration_id IS NOT NULL AND source_delivery_id IS NOT NULL));
 
 ALTER TABLE rules
     DROP CHECK chk_rules_trigger_type,

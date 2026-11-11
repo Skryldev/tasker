@@ -859,12 +859,13 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
       </div>
       <div className="flex items-end gap-2">
         <div className="flex flex-1 flex-col gap-1.5">
-          <Label htmlFor="label-name">Name</Label>
+          <Label htmlFor="label-name">Label name</Label>
           <Input
             id="label-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="New label name"
+            aria-label="Label name"
             data-testid="label-name-input"
           />
         </div>

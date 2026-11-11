@@ -49,7 +49,13 @@ CREATE TABLE domain_events_new (
     -- integration events): a delivery must not generate duplicate domain
     -- events, and provenance stays queryable after processing completes.
     integration_id       TEXT REFERENCES integrations (id) ON DELETE RESTRICT ON UPDATE RESTRICT,
-    source_delivery_id   TEXT REFERENCES webhook_deliveries (id) ON DELETE RESTRICT ON UPDATE RESTRICT
+    source_delivery_id   TEXT REFERENCES webhook_deliveries (id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+    -- Provenance consistency: integration events carry both provenance
+    -- columns; task events carry neither. Enforced by the database.
+    CHECK (
+        (origin = 'integration')
+        = (integration_id IS NOT NULL AND source_delivery_id IS NOT NULL)
+    )
 );
 
 INSERT INTO domain_events_new
