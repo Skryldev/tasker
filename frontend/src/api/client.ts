@@ -13,9 +13,57 @@ export type TaskCreate = components["schemas"]["TaskCreate"];
 export type TaskUpdate = components["schemas"]["TaskUpdate"];
 export type Comment = components["schemas"]["Comment"];
 export type Activity = components["schemas"]["Activity"];
-export type Notification = components["schemas"]["Notification"];
+export type Notification = components["schemas"]["Notification"] & {
+  /** Phase 14 WS5 (ADR-0022) — regenerated schemas include these. */
+  pinned?: boolean;
+  pinned_at?: number | null;
+};
+export interface NotificationTabCounts {
+  all: { total: number; unread: number };
+  mentions: { total: number; unread: number };
+  assigned: { total: number; unread: number };
+  activity: { total: number; unread: number };
+}
 export type DependencyEdge = components["schemas"]["DependencyEdge"];
 export type DependencyList = components["schemas"]["DependencyList"];
+
+/** The four dependency types (Phase 14 WS6, ADR-0023). */
+export type DependencyType = "blocks" | "relates_to" | "duplicates" | "causes";
+
+/** Live client shapes for the ADR-0023 engine (schema regen will absorb them). */
+export interface DependencyEdge2 {
+  id: string;
+  from_task_id: string;
+  to_task_id: string;
+  type: DependencyType;
+  auto_schedule: boolean;
+  created_at: number;
+}
+export interface DependencyRef2 {
+  dep_id: string;
+  type: DependencyType;
+  task_id: string;
+  title: string;
+  status: string;
+  due_date: string | null;
+}
+export interface DependencyList2 {
+  blocked_by: DependencyRef2[];
+  blocking: DependencyRef2[];
+  /** Guests read edges; only members manage them. */
+  can_manage?: boolean;
+}
+export interface DependencyGraphNode2 {
+  task_id: string;
+  title: string;
+  status: string;
+  due_date: string | null;
+}
+export interface DependencyGraph2 {
+  task_id: string;
+  blocked_by: DependencyGraphNode2[];
+  blocking: DependencyGraphNode2[];
+}
 export type Workload = components["schemas"]["Workload"];
 export type TaskTemplate = components["schemas"]["TaskTemplate"];
 export type TemplateUpsert = components["schemas"]["TemplateUpsert"];
@@ -46,11 +94,45 @@ export interface TeamGuest2 {
   created_at: number;
   permissions: GuestPermission[];
 }
+/** The granular RBAC v2 guest permissions (Phase 14 WS2, ADR-0021). */
+export type GuestPermissionKey =
+  | "view_team"
+  | "view_team_members"
+  | "view_team_activity"
+  | "view_project_list"
+  | "view_project"
+  | "view_project_tasks"
+  | "view_project_timeline"
+  | "view_project_board"
+  | "view_task"
+  | "view_task_own"
+  | "view_task_dates"
+  | "view_task_activity"
+  | "view_task_comments"
+  | "comment_task"
+  | "view_task_attachments"
+  | "download_task_attachments"
+  | "upload_task_attachments"
+  | "invite_guest"
+  | "view_audit_log";
+
 export interface GuestPermission {
   id: string;
-  permission: "view_team" | "view_project" | "view_task" | "comment_task" | "view_activity";
+  permission: GuestPermissionKey;
   scope_type: "team" | "project";
   scope_id: string | null;
+  created_at: number;
+}
+
+/** A guest-filed invitation request (two-step invite flow, ADR-0021). */
+export interface GuestInvitationRequest {
+  id: string;
+  team_id: string;
+  invitee_email: string;
+  status: "pending" | "approved" | "rejected";
+  requested_by: { id: string; display_name: string; email: string } | null;
+  decided_by: { id: string; display_name: string; email: string } | null;
+  decided_at: number | null;
   created_at: number;
 }
 export type ChecklistItem = components["schemas"]["ChecklistItem"];
@@ -394,19 +476,22 @@ export const api = {
       body: reason !== undefined ? { to, reason } : { to },
     }) as Promise<Task>;
   },
-  listDependencies(taskId: string): Promise<DependencyList> {
-    return request("get", `/tasks/${taskId}/dependencies`) as Promise<DependencyList>;
+  listDependencies(taskId: string): Promise<DependencyList2> {
+    return request("get", `/tasks/${taskId}/dependencies`) as Promise<DependencyList2>;
   },
-  createDependency(taskId: string, predecessorTaskId: string): Promise<DependencyEdge> {
+  createDependency(
+    taskId: string,
+    body: { from_task_id: string; dep_type?: DependencyType; auto_schedule?: boolean },
+  ): Promise<DependencyEdge2> {
     return request("post", `/tasks/${taskId}/dependencies`, {
-      body: { predecessor_task_id: predecessorTaskId },
-    }) as Promise<DependencyEdge>;
+      body,
+    }) as Promise<DependencyEdge2>;
   },
-  removeDependency(taskId: string, predecessorTaskId: string): Promise<void> {
-    return request(
-      "delete",
-      `/tasks/${taskId}/dependencies/${predecessorTaskId}`,
-    ) as Promise<void>;
+  removeDependency(taskId: string, depId: string): Promise<void> {
+    return request("delete", `/tasks/${taskId}/dependencies/${depId}`) as Promise<void>;
+  },
+  dependencyGraph(taskId: string): Promise<DependencyGraph2> {
+    return request("get", `/tasks/${taskId}/dependencies/graph`) as Promise<DependencyGraph2>;
   },
   workload(
     teamId: string,
@@ -580,10 +665,25 @@ export const api = {
     unread: boolean,
     page?: number,
     pageSize?: number,
+    pinned?: boolean,
   ): Promise<{ items: Notification[]; page: number; page_size: number; total: number }> {
     return request("get", "/notifications", {
-      query: { unread: unread || undefined, page, page_size: pageSize },
+      query: {
+        unread: unread || undefined,
+        pinned: pinned || undefined,
+        page,
+        page_size: pageSize,
+      },
     }) as Promise<{ items: Notification[]; page: number; page_size: number; total: number }>;
+  },
+  /** Per-tab totals for the action center (Phase 14 WS5, ADR-0022). */
+  notificationCounts(): Promise<NotificationTabCounts> {
+    return request("get", "/notifications/counts") as Promise<NotificationTabCounts>;
+  },
+  toggleNotificationPin(id: string, pinned?: boolean): Promise<{ pinned: boolean }> {
+    return request("post", `/notifications/${id}/pin`, {
+      body: pinned === undefined ? {} : { pinned },
+    }) as Promise<{ pinned: boolean }>;
   },
   unreadCount(): Promise<{ count: number }> {
     return request("get", "/notifications/unread-count") as Promise<{ count: number }>;
@@ -686,6 +786,12 @@ export const api = {
       body,
     }) as Promise<GuestPermission>;
   },
+  listGuestPermissions(teamId: string, guestId: string): Promise<{ items: GuestPermission[] }> {
+    return request(
+      "get",
+      `/teams/${teamId}/guests2/${guestId}/permissions`,
+    ) as Promise<{ items: GuestPermission[] }>;
+  },
   revokeGuestPermission(
     teamId: string,
     guestId: string,
@@ -695,6 +801,23 @@ export const api = {
       "delete",
       `/teams/${teamId}/guests2/${guestId}/permissions/${permissionId}`,
     ) as Promise<void>;
+  },
+
+  // guest invitation requests (Phase 14 WS2, ADR-0021) ---------------------
+  listGuestInviteRequests(teamId: string): Promise<{ items: GuestInvitationRequest[] }> {
+    return request("get", `/teams/${teamId}/guests/invite-requests`) as Promise<{
+      items: GuestInvitationRequest[];
+    }>;
+  },
+  decideGuestInviteRequest(
+    teamId: string,
+    requestId: string,
+    decision: "approve" | "reject",
+  ): Promise<GuestInvitationRequest> {
+    return request(
+      "post",
+      `/teams/${teamId}/guests/invite-requests/${requestId}/${decision}`,
+    ) as Promise<GuestInvitationRequest>;
   },
 
   // team dashboard (Phase 12 WS14) ----------------------------------------

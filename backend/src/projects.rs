@@ -167,6 +167,46 @@ impl ProjectActor {
 
 /// Resolve the project and the caller's access: team membership first, then
 /// the explicit project-guest grant. Outsiders get the standard 404.
+/// Phase 14 (ADR-0021): whether a team guest holds ANY project-scoped view
+/// grant for this project — the minimum to reach the project's read
+/// surfaces at all. Each endpoint then resolves its own specific
+/// permission (`view_project`, `view_project_tasks`, `view_project_board`,
+/// `view_project_timeline`).
+pub async fn guest_project_reach(
+    conn: &mut Conn<'_>,
+    team_id: &str,
+    user_id: &str,
+    project_id: &str,
+) -> Result<bool, AppError> {
+    for permission in [
+        "view_project",
+        "view_project_tasks",
+        "view_project_board",
+        "view_project_timeline",
+    ] {
+        if crate::guests::guest_has(conn, team_id, user_id, permission, Some(project_id)).await? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Phase 14 (ADR-0021): granular check for a team guest on a specific
+/// project-surface permission. Phase 3 project viewers (separate grant
+/// model) keep their full read access and are exempt.
+pub async fn guest_has_surface(
+    conn: &mut Conn<'_>,
+    team_id: &str,
+    project_id: &str,
+    user_id: &str,
+    permission: &str,
+) -> Result<bool, AppError> {
+    if is_project_guest(conn, project_id, user_id).await? {
+        return Ok(true);
+    }
+    crate::guests::guest_has(conn, team_id, user_id, permission, Some(project_id)).await
+}
+
 pub async fn require_project_access(
     conn: &mut Conn<'_>,
     project_id: &str,
@@ -182,9 +222,11 @@ pub async fn require_project_access(
         }
     } else {
         // Phase 13 team guests (Bug 7, ADR-0018): a non-member with an
-        // explicit `view_project` grant for THIS project (or a team-wide
-        // NULL-scope row) reads the project read-only. Project viewers
-        // (Phase 3) keep their path. Everything else stays 404.
+        // explicit grant for THIS project (or a team-wide NULL-scope row)
+        // reads the project read-only. Since Phase 14 (ADR-0021) any
+        // project-scoped view grant establishes reach; each endpoint then
+        // resolves its own granular permission. Project viewers (Phase 3)
+        // keep their path. Everything else stays 404.
         let mut args = Args::new();
         args.s(project_id).s(user_id);
         let viewer = conn
@@ -195,14 +237,7 @@ pub async fn require_project_access(
             .await?
             .is_some();
         let team_guest = viewer
-            || crate::guests::guest_has(
-                conn,
-                &project.team_id,
-                user_id,
-                "view_project",
-                Some(project_id),
-            )
-            .await?;
+            || guest_project_reach(conn, &project.team_id, user_id, project_id).await?;
         if !team_guest {
             return Err(AppError::NotFound("project not found"));
         }
@@ -394,7 +429,15 @@ async fn list_projects(
     Query(query): Query<ListProjectsQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let mut conn = state.db.conn();
-    let membership = require_membership(&mut conn, &team_id, &user.id).await?;
+    let membership = crate::authorization::get_membership(&mut conn, &team_id, &user.id).await?;
+    // Phase 14 (ADR-0021): a non-member reads the project list only with
+    // the team-scoped `view_project_list` grant; my_role stays None.
+    let is_list_guest = membership.is_none()
+        && crate::guests::guest_has(&mut conn, &team_id, &user.id, "view_project_list", None)
+            .await?;
+    if membership.is_none() && !is_list_guest {
+        return Err(AppError::NotFound("team not found"));
+    }
     let mut args = Args::new();
     args.s(&team_id).b(query.include_archived);
     let rows = conn
@@ -412,7 +455,8 @@ async fn list_projects(
     for row in rows {
         let mut project = row_to_project(&row)?;
         project.open_task_count = Some(row.try_get("open_task_count")?);
-        project.my_role = Some(membership.role);
+        project.my_role = membership.as_ref().map(|m| m.role);
+        project.is_guest = is_list_guest;
         items.push(project);
     }
     Ok(Json(json!({ "items": items })))
@@ -425,6 +469,11 @@ async fn get_project(
 ) -> Result<Json<Project>, AppError> {
     let mut conn = state.db.conn();
     let (mut project, actor) = require_project_access(&mut conn, &project_id, &user.id).await?;
+    // Phase 14 (ADR-0021): the project detail payload is the page shell —
+    // any project-view grant (`view_project`, `view_project_tasks`,
+    // `view_project_board`, `view_project_timeline`) establishes reach
+    // through require_project_access. The specific surfaces still enforce
+    // their own permission downstream.
     project.is_guest = actor.is_guest();
     project.my_role = actor.membership.map(|m| m.role);
     Ok(Json(project))

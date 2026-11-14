@@ -433,7 +433,16 @@ async fn list_members(
     Path(team_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let mut conn = state.db.conn();
-    require_membership(&mut conn, &team_id, &user.id).await?;
+    // Phase 14 (ADR-0021): a non-member reads the roster only with the
+    // team-scoped `view_team_members` grant; otherwise 404 (non-disclosure).
+    if crate::authorization::get_membership(&mut conn, &team_id, &user.id)
+        .await?
+        .is_none()
+        && !crate::guests::guest_has(&mut conn, &team_id, &user.id, "view_team_members", None)
+            .await?
+    {
+        return Err(AppError::NotFound("team not found"));
+    }
     let mut args = Args::new();
     args.s(&team_id);
     let rows = conn

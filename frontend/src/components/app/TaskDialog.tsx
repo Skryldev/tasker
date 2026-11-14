@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES, STATUS_LABELS, type Priority, type TaskStatus } from "@/lib/utils";
+import { PRIORITY_META } from "@/lib/priority-meta";
+import { cn } from "@/lib/utils";
 import { useLabels, useMembers, useTemplates } from "@/api/hooks";
 import { LabelIcon } from "./TaskBadges";
 import { useWorkspace } from "@/lib/workspace";
@@ -209,6 +211,14 @@ export function TaskDialog(props: TaskDialogProps) {
       setFieldErrors({ title: "Title is required" });
       return;
     }
+    // Phase 12 rule, enforced inline: deadline must be on or after the due
+    // date when both are set (the server enforces the same rule).
+    if (form.due_date && form.deadline && form.deadline < form.due_date) {
+      setFieldErrors({
+        deadline: "The deadline must be on or after the due date",
+      });
+      return;
+    }
     mutation.mutate();
   };
 
@@ -303,11 +313,28 @@ export function TaskDialog(props: TaskDialogProps) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {PRIORITIES.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {PRIORITY_LABELS[p]}
-                    </SelectItem>
-                  ))}
+                  {PRIORITIES.map((p) => {
+                    const meta = PRIORITY_META[p];
+                    return (
+                      <SelectItem key={p} value={p} aria-describedby={`priority-desc-${p}`}>
+                        <span className="flex items-center gap-2">
+                          <meta.icon className={cn("h-4 w-4 shrink-0", meta.color)} aria-hidden />
+                          <span className="flex flex-col">
+                            <span className="text-sm font-semibold leading-tight">
+                              {PRIORITY_LABELS[p]}
+                            </span>
+                            <span
+                              id={`priority-desc-${p}`}
+                              className="text-xs font-normal text-muted-foreground"
+                              style={{ lineHeight: 1.3 }}
+                            >
+                              {meta.fa} — {meta.en}
+                            </span>
+                          </span>
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
@@ -378,6 +405,7 @@ export function TaskDialog(props: TaskDialogProps) {
                 value={form.deadline || null}
                 onChange={(v) => setForm((f) => ({ ...f, deadline: v }))}
                 ariaLabel="Deadline"
+                placeholder="Set deadline"
               />
               <p className="text-2xs text-muted-foreground">Hard cutoff; must be on or after the due date.</p>
               {fieldErrors.deadline ? (

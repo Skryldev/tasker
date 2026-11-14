@@ -413,11 +413,7 @@ function MembersSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean 
                       @{member.username}
                     </span>
                   ) : null}
-                  {member.role === "owner" ? (
-                    <Badge className="ml-2" variant="muted">
-                      {roleLabel(member.role)}
-                    </Badge>
-                  ) : null}
+                  <RoleBadge role={member.role} className="ml-2" />
                 </p>
                 <p className="truncate text-2xs text-muted-foreground">
                   {member.user.email} · joined {timeAgo(member.created_at)}
@@ -429,9 +425,7 @@ function MembersSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean 
                   changeRole={changeRole}
                   confirmRemove={confirmRemove}
                 />
-              ) : (
-                <Badge variant="muted">{roleLabel(member.role)}</Badge>
-              )}
+              ) : null}
             </li>
           ))}
         </ul>
@@ -479,6 +473,7 @@ function MemberRowMenu({
 import { AddMemberDialog } from "@/pages/AddMemberDialog";
 import { TeamGuestsSection } from "@/pages/TeamGuestsSection";
 import { LabelChip } from "@/components/app/LabelChip";
+import { RoleBadge } from "@/components/app/RoleBadge";
 import { LABEL_ICON_MAP } from "@/components/app/TaskBadges";
 
 // ---------------------------------------------------------------------------

@@ -483,7 +483,7 @@ export function TaskDetailBody({
 
       <Separator className="my-5" />
 
-      <section aria-label="Comments" className="mt-1">
+      <section aria-label="Comments" className="mt-1" id="task-comments">
         <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
           <MessageSquare className="h-3.5 w-3.5" /> Comments ({comments.data?.total ?? 0})
         </h3>
@@ -668,7 +668,7 @@ export function MetadataBand({
   );
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5" data-testid="task-metadata">
+    <div className="flex flex-wrap items-center gap-1.5" id="task-dates" data-testid="task-metadata">
       {/* Reporter */}
       {readOnly ? (
         <span className={staticChipClass} data-testid="chip-reporter">

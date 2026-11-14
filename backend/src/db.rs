@@ -266,6 +266,18 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
         "0018_team_guests",
         include_str!("../migrations/postgres/0018_team_guests.sql"),
     ),
+    (
+        "0020_granular_guest_permissions",
+        include_str!("../migrations/postgres/0020_granular_guest_permissions.sql"),
+    ),
+    (
+        "0021_notification_action_center",
+        include_str!("../migrations/postgres/0021_notification_action_center.sql"),
+    ),
+    (
+        "0022_dependency_types",
+        include_str!("../migrations/postgres/0022_dependency_types.sql"),
+    ),
 ];
 const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -336,6 +348,18 @@ const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
         "0018_team_guests",
         include_str!("../migrations/mysql/0018_team_guests.sql"),
     ),
+    (
+        "0020_granular_guest_permissions",
+        include_str!("../migrations/mysql/0020_granular_guest_permissions.sql"),
+    ),
+    (
+        "0021_notification_action_center",
+        include_str!("../migrations/mysql/0021_notification_action_center.sql"),
+    ),
+    (
+        "0022_dependency_types",
+        include_str!("../migrations/mysql/0022_dependency_types.sql"),
+    ),
 ];
 const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -401,6 +425,18 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
         "0018_team_guests",
         include_str!("../migrations/sqlite/0018_team_guests.sql"),
+    ),
+    (
+        "0020_granular_guest_permissions",
+        include_str!("../migrations/sqlite/0020_granular_guest_permissions.sql"),
+    ),
+    (
+        "0021_notification_action_center",
+        include_str!("../migrations/sqlite/0021_notification_action_center.sql"),
+    ),
+    (
+        "0022_dependency_types",
+        include_str!("../migrations/sqlite/0022_dependency_types.sql"),
     ),
 ];
 
@@ -970,7 +1006,7 @@ mod tests {
         .await
         .unwrap();
         let migrations = migrations_for(Driver::Sqlite);
-        assert_eq!(migrations.len(), 16, "expected migrations 0001..0018");
+        assert_eq!(migrations.len(), 19, "expected migrations 0001..0022");
         // Build the PRE-0005 schema: 0001..0004 only.
         for (version, sql) in &migrations[..4] {
             for statement in split_statements(sql) {

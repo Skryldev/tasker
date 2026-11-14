@@ -267,9 +267,16 @@ test.describe.serial("Phase 13.5 fixes", () => {
     await expect(page.getByTestId("permission-drawer")).toBeVisible();
     await page.getByTestId(`perm-toggle-${projectId}-view_project`).click();
     await page.getByTestId(`perm-toggle-${projectId}-view_task`).click();
+    // Phase 14 (ADR-0021): the task LIST and the BOARD are separate grants;
+    // the default project view is the board.
+    await page.getByTestId(`perm-toggle-${projectId}-view_project_tasks`).click();
+    await page.getByTestId(`perm-toggle-${projectId}-view_project_board`).click();
     await page.getByTestId("perm-save").click();
     await expect(page.getByTestId("permission-drawer")).toBeHidden();
-    await expect(page.getByTestId(`guest-badges-${guestId}`)).toContainText("See the project");
+    // Phase 14 (ADR-0021) labels: grouped by domain with the drawer's
+    // human labels.
+    await expect(page.getByTestId(`guest-badges-${guestId}`)).toContainText("Open the project");
+    await expect(page.getByTestId(`guest-badges-${guestId}`)).toContainText("See the task list");
 
     // Guest can now see the project.
     const guestContext = await context.browser()!.newContext();
@@ -282,9 +289,17 @@ test.describe.serial("Phase 13.5 fixes", () => {
     await gp.goto(`/projects/${projectId}`);
     await expect(gp.getByTestId("main-content")).toContainText("P135 seed task");
 
-    // Badge remove actions revoke immediately: remove both badges.
-    await page.locator("[data-testid^=perm-remove-]").first().click();
-    await page.locator("[data-testid^=perm-remove-]").first().click();
+    // Badge remove actions revoke immediately: drain every badge (the
+    // granular grant set has several).
+    for (let i = 0; i < 10; i++) {
+      const remove = page.locator("[data-testid^=perm-remove-]").first();
+      if ((await remove.count()) === 0) break;
+      const badgeId = (await remove.getAttribute("data-testid"))!;
+      await remove.click();
+      // Each removal re-renders the badge list — wait for this badge to
+      // disappear before targeting the next one.
+      await expect(page.getByTestId(badgeId)).toHaveCount(0, { timeout: 5000 });
+    }
     await expect(page.getByTestId(`guest-badges-${guestId}`)).toContainText(
       "No permissions granted",
     );

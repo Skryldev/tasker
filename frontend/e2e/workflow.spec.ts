@@ -49,15 +49,17 @@ test.describe.serial("Tasker core workflow", () => {
   });
 
   test("create a team", async () => {
+    // Suffix-qualified: stale teams from earlier runs break the lookup.
+    const suffix = Date.now().toString(36);
     await page.goto("/");
     await page.getByTestId("team-switcher").click();
     await page.getByText("Create team…").click();
-    await page.getByLabel("Name").fill("E2E Team");
+    await page.getByLabel("Name").fill(`E2E Team ${suffix}`);
     await page.getByTestId("create-team-submit").click();
     await expect(page.getByTestId("team-switcher")).toContainText("E2E Team");
     const created = await page.request.get("/api/v1/teams");
     teamId = ((await created.json()).items as { id: string; name: string }[]).find(
-      (t) => t.name === "E2E Team",
+      (t) => t.name === `E2E Team ${suffix}`,
     )!.id;
     expect(teamId).not.toBe("");
   });

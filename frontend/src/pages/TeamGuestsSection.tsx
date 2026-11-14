@@ -1,9 +1,20 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, ShieldCheck, Trash2 } from "lucide-react";
-import { api, ApiError, type TeamGuest2 } from "@/api/client";
-import { GuestPermissionDrawer } from "./GuestPermissionDrawer";
-import { PermissionBadge } from "./GuestPermissionDrawer";
+import { Check, Search, ShieldCheck, Trash2, X } from "lucide-react";
+import {
+  api,
+  ApiError,
+  type GuestInvitationRequest,
+  type GuestPermissionKey,
+  type TeamGuest2,
+} from "@/api/client";
+import {
+  GuestPermissionDrawer,
+  PermissionBadge,
+  PERM_META,
+  DOMAIN_LABELS,
+  type PermDomain,
+} from "./GuestPermissionDrawer";
 import { adminApi, type EligibleMember } from "@/api/admin-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,9 +25,11 @@ import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { timeAgo } from "@/lib/utils";
 
 /**
- * Team guests (Phase 13 Bug 7, ADR-0018): non-members with an explicitly
- * granted permission set. Deny by default; revocation is immediate. This
- * section coexists with the Phase 3 project-viewer guest list.
+ * Team guests (Phase 13 Bug 7, ADR-0018; granular since Phase 14 WS2,
+ * ADR-0021): non-members with an explicitly granted permission set. Deny
+ * by default; revocation is immediate. Includes the two-step invitation
+ * queue: guests with `invite_guest` file requests, Owner/Admin approve or
+ * reject. Coexists with the Phase 3 project-viewer guest list.
  */
 
 export function TeamGuestsSection({
@@ -64,6 +77,32 @@ export function TeamGuestsSection({
     },
     onError: (error) =>
       push("error", "Could not remove permission", error instanceof Error ? error.message : undefined),
+  });
+
+  const invitations = useQuery({
+    queryKey: ["guest-invite-requests", teamId],
+    queryFn: () => api.listGuestInviteRequests(teamId),
+    enabled: canManage,
+  });
+
+  const decide = useMutation({
+    mutationFn: (vars: { requestId: string; decision: "approve" | "reject" }) =>
+      api.decideGuestInviteRequest(teamId, vars.requestId, vars.decision),
+    onSuccess: (row) => {
+      push(
+        "success",
+        row.status === "approved" ? "Invitation approved" : "Invitation rejected",
+        row.invitee_email,
+      );
+      void qc.invalidateQueries({ queryKey: ["guest-invite-requests", teamId] });
+      invalidate();
+    },
+    onError: (error) =>
+      push(
+        "error",
+        "Could not decide the request",
+        error instanceof Error ? error.message : undefined,
+      ),
   });
 
   return (
@@ -123,27 +162,49 @@ export function TeamGuestsSection({
                   </Button>
                 ) : null}
               </div>
-              {/* Permission matrix: granted rows + the grant controls. */}
+              {/* Permission matrix: granted rows grouped by domain + the
+                  grant controls (ADR-0021). */}
               <div className="mt-2.5 flex flex-col gap-2">
-                <div className="flex flex-wrap gap-1.5" data-testid={`guest-badges-${guest.guest_id}`}>
-                  {guest.permissions.map((p) => (
-                    <PermissionBadge
-                      key={p.id}
-                      permission={p}
-                      onRemove={
-                        canManage
-                          ? () =>
-                              revokePermission.mutate({
-                                guestId: guest.guest_id,
-                                permissionId: p.id,
-                              })
-                          : undefined
-                      }
-                    />
-                  ))}
-                  {guest.permissions.length === 0 ? (
-                    <span className="text-2xs text-muted-foreground">No permissions granted.</span>
-                  ) : null}
+                <div
+                  className="flex flex-col gap-1.5"
+                  data-testid={`guest-badges-${guest.guest_id}`}
+                >
+                {guest.permissions.length === 0 ? (
+                  <span className="text-2xs text-muted-foreground">No permissions granted.</span>
+                ) : (
+                  <>
+                    {(["team", "projects", "tasks", "admin"] as PermDomain[]).map((domain) => {
+                      const rows = guest.permissions.filter(
+                        (p) =>
+                          (PERM_META[p.permission as GuestPermissionKey] ?? PERM_META.view_team)
+                            .domain === domain,
+                      );
+                      if (rows.length === 0) return null;
+                      return (
+                        <div key={domain} className="flex flex-wrap items-center gap-1.5">
+                          <span className="w-20 shrink-0 text-2xs uppercase tracking-wide text-muted-foreground">
+                            {DOMAIN_LABELS[domain]}
+                          </span>
+                          {rows.map((p) => (
+                            <PermissionBadge
+                              key={p.id}
+                              permission={p}
+                              onRemove={
+                                canManage
+                                  ? () =>
+                                      revokePermission.mutate({
+                                        guestId: guest.guest_id,
+                                        permissionId: p.id,
+                                      })
+                                  : undefined
+                              }
+                            />
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
                 </div>
                 {canManage ? (
                   <Button
@@ -164,6 +225,13 @@ export function TeamGuestsSection({
       )}
       {inviteOpen ? (
         <InviteGuestDialog teamId={teamId} onOpenChange={setInviteOpen} />
+      ) : null}
+      {canManage && (invitations.data?.items.length ?? 0) > 0 ? (
+        <InvitationQueue
+          requests={invitations.data!.items}
+          onDecide={(requestId, decision) => decide.mutate({ requestId, decision })}
+          pending={decide.isPending}
+        />
       ) : null}
       {drawerGuest ? (
         <GuestPermissionDrawer
@@ -285,6 +353,93 @@ function InviteGuestDialog({
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Two-step invitation queue (Phase 14 WS2, ADR-0021): pending requests
+ * filed by `invite_guest` holders, then decided history. Owner/Admin only.
+ */
+function InvitationQueue({
+  requests,
+  onDecide,
+  pending,
+}: {
+  requests: GuestInvitationRequest[];
+  onDecide: (requestId: string, decision: "approve" | "reject") => void;
+  pending: boolean;
+}) {
+  const pendingItems = requests.filter((r) => r.status === "pending");
+  const decided = requests.filter((r) => r.status !== "pending");
+  if (requests.length === 0) return null;
+  return (
+    <div
+      className="mt-4 rounded-lg border p-3"
+      aria-label="Guest invitation requests"
+      data-testid="invite-requests-list"
+    >
+      <h3 className="mb-1.5 text-xs font-semibold">Invitation requests</h3>
+      <p className="mb-2 text-2xs text-muted-foreground">
+        Guests with the <code>invite_guest</code> grant can ask you to invite someone. Nothing
+        changes until you decide.
+      </p>
+      {pendingItems.length === 0 && decided.length === 0 ? null : (
+        <ul className="flex flex-col gap-1.5">
+          {pendingItems.map((r) => (
+            <li
+              key={r.id}
+              className="flex items-center justify-between gap-2 rounded-md border border-dashed px-2.5 py-2"
+              data-testid={`invite-request-${r.id}`}
+            >
+              <div className="min-w-0">
+                <p className="truncate text-xs font-medium">{r.invitee_email}</p>
+                <p className="text-2xs text-muted-foreground">
+                  Requested by {r.requested_by?.display_name ?? "unknown"} · {timeAgo(r.created_at)}
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-1.5">
+                <Button
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => onDecide(r.id, "approve")}
+                  data-testid={`approve-invite-request-${r.id}`}
+                >
+                  <Check /> Approve
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={pending}
+                  onClick={() => onDecide(r.id, "reject")}
+                  data-testid={`reject-invite-request-${r.id}`}
+                >
+                  <X /> Reject
+                </Button>
+              </div>
+            </li>
+          ))}
+          {decided.map((r) => (
+            <li
+              key={r.id}
+              className="flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-2xs text-muted-foreground">{r.invitee_email}</p>
+              </div>
+              <span
+                className={
+                  r.status === "approved"
+                    ? "shrink-0 text-2xs font-medium text-emerald-600 dark:text-emerald-400"
+                    : "shrink-0 text-2xs font-medium text-muted-foreground"
+                }
+              >
+                {r.status === "approved" ? "Approved" : "Rejected"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

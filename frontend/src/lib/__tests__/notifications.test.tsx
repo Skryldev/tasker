@@ -122,6 +122,13 @@ describe("NotificationBell", () => {
     });
     vi.mocked(api).markNotificationRead = vi.fn().mockResolvedValue(undefined);
     vi.mocked(api).markAllNotificationsRead = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(api).notificationCounts = vi.fn().mockResolvedValue({
+      all: { total: 2, unread: 1 },
+      mentions: { total: 0, unread: 0 },
+      assigned: { total: 0, unread: 0 },
+      activity: { total: 2, unread: 1 },
+    });
+    vi.mocked(api).toggleNotificationPin = vi.fn().mockResolvedValue({ pinned: true });
   });
 
   it("shows the unread badge count", async () => {
@@ -171,6 +178,8 @@ describe("NotificationBell", () => {
     await user.click(await screen.findByTestId("notification-bell"));
     expect(await screen.findByRole("alert")).toBeVisible();
     await user.click(screen.getByText("Retry"));
-    expect(vi.mocked(api).listNotifications).toHaveBeenCalledTimes(2);
+    // The action center issues two list queries up front (the active tab
+    // and the pinned section), then the retry refetches the tab list.
+    expect(vi.mocked(api).listNotifications).toHaveBeenCalledTimes(3);
   });
 });

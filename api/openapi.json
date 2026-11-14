@@ -1216,6 +1216,17 @@
         "summary": "List project tasks (root tasks; server-side pagination)",
         "parameters": [
           {
+            "name": "view",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "timeline"
+              ]
+            },
+            "description": "`view=timeline` requires the separate `view_project_timeline` grant for team guests (ADR-0021); other callers are unaffected."
+          },
+          {
             "$ref": "#/components/parameters/ProjectId"
           },
           {
@@ -1811,6 +1822,15 @@
             }
           },
           {
+            "name": "pinned",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Only pinned notifications (action center pinned section)."
+          },
+          {
             "$ref": "#/components/parameters/Page"
           },
           {
@@ -1862,6 +1882,92 @@
           },
           "401": {
             "$ref": "#/components/responses/Problem401"
+          }
+        }
+      }
+    },
+    "/notifications/counts": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Per-tab totals for the action center (ADR-0022)",
+        "description": "Totals and unread counts per action-center tab: `all`, `mentions` (comment_mention), `assigned` (task_assigned), and `activity` (every other task event).",
+        "responses": {
+          "200": {
+            "description": "Tab counts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationTabCounts"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          }
+        }
+      }
+    },
+    "/notifications/{notification_id}/pin": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Pin toggle for the authenticated recipient (ADR-0022)",
+        "description": "Flips the pinned state unless an explicit `{ \"pinned\": bool }` body is given. Scoped to the recipient; foreign ids are 404.",
+        "parameters": [
+          {
+            "name": "notification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "pinned": {
+                    "type": "boolean",
+                    "description": "Omit to toggle the current state."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The resulting pinned state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "pinned"
+                  ],
+                  "properties": {
+                    "pinned": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
           }
         }
       }
@@ -1918,8 +2024,8 @@
         "tags": [
           "tasks"
         ],
-        "summary": "List dependency relations for a task",
-        "description": "`blockers` are tasks that must finish before this task;\n`blocked` are tasks waiting on this one. Read-only for guests.\n",
+        "summary": "List dependency relations for a task (grouped, typed)",
+        "description": "`blocked_by` are edges into this task (tasks it depends on);\n`blocking` are edges out (tasks waiting on it). Read-only for\nguests.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/TaskId"
@@ -1945,8 +2051,8 @@
         "tags": [
           "tasks"
         ],
-        "summary": "Add a finish-to-start dependency",
-        "description": "The predecessor must finish before this task starts. Both tasks must\nbelong to the same project. Self-dependencies, duplicates and cycles\nare rejected with 422/409. Team members only (guests read-only).\nDependency mutations serialize per project; the cycle check is\ntherefore race-free.\n",
+        "summary": "Add a typed dependency edge (ADR-0023)",
+        "description": "The dependency (`from_task_id`) relates to this task. `dep_type`\ndefaults to `blocks`; only `blocks` participates in cycle prevention\nand scheduling. `auto_schedule` opts the edge into CPM pull. Both\ntasks must belong to the same project. Self-dependencies, duplicates\nand `blocks` cycles are rejected with 422/409. Team members only\n(guests read-only). Mutations serialize per project; the cycle check\nis therefore race-free.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/TaskId"
@@ -1959,12 +2065,28 @@
               "schema": {
                 "type": "object",
                 "required": [
-                  "predecessor_task_id"
+                  "from_task_id"
                 ],
                 "properties": {
-                  "predecessor_task_id": {
+                  "from_task_id": {
                     "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "description": "The task this one depends on (its `from` endpoint)."
+                  },
+                  "dep_type": {
+                    "type": "string",
+                    "enum": [
+                      "blocks",
+                      "relates_to",
+                      "duplicates",
+                      "causes"
+                    ],
+                    "default": "blocks"
+                  },
+                  "auto_schedule": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Opt-in CPM pull of this task's due date."
                   }
                 }
               }
@@ -1997,23 +2119,22 @@
         }
       }
     },
-    "/tasks/{task_id}/dependencies/{predecessor_task_id}": {
+    "/tasks/{task_id}/dependencies/{dep_id}": {
       "delete": {
         "tags": [
           "tasks"
         ],
-        "summary": "Remove a dependency edge",
+        "summary": "Remove a dependency edge by its surrogate id",
         "parameters": [
           {
             "$ref": "#/components/parameters/TaskId"
           },
           {
-            "name": "predecessor_task_id",
+            "name": "dep_id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": "string"
             }
           }
         ],
@@ -2026,6 +2147,209 @@
           },
           "404": {
             "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/tasks/{task_id}/dependencies/graph": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Blocks-only one-level subgraph for visualization (ADR-0023)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TaskId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The task with its blockers and blocked tasks.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyGraph"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/guests/invite-requests": {
+      "get": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "List guest invitation requests (Owner/Admin)",
+        "description": "The two-step invitation queue (Phase 14 WS2, ADR-0021): requests filed by `invite_guest` holders, pending first.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invitation requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestInvitationList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "File a guest invitation request (invite_guest holders)",
+        "description": "An active guest with the team-scoped `invite_guest` grant asks the Owner/Admin to invite an email. Nothing changes until a decision; one pending request per (team, email).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Request filed (status pending).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestInvitation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/guests/invite-requests/{request_id}/approve": {
+      "post": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Approve a pending invitation request (Owner/Admin)",
+        "description": "Creates the guest registration (same rules as a direct invite).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The decided request (status approved).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestInvitation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/guests/invite-requests/{request_id}/reject": {
+      "post": {
+        "tags": [
+          "teams"
+        ],
+        "summary": "Reject a pending invitation request (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The decided request (status rejected).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestInvitation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem401"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
           }
         }
       }
@@ -6460,6 +6784,16 @@
               "integer",
               "null"
             ]
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "Pinned items surface above the time groups in the action center (Phase 14 WS5, ADR-0022)."
+          },
+          "pinned_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         }
       },
@@ -6491,19 +6825,40 @@
       },
       "DependencyEdge": {
         "type": "object",
+        "description": "A typed dependency edge (Phase 14 WS6, ADR-0022/0023). Only `blocks` participates in cycle prevention and scheduling.",
         "required": [
-          "predecessor_task_id",
-          "successor_task_id",
+          "id",
+          "from_task_id",
+          "to_task_id",
+          "type",
+          "auto_schedule",
           "created_at"
         ],
         "properties": {
-          "predecessor_task_id": {
+          "id": {
+            "type": "string",
+            "description": "Surrogate edge id used for removal."
+          },
+          "from_task_id": {
             "type": "string",
             "format": "uuid"
           },
-          "successor_task_id": {
+          "to_task_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "blocks",
+              "relates_to",
+              "duplicates",
+              "causes"
+            ]
+          },
+          "auto_schedule": {
+            "type": "boolean",
+            "description": "Opt-in CPM pull of the dependent task's due date."
           },
           "created_at": {
             "type": "integer"
@@ -6511,6 +6866,111 @@
         }
       },
       "DependencyTaskRef": {
+        "type": "object",
+        "required": [
+          "dep_id",
+          "type",
+          "task_id",
+          "title",
+          "status"
+        ],
+        "properties": {
+          "dep_id": {
+            "type": "string",
+            "description": "Edge id (for removal)."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "blocks",
+              "relates_to",
+              "duplicates",
+              "causes"
+            ]
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "backlog",
+              "todo",
+              "in_progress",
+              "resolved",
+              "in_review",
+              "closed"
+            ]
+          },
+          "due_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          }
+        }
+      },
+      "DependencyList": {
+        "type": "object",
+        "required": [
+          "blocked_by",
+          "blocking",
+          "can_manage"
+        ],
+        "properties": {
+          "blocked_by": {
+            "type": "array",
+            "description": "Edges INTO this task — the tasks it depends on.",
+            "items": {
+              "$ref": "#/components/schemas/DependencyTaskRef"
+            }
+          },
+          "blocking": {
+            "type": "array",
+            "description": "Edges OUT of this task — tasks waiting on it.",
+            "items": {
+              "$ref": "#/components/schemas/DependencyTaskRef"
+            }
+          },
+          "can_manage": {
+            "type": "boolean",
+            "description": "False for guests (read-only edges)."
+          }
+        }
+      },
+      "DependencyGraph": {
+        "type": "object",
+        "description": "Blocks-only one-level expansion of the dependency subgraph for visualization (ADR-0023).",
+        "required": [
+          "task_id",
+          "blocked_by",
+          "blocking"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "blocked_by": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DependencyGraphNode"
+            }
+          },
+          "blocking": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DependencyGraphNode"
+            }
+          }
+        }
+      },
+      "DependencyGraphNode": {
         "type": "object",
         "required": [
           "task_id",
@@ -6545,31 +7005,43 @@
           }
         }
       },
-      "DependencyList": {
+      "NotificationTabCounts": {
         "type": "object",
         "required": [
-          "blockers",
-          "blocked",
-          "can_manage"
+          "all",
+          "mentions",
+          "assigned",
+          "activity"
         ],
         "properties": {
-          "blockers": {
-            "type": "array",
-            "description": "Tasks that must finish before this task.",
-            "items": {
-              "$ref": "#/components/schemas/DependencyTaskRef"
-            }
+          "all": {
+            "$ref": "#/components/schemas/NotificationTabCount"
           },
-          "blocked": {
-            "type": "array",
-            "description": "Tasks waiting on this task.",
-            "items": {
-              "$ref": "#/components/schemas/DependencyTaskRef"
-            }
+          "mentions": {
+            "$ref": "#/components/schemas/NotificationTabCount"
           },
-          "can_manage": {
-            "type": "boolean",
-            "description": "False for project guests."
+          "assigned": {
+            "$ref": "#/components/schemas/NotificationTabCount"
+          },
+          "activity": {
+            "$ref": "#/components/schemas/NotificationTabCount"
+          }
+        }
+      },
+      "NotificationTabCount": {
+        "type": "object",
+        "required": [
+          "total",
+          "unread"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unread": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },
@@ -8929,12 +9401,27 @@
           },
           "permission": {
             "type": "string",
+            "description": "Granular RBAC v2 permission (Phase 14 WS2, ADR-0021).",
             "enum": [
               "view_team",
+              "view_team_members",
+              "view_team_activity",
+              "view_project_list",
               "view_project",
+              "view_project_tasks",
+              "view_project_timeline",
+              "view_project_board",
               "view_task",
+              "view_task_own",
+              "view_task_dates",
+              "view_task_activity",
+              "view_task_comments",
               "comment_task",
-              "view_activity"
+              "view_task_attachments",
+              "download_task_attachments",
+              "upload_task_attachments",
+              "invite_guest",
+              "view_audit_log"
             ]
           },
           "scope_type": {
@@ -9019,12 +9506,27 @@
         "properties": {
           "permission": {
             "type": "string",
+            "description": "Granular RBAC v2 permission (Phase 14 WS2, ADR-0021).",
             "enum": [
               "view_team",
+              "view_team_members",
+              "view_team_activity",
+              "view_project_list",
               "view_project",
+              "view_project_tasks",
+              "view_project_timeline",
+              "view_project_board",
               "view_task",
+              "view_task_own",
+              "view_task_dates",
+              "view_task_activity",
+              "view_task_comments",
               "comment_task",
-              "view_activity"
+              "view_task_attachments",
+              "download_task_attachments",
+              "upload_task_attachments",
+              "invite_guest",
+              "view_audit_log"
             ]
           },
           "scope_type": {
@@ -9038,6 +9540,81 @@
             "type": "string",
             "format": "uuid",
             "description": "Required for project-scoped permissions; the project must belong to this team."
+          }
+        }
+      },
+      "GuestInvitation": {
+        "type": "object",
+        "description": "A two-step guest invitation request (ADR-0021).",
+        "required": [
+          "id",
+          "team_id",
+          "invitee_email",
+          "status",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "invitee_email": {
+            "type": "string",
+            "format": "email"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          },
+          "requested_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UserBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decided_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UserBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decided_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "GuestInvitationList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuestInvitation"
+            }
           }
         }
       }

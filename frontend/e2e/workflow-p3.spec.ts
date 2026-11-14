@@ -196,14 +196,17 @@ test.describe.serial("Phase 3 guests, dependencies, workload, templates", () => 
     await mp.waitForURL(/\/$|\?team=/, { timeout: 15_000 });
 
     // Foundation blocks Dependent.
+    // Phase 14 (ADR-0023): typed engine — from_task_id body, blocks type.
     const create = await mp.request.post(`/api/v1/tasks/${otherTaskId}/dependencies`, {
-      data: { predecessor_task_id: taskId },
+      data: { from_task_id: taskId, dep_type: "blocks" },
     });
     expect(create.status()).toBe(201);
+    const edge = (await create.json()) as { id: string; type: string };
+    expect(edge.type).toBe("blocks");
 
-    // Reverse edge = cycle → 409.
+    // Reverse edge = cycle → 409 (blocks type only).
     const cycle = await mp.request.post(`/api/v1/tasks/${taskId}/dependencies`, {
-      data: { predecessor_task_id: otherTaskId },
+      data: { from_task_id: otherTaskId },
     });
     expect(cycle.status()).toBe(409);
 

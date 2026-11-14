@@ -26,7 +26,12 @@ export function TeamSwitcherMenu({
   const navigate = useNavigate();
   const location = useLocation();
   return (
-    <DropdownMenuContent align="start" className="w-56">
+    // Long team lists scroll instead of clipping the create-team action
+    // below the fold (the menu itself is overflow-hidden by default).
+    <DropdownMenuContent
+      align="start"
+      className="w-56 max-h-[min(24rem,60vh)] overflow-y-auto scrollbar-thin"
+    >
       <DropdownMenuLabel>Teams</DropdownMenuLabel>
       {teams.map((team) => (
         <DropdownMenuItem

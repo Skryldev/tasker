@@ -80,13 +80,18 @@ test.describe.serial("Phase 12 features", () => {
     await dialog.getByTestId("task-title-input").fill("P12 created by spec");
     const priority = dialog.locator("#task-priority");
     await priority.click();
+    // Phase 14 (WS3): each option is a two-line row — bold level name plus
+    // a muted bilingual (fa — en) description — so match by the bold name.
     for (const level of ["None", "Low", "Medium", "High", "Urgent", "Critical"]) {
       await expect(
-        page.getByRole("option", { name: level, exact: true }),
+        page.getByRole("option").filter({ has: page.getByText(level, { exact: true }) }),
         `priority option ${level}`,
       ).toHaveCount(1);
     }
-    await page.getByRole("option", { name: "Urgent", exact: true }).click();
+    await page
+      .getByRole("option")
+      .filter({ has: page.getByText("Urgent", { exact: true }) })
+      .click();
     await dialog.getByTestId("task-submit").click();
     await expect(dialog).toBeHidden();
   });

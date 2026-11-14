@@ -80,7 +80,9 @@ test.describe.serial("Phase 13 fixes", () => {
     // Switch to Team B via the switcher (Bug 3's project-path rule lands on
     // Team B's projects list, NOT Team A's project).
     await page.getByTestId("team-switcher").click();
-    await page.getByRole("menu").getByText("P13 Team B", { exact: false }).click();
+    // Match the full (suffix-qualified) team name — stale teams from
+    // earlier runs would otherwise collide in the switcher menu.
+    await page.getByRole("menu").getByText(`P13 Team B ${suffix}`).click();
     await expect(page).toHaveURL(new RegExp(`team=${teamBId}`));
     await expect(page).not.toHaveURL(new RegExp(projectId));
 
@@ -244,7 +246,14 @@ test.describe.serial("Phase 13 fixes", () => {
     expect([201, 422]).toContain(createdGuest.status());
     if (createdGuest.status() === 201) {
       const g = (await createdGuest.json()) as { guest_id: string };
-      for (const permission of ["view_project", "view_task"]) {
+      // Phase 14 (ADR-0021): list + board are separate grants now; the
+      // default project view is the board.
+      for (const permission of [
+        "view_project",
+        "view_task",
+        "view_project_tasks",
+        "view_project_board",
+      ]) {
         const granted = await page.request.post(
           `/api/v1/teams/${guestTeamId}/guests2/${g.guest_id}/permissions`,
           { data: { permission, scope_type: "project", project_id: projectId } },
@@ -259,7 +268,12 @@ test.describe.serial("Phase 13 fixes", () => {
       const gid = guests.items.find(
         (g: { user: { email: string } }) => g.user.email === guestEmail,
       ).guest_id as string;
-      for (const permission of ["view_project", "view_task"]) {
+      for (const permission of [
+        "view_project",
+        "view_task",
+        "view_project_tasks",
+        "view_project_board",
+      ]) {
         await page.request.post(
           `/api/v1/teams/${guestTeamId}/guests2/${gid}/permissions`,
           { data: { permission, scope_type: "project", project_id: projectId } },

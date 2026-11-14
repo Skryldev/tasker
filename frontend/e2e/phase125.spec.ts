@@ -103,8 +103,8 @@ test.describe.serial("Phase 12.5 fixes", () => {
     await expect(up.getByRole("heading", { name: "My Tasks" })).toBeVisible();
     await up.getByTestId("team-switcher").click();
     const menu = up.getByRole("menu");
-    await expect(menu.getByText("P125 Team A", { exact: false })).toBeVisible();
-    await expect(menu.getByText("P125 Team B", { exact: false })).toBeVisible();
+    await expect(menu.getByText(`P125 Team A ${suffix}`)).toBeVisible();
+    await expect(menu.getByText(`P125 Team B ${suffix}`)).toBeVisible();
     await userContext.close();
   });
 
@@ -113,7 +113,9 @@ test.describe.serial("Phase 12.5 fixes", () => {
     // Select Team B via the switcher.
     await page.goto("/");
     await page.getByTestId("team-switcher").click();
-    await page.getByRole("menu").getByText("P125 Team B", { exact: false }).click();
+    // Full (suffix-qualified) name — stale teams from earlier runs would
+    // otherwise collide in the switcher menu.
+    await page.getByRole("menu").getByText(`P125 Team B ${suffix}`).click();
     await expect(page).toHaveURL(new RegExp(`team=${teamBId}`));
 
     // Every section reflects Team B (its project appears in Projects).
@@ -129,7 +131,7 @@ test.describe.serial("Phase 12.5 fixes", () => {
 
     // Switching from Team B settings to Team A preserves the section.
     await page.getByTestId("team-switcher").click();
-    await page.getByRole("menu").getByText("P125 Team A", { exact: false }).click();
+    await page.getByRole("menu").getByText(`P125 Team A ${suffix}`).click();
     await expect(page).toHaveURL(new RegExp(`/teams/${teamId}/settings`));
     await expect(page.getByTestId("team-switcher")).toContainText("P125 Team A");
   });

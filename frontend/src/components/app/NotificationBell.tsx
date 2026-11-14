@@ -5,18 +5,17 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useUnreadCount } from "@/api/notifications";
+import { useUnreadCount, type NotificationTab } from "@/api/notifications";
 
-// Phase 12 WS12: the notification dropdown (icons, groups, tabs) is lazy —
-// the eager shell is just the bell + unread badge, keeping the main bundle
-// at its Phase 12 gate.
+// Phase 12 WS12; the action center (Phase 14 WS5) stays lazy — the eager
+// shell is just the bell + unread badge, keeping the main bundle small.
 const NotificationBellContent = lazy(() =>
   import("./NotificationBellContent").then((m) => ({ default: m.NotificationBellContent })),
 );
 
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
-  const [filterUnread, setFilterUnread] = useState(false);
+  const [tab, setTab] = useState<NotificationTab>("all");
   const [opened, setOpened] = useState(false);
   const { data: unread } = useUnreadCount();
 
@@ -52,8 +51,8 @@ export function NotificationBell() {
       {opened ? (
         <Suspense fallback={null}>
           <NotificationBellContent
-            filterUnread={filterUnread}
-            onFilterChange={setFilterUnread}
+            tab={tab}
+            onTabChange={setTab}
             onClose={() => setOpen(false)}
             unreadCount={count}
           />

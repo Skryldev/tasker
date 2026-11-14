@@ -27,6 +27,9 @@ export default defineConfig({
         manualChunks: {
           vendor: ["react", "react-dom", "react-router-dom"],
           query: ["@tanstack/react-query"],
+          // The shared API client is imported by every page chunk — keep
+          // it out of the eager shell so the index gate stays honest.
+          api: ["./src/api/client.ts"],
         },
       },
     },

@@ -198,10 +198,24 @@ async fn list_comments(
     Query(query): Query<ListCommentsQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let mut conn = state.db.conn();
-    let (_, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
-    // Guests see only comments explicitly marked visible to them. The filter
-    // is alias-free: the count query reads `FROM comments` without an alias,
+    let (task, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
+    // Phase 14 (ADR-0021): a team guest reads the discussion only with the
+    // `view_task_comments` grant (Phase 3 viewers are exempt). Guests see
+    // only comments explicitly marked visible to them. The filter is
+    // alias-free: the count query reads `FROM comments` without an alias,
     // and the list query has no other table carrying the column.
+    if actor.is_guest()
+        && !crate::projects::guest_has_surface(
+            &mut conn,
+            &task.team_id,
+            &task.project_id,
+            &user.id,
+            "view_task_comments",
+        )
+        .await?
+    {
+        return Err(AppError::NotFound("task not found"));
+    }
     let visibility = if actor.is_guest() {
         " AND guest_visible = TRUE"
     } else {

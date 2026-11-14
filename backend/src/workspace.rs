@@ -27,8 +27,12 @@ pub fn routes() -> Router<AppState> {
             get(list_dependencies).post(create_dependency),
         )
         .route(
-            "/tasks/{task_id}/dependencies/{predecessor_task_id}",
+            "/tasks/{task_id}/dependencies/{dep_id}",
             axum::routing::delete(remove_dependency),
+        )
+        .route(
+            "/tasks/{task_id}/dependencies/graph",
+            get(dependency_graph),
         )
         // Workload
         .route("/teams/{team_id}/workload", get(workload))
@@ -63,13 +67,21 @@ fn today_iso() -> String {
 }
 
 // ===========================================================================
-// Task dependencies (finish-to-start)
+// Task dependencies (Phase 14 WS6 engine — ADR-0023)
 // ===========================================================================
+
+/// The four dependency types. Only `blocks` participates in cycle
+/// prevention and scheduling; the rest are informational.
+pub const DEPENDENCY_TYPES: [&str; 4] = ["blocks", "relates_to", "duplicates", "causes"];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DependencyEdge {
-    pub predecessor_task_id: String,
-    pub successor_task_id: String,
+    pub id: String,
+    pub from_task_id: String,
+    pub to_task_id: String,
+    #[serde(rename = "type")]
+    pub dep_type: String,
+    pub auto_schedule: bool,
     pub created_at: i64,
 }
 
@@ -79,36 +91,50 @@ pub struct DependencyTaskRef {
     pub title: String,
     pub status: String,
     pub due_date: Option<String>,
+    /// The edge id (for removal).
+    pub dep_id: String,
+    /// The edge type (for grouped rendering).
+    #[serde(rename = "type")]
+    pub dep_type: String,
 }
 
+fn dep_edge_from_row(r: &sqlx::any::AnyRow) -> Result<DependencyEdge, AppError> {
+    Ok(DependencyEdge {
+        id: r.try_get("id")?,
+        from_task_id: r.try_get("from_task_id")?,
+        to_task_id: r.try_get("to_task_id")?,
+        dep_type: r.try_get::<String, _>("type")?,
+        auto_schedule: r
+            .try_get::<i64, _>("auto_schedule")
+            .map(|v| v != 0)
+            .unwrap_or(false),
+        created_at: r.try_get("created_at")?,
+    })
+}
+
+/// Load one edge by (from, to) — the unique business key.
 async fn load_edge(
     conn: &mut Conn<'_>,
-    predecessor: &str,
-    successor: &str,
+    from_task: &str,
+    to_task: &str,
+    dep_type: &str,
 ) -> Result<Option<DependencyEdge>, AppError> {
     let mut args = Args::new();
-    args.s(predecessor).s(successor);
+    args.s(from_task).s(to_task).s(dep_type);
     let row = conn
         .fetch_optional(
-            "SELECT predecessor_task_id, successor_task_id, created_at \
-             FROM task_dependencies WHERE predecessor_task_id = ? AND successor_task_id = ?",
+            "SELECT id, from_task_id, to_task_id, type, \
+             CASE WHEN auto_schedule THEN 1 ELSE 0 END AS auto_schedule, created_at \
+             FROM task_dependencies WHERE from_task_id = ? AND to_task_id = ? AND type = ?",
             args,
         )
         .await?;
-    row.map(|r| {
-        Ok(DependencyEdge {
-            predecessor_task_id: r.try_get("predecessor_task_id")?,
-            successor_task_id: r.try_get("successor_task_id")?,
-            created_at: r.try_get("created_at")?,
-        })
-    })
-    .transpose()
+    row.map(|r| dep_edge_from_row(&r)).transpose()
 }
 
-/// BFS over predecessor edges starting at `start`: if `target` is reachable,
-/// the graph already contains target → … → start, so adding start → target
-/// closes a cycle. Terminates via the visited set; depth is bounded by the
-/// number of tasks in the project.
+/// DFS over `blocks` edges starting at `start`: if `target` is reachable,
+/// adding start → target closes a cycle. Only `blocks` edges participate
+/// (informational types never constrain). Terminates via the visited set.
 async fn reachable(conn: &mut Conn<'_>, start: &str, target: &str) -> Result<bool, AppError> {
     let mut visited: HashSet<String> = HashSet::new();
     visited.insert(start.to_string());
@@ -118,17 +144,17 @@ async fn reachable(conn: &mut Conn<'_>, start: &str, target: &str) -> Result<boo
         args.s(&node);
         let rows = conn
             .fetch_all(
-                "SELECT predecessor_task_id FROM task_dependencies WHERE successor_task_id = ?",
+                "SELECT from_task_id FROM task_dependencies WHERE to_task_id = ? AND type = 'blocks'",
                 args,
             )
             .await?;
         for row in rows {
-            let pred: String = row.try_get("predecessor_task_id")?;
-            if pred == target {
+            let from: String = row.try_get("from_task_id")?;
+            if from == target {
                 return Ok(true);
             }
-            if visited.insert(pred.clone()) {
-                frontier.push(pred);
+            if visited.insert(from.clone()) {
+                frontier.push(from);
             }
         }
     }
@@ -137,8 +163,19 @@ async fn reachable(conn: &mut Conn<'_>, start: &str, target: &str) -> Result<boo
 
 #[derive(Deserialize)]
 pub struct CreateDependencyRequest {
-    /// The task that must finish first.
-    pub predecessor_task_id: String,
+    /// Dependency type. Defaults to `blocks`.
+    #[serde(default = "default_dep_type")]
+    pub dep_type: String,
+    /// The task this one depends on (its `from` endpoint).
+    pub from_task_id: String,
+    /// Opt-in CPM: pull this task's due date forward when the dependency's
+    /// due date moves later.
+    #[serde(default)]
+    pub auto_schedule: bool,
+}
+
+fn default_dep_type() -> String {
+    "blocks".to_string()
 }
 
 async fn create_dependency(
@@ -147,25 +184,28 @@ async fn create_dependency(
     Path(task_id): Path<String>,
     Json(body): Json<CreateDependencyRequest>,
 ) -> Result<(StatusCode, Json<DependencyEdge>), AppError> {
-    let predecessor = body.predecessor_task_id.trim().to_string();
-    if predecessor == task_id {
+    let dep_type = body.dep_type.as_str();
+    if !DEPENDENCY_TYPES.contains(&dep_type) {
         return Err(AppError::validation(
-            "predecessor_task_id",
+            "type",
+            format!("unknown dependency type `{dep_type}`; expected one of {DEPENDENCY_TYPES:?}"),
+        ));
+    }
+    let from_task = body.from_task_id.trim().to_string();
+    if from_task == task_id {
+        return Err(AppError::validation(
+            "from_task_id",
             "a task cannot depend on itself",
         ));
     }
 
     let mut conn = state.db.begin().await?;
-    // Successor access governs the mutation; guests are read-only.
-    let (successor, actor) =
+    let (to_task, actor) =
         crate::tasks::require_task_access(&mut conn, &task_id, &user.id).await?;
     if actor.is_guest() {
         return Err(deny_guest());
     }
-    // Dependency edges are coordination metadata between tasks a team member
-    // can already see; guests stay read-only (the security boundary). Tasks
-    // must share the project (validated below).
-    if crate::projects::find_project(&mut conn, &successor.project_id)
+    if crate::projects::find_project(&mut conn, &to_task.project_id)
         .await?
         .status
         == "archived"
@@ -173,68 +213,112 @@ async fn create_dependency(
         return Err(AppError::Conflict("archived projects are read-only".into()));
     }
 
-    // The predecessor must exist in the same project (and therefore team).
+    // The dependency task must exist in the same project (and therefore team).
     let mut args = Args::new();
-    args.s(&predecessor).s(&successor.project_id);
-    let pred_row = conn
-        .fetch_optional(
-            "SELECT team_id FROM tasks WHERE id = ? AND project_id = ?",
-            args,
-        )
+    args.s(&from_task).s(&to_task.project_id);
+    let from_row = conn
+        .fetch_optional("SELECT team_id FROM tasks WHERE id = ? AND project_id = ?", args)
         .await?
         .ok_or_else(|| {
             AppError::validation(
-                "predecessor_task_id",
-                "the predecessor task does not exist in this project",
+                "from_task_id",
+                "the dependency task does not exist in this project",
             )
         })?;
-    if pred_row.try_get::<String, _>("team_id")? != successor.team_id {
+    if from_row.try_get::<String, _>("team_id")? != to_task.team_id {
         return Err(AppError::internal("project/team mismatch")); // unreachable: project filter
     }
 
-    if load_edge(&mut conn, &predecessor, &task_id)
+    if load_edge(&mut conn, &from_task, &task_id, dep_type)
         .await?
         .is_some()
     {
         return Err(AppError::Conflict("this dependency already exists".into()));
     }
-    // A stored reverse edge is a two-task cycle.
-    if load_edge(&mut conn, &task_id, &predecessor)
-        .await?
-        .is_some()
-    {
-        return Err(AppError::Conflict(
-            "this dependency would create a cycle with the existing reverse dependency".into(),
-        ));
-    }
-
-    // Serialize per project so two concurrent requests cannot both pass the
-    // cycle check and close a loop together (see db::ProjectDependencyLock).
-    {
-        let mut lock = crate::db::ProjectDependencyLock::for_driver(conn.driver());
-        lock.acquire(&mut conn, &successor.project_id).await;
-        // Under the lock: does the successor already transitively depend on
-        // the predecessor? Then predecessor → successor closes a loop.
-        if reachable(&mut conn, &task_id, &predecessor).await? {
+    // Cycle prevention applies only to `blocks` (informational types never
+    // constrain). A stored direct pair-edge is a two-task cycle.
+    if dep_type == "blocks" {
+        if load_edge(&mut conn, &task_id, &from_task, "blocks")
+            .await?
+            .is_some()
+        {
             return Err(AppError::Conflict(
-                "this dependency would create a cycle: the predecessor already depends on this task"
-                    .into(),
+                "this dependency would create a cycle with the existing reverse dependency".into(),
             ));
         }
+        // Serialize per project so two concurrent requests cannot both pass
+        // the DFS check and close a loop together (db::ProjectDependencyLock).
+        {
+            let mut lock = crate::db::ProjectDependencyLock::for_driver(conn.driver());
+            lock.acquire(&mut conn, &to_task.project_id).await;
+            if reachable(&mut conn, &task_id, &from_task).await? {
+                lock.release(&mut conn, &to_task.project_id).await;
+                return Err(AppError::Conflict(
+                    "this dependency would create a circular dependency: the dependency task already depends on this task (directly or transitively)".into(),
+                ));
+            }
+            let id = util::new_id();
+            let mut args = Args::new();
+            args.s(&id)
+                .s(&from_task)
+                .s(&task_id)
+                .s(dep_type)
+                .b(body.auto_schedule)
+                .s(&user.id)
+                .i(util::now_ms());
+            conn.execute(
+                "INSERT INTO task_dependencies (id, from_task_id, to_task_id, type, auto_schedule, created_by, created_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                args,
+            )
+            .await?;
+            lock.release(&mut conn, &to_task.project_id).await;
+        }
+
+        // Opt-in CPM: if both tasks carry due dates and this task's due date
+        // precedes its dependency's, pull it forward to match.
+        if body.auto_schedule {
+            let mut args = Args::new();
+            args.s(&from_task);
+            let dep_due = conn
+                .fetch_optional("SELECT due_date FROM tasks WHERE id = ?", args)
+                .await?;
+            if let Some(row) = dep_due {
+                let dep_due_date: Option<String> = row.try_get("due_date").ok();
+                if let Some(dep_due) = dep_due_date {
+                    if let Some(my_due) = &to_task.due_date {
+                        if my_due.as_str() < dep_due.as_str() {
+                            let mut a = Args::new();
+                            a.s(&dep_due).i(util::now_ms()).s(&task_id);
+                            conn.execute(
+                                "UPDATE tasks SET due_date = ?, updated_at = ? WHERE id = ?",
+                                a,
+                            )
+                            .await?;
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Informational types: no cycle check, no scheduling.
+        let id = util::new_id();
         let mut args = Args::new();
-        args.s(&predecessor)
+        args.s(&id)
+            .s(&from_task)
             .s(&task_id)
-            .i(util::now_ms())
-            .s(&user.id);
+            .s(dep_type)
+            .b(body.auto_schedule)
+            .s(&user.id)
+            .i(util::now_ms());
         conn.execute(
-            "INSERT INTO task_dependencies (predecessor_task_id, successor_task_id, created_at, created_by) \
-             VALUES (?, ?, ?, ?)",
+            "INSERT INTO task_dependencies (id, from_task_id, to_task_id, type, auto_schedule, created_by, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
             args,
         )
         .await?;
-        lock.release(&mut conn, &successor.project_id).await;
     }
-    let edge = load_edge(&mut conn, &predecessor, &task_id)
+    let edge = load_edge(&mut conn, &from_task, &task_id, dep_type)
         .await?
         .ok_or_else(|| AppError::internal("dependency insert did not persist"))?;
     conn.commit().await?;
@@ -244,19 +328,19 @@ async fn create_dependency(
 async fn remove_dependency(
     State(state): State<AppState>,
     user: AuthedUser,
-    Path((task_id, predecessor_task_id)): Path<(String, String)>,
+    Path((task_id, dep_id)): Path<(String, String)>,
 ) -> Result<StatusCode, AppError> {
     let mut conn = state.db.begin().await?;
-    let (_successor, actor) =
+    let (_, actor) =
         crate::tasks::require_task_access(&mut conn, &task_id, &user.id).await?;
     if actor.is_guest() {
         return Err(deny_guest());
     }
     let mut args = Args::new();
-    args.s(&predecessor_task_id).s(&task_id);
+    args.s(&dep_id).s(&task_id);
     let affected = conn
         .execute(
-            "DELETE FROM task_dependencies WHERE predecessor_task_id = ? AND successor_task_id = ?",
+            "DELETE FROM task_dependencies WHERE id = ? AND to_task_id = ?",
             args,
         )
         .await?;
@@ -267,6 +351,9 @@ async fn remove_dependency(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Grouped dependency listing: for `task_id`, `blocked_by` = edges whose
+/// to_task_id is this task (other tasks this one depends on), `blocking` =
+/// edges whose from_task_id is this task (other tasks depending on it).
 async fn list_dependencies(
     State(state): State<AppState>,
     user: AuthedUser,
@@ -274,26 +361,30 @@ async fn list_dependencies(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let mut conn = state.db.conn();
     let (_, actor) = crate::tasks::require_task_access(&mut conn, &task_id, &user.id).await?;
+    // Guests see the edges read-only; only members manage them.
+    let can_manage = !actor.is_guest();
 
     let mut args = Args::new();
     args.s(&task_id);
     let blocker_rows = conn
         .fetch_all(
-            "SELECT t.id, t.title, t.status, t.due_date \
-             FROM task_dependencies d JOIN tasks t ON t.id = d.predecessor_task_id \
-             WHERE d.successor_task_id = ? ORDER BY d.created_at",
+            "SELECT d.id, d.type, t.id AS task_id, t.title, t.status, t.due_date \
+             FROM task_dependencies d JOIN tasks t ON t.id = d.from_task_id \
+             WHERE d.to_task_id = ? ORDER BY d.created_at",
             args,
         )
         .await?;
-    let blockers = blocker_rows
+    let blocked_by: Vec<serde_json::Value> = blocker_rows
         .iter()
         .map(|r| {
-            Ok(DependencyTaskRef {
-                task_id: r.try_get("id")?,
-                title: r.try_get("title")?,
-                status: r.try_get("status")?,
-                due_date: r.try_get("due_date")?,
-            })
+            Ok(serde_json::json!({
+                "dep_id": r.try_get::<String, _>("id")?,
+                "type": r.try_get::<String, _>("type")?,
+                "task_id": r.try_get::<String, _>("task_id")?,
+                "title": r.try_get::<String, _>("title")?,
+                "status": r.try_get::<String, _>("status")?,
+                "due_date": r.try_get::<Option<String>, _>("due_date")?,
+            }))
         })
         .collect::<Result<Vec<_>, AppError>>()?;
 
@@ -301,30 +392,82 @@ async fn list_dependencies(
     args.s(&task_id);
     let successor_rows = conn
         .fetch_all(
-            "SELECT t.id, t.title, t.status, t.due_date \
-             FROM task_dependencies d JOIN tasks t ON t.id = d.successor_task_id \
-             WHERE d.predecessor_task_id = ? ORDER BY d.created_at",
+            "SELECT d.id, d.type, t.id AS task_id, t.title, t.status, t.due_date \
+             FROM task_dependencies d JOIN tasks t ON t.id = d.to_task_id \
+             WHERE d.from_task_id = ? ORDER BY d.created_at",
             args,
         )
         .await?;
-    let blocked = successor_rows
+    let blocking: Vec<serde_json::Value> = successor_rows
         .iter()
         .map(|r| {
-            Ok(DependencyTaskRef {
-                task_id: r.try_get("id")?,
-                title: r.try_get("title")?,
-                status: r.try_get("status")?,
-                due_date: r.try_get("due_date")?,
-            })
+            Ok(serde_json::json!({
+                "dep_id": r.try_get::<String, _>("id")?,
+                "type": r.try_get::<String, _>("type")?,
+                "task_id": r.try_get::<String, _>("task_id")?,
+                "title": r.try_get::<String, _>("title")?,
+                "status": r.try_get::<String, _>("status")?,
+                "due_date": r.try_get::<Option<String>, _>("due_date")?,
+            }))
         })
         .collect::<Result<Vec<_>, AppError>>()?;
 
-    Ok(Json(json!({
-        "blockers": blockers,
-        "blocked": blocked,
-        "can_manage": !actor.is_guest(),
+    Ok(Json(serde_json::json!({
+        "blocked_by": blocked_by,
+        "blocking": blocking,
+        "can_manage": can_manage,
     })))
 }
+
+/// Subgraph for visualization: the task's `blocks` dependencies and
+/// blockers (task refs), expanded one level.
+async fn dependency_graph(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(task_id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let mut conn = state.db.conn();
+    crate::tasks::require_task_access(&mut conn, &task_id, &user.id).await?;
+
+    let mut args = Args::new();
+    args.s(&task_id);
+    let up_rows = conn
+        .fetch_all(
+            "SELECT d.from_task_id AS task_id, t.title, t.status, t.due_date \
+             FROM task_dependencies d JOIN tasks t ON t.id = d.from_task_id \
+             WHERE d.to_task_id = ? AND d.type = 'blocks'",
+            args,
+        )
+        .await?;
+    let mut args = Args::new();
+    args.s(&task_id);
+    let down_rows = conn
+        .fetch_all(
+            "SELECT d.to_task_id AS task_id, t.title, t.status, t.due_date \
+             FROM task_dependencies d JOIN tasks t ON t.id = d.to_task_id \
+             WHERE d.from_task_id = ? AND d.type = 'blocks'",
+            args,
+        )
+        .await?;
+    let node_json = |rows: &[sqlx::any::AnyRow]| -> Result<Vec<serde_json::Value>, AppError> {
+        rows.iter()
+            .map(|r| {
+                Ok(serde_json::json!({
+                    "task_id": r.try_get::<String, _>("task_id")?,
+                    "title": r.try_get::<String, _>("title")?,
+                    "status": r.try_get::<String, _>("status")?,
+                    "due_date": r.try_get::<Option<String>, _>("due_date")?,
+                }))
+            })
+            .collect()
+    };
+    Ok(Json(serde_json::json!({
+        "task_id": task_id,
+        "blocked_by": node_json(&up_rows)?,
+        "blocking": node_json(&down_rows)?,
+    })))
+}
+
 
 // ===========================================================================
 // Workload (team-scoped SQL aggregation)

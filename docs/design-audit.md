@@ -112,9 +112,9 @@ every addition was measured; all new surfaces are lazy-loaded.
   line), so it needs measurement work.
 - The command palette does not include the new Settings/section
   targets yet.
-- Guest permission editor uses native `<select>` elements rather than
-  the Radix Select for now (dialog-in-dialog focus order); a Radix
-  pass is cosmetic follow-up.
+- ~~Guest permission editor uses native `<select>` elements~~ — resolved
+  in Phase 13.5/14: the drawer is now an accessible accordion of
+  role="switch" toggles (no extra dependency, ADR-0021).
 - Mobile drawer content does not yet show the Guest badge (it renders
   in the topbar, which the drawer overlays).
 
@@ -127,3 +127,34 @@ the Phase 13 changes intentionally refreshed the task-panel baseline
 `npx playwright test quality --update-snapshots` regenerates them.
 New Phase 13 surfaces are asserted structurally in `e2e/phase13.spec.ts`
 rather than pixel-pinned, since their final polish is still landing.
+
+## Phase 14 audit pass (2026-11-14)
+
+- **Priority dropdown (WS3).** Each priority row now leads with a tinted
+  icon and a bold name, followed by a muted bilingual (Persian/English)
+  description that is always visible — users no longer need a tooltip to
+  learn what "critical" means, and the Persian-first copy matches the
+  Doran calendar's locale. 12px muted description, `aria-describedby`
+  wired.
+- **Role badges (WS4).** Every member row carries a role badge (Owner =
+  amber crown, Admin = purple shield, Manager = blue users, Member = slate
+  user, Viewer = gray eye, Guest = teal user-check) — previously the badge
+  was gated behind the owner check, so 4 of 6 roles were invisible.
+  20px pill, `aria-label="Role: …"`.
+- **Guest permission drawer (WS2, ADR-0021).** Domain accordions (Team /
+  Projects / Tasks / Administration) with live grant-count chips, a
+  summary badge in the header, switch toggles with dependency rules
+  (upload implies comment; view_task disables view_task_own), and a
+  transactional save with compensating rollback. Guest cards group their
+  badges by domain.
+- **Notification action center (WS5, ADR-0022).** Tabs with server-backed
+  unread chips, search, pinned section, Today/Yesterday/This Week/Earlier
+  groups, per-type left color bars, burst batching ("+N" with
+  expander), and per-row quick actions (Reply / Reschedule / View / Pin).
+- **Dependency panel (WS6, ADR-0023).** Searchable command-menu picker
+  with type chips and auto-schedule opt-in, type-colored edge cards with
+  At Risk badges, lazy SVG graph modal (three-column blocks subgraph).
+- **Deadline picker (WS1).** The Doran date field in the New Task dialog
+  opens on click and keyboard, renders above the dialog through the
+  portal container, handles null cleanly, and validates
+  deadline >= due date inline.

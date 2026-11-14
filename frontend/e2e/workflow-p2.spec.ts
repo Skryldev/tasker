@@ -28,6 +28,9 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
   });
 
   test("setup: admin signs in, creates team + member + project + task", async () => {
+    // Suffix-qualified names: stale teams from earlier runs would break the
+    // name-based lookup below.
+    const suffix = Date.now().toString(36);
     await page.goto("/login");
     await page.getByLabel("Email").fill(ADMIN.email);
     await page.getByLabel("Password").fill(ADMIN.password);
@@ -36,14 +39,14 @@ test.describe.serial("Phase 2 workflow and notifications", () => {
 
     await page.getByTestId("team-switcher").click();
     await page.getByText("Create team…").click();
-    await page.getByLabel("Name").fill("P2 Team");
+    await page.getByLabel("Name").fill(`P2 Team ${suffix}`);
     await page.getByTestId("create-team-submit").click();
     // Resolve by name via the API: the URL's team param can be defaulted by
     // the workspace and is not race-proof here.
     await expect(page.getByTestId("team-switcher")).toContainText("P2 Team");
     const created = await page.request.get("/api/v1/teams");
     teamId = ((await created.json()).items as { id: string; name: string }[]).find(
-      (t) => t.name === "P2 Team",
+      (t) => t.name === `P2 Team ${suffix}`,
     )!.id;
 
     // Bug 2 (ADR-0014): the account is created by the Owner on the Users

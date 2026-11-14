@@ -96,6 +96,10 @@ export function StatusControl({ task }: { task: Task }) {
   const qc = useQueryClient();
   const [rejectOpen, setRejectOpen] = useState(false);
   const [acceptOpen, setAcceptOpen] = useState(false);
+  const [blockersOpen, setBlockersOpen] = useState(false);
+  const [blockersNote, setBlockersNote] = useState<string | null>(null);
+  const [overrideReason, setOverrideReason] = useState("");
+  const [overrideError, setOverrideError] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState<string | null>(null);
 
@@ -140,6 +144,26 @@ export function StatusControl({ task }: { task: Task }) {
     mutationFn: () => transition("closed"),
     onSuccess: (updated) => {
       setAcceptOpen(false);
+      refresh(updated);
+    },
+    onError: (error) => {
+      // Phase 14 WS6 (ADR-0023): the server refuses to close a task with
+      // open `blocks` dependencies unless an override reason is given —
+      // surface the blocker modal instead of a dead-end toast.
+      if (error instanceof ApiError && error.status === 409) {
+        setAcceptOpen(false);
+        setBlockersNote(error.message);
+        setBlockersOpen(true);
+        return;
+      }
+      onError(error);
+    },
+  });
+  const acceptWithOverride = useMutation({
+    mutationFn: (why: string) => transition("closed", why),
+    onSuccess: (updated) => {
+      setBlockersOpen(false);
+      setOverrideReason("");
       refresh(updated);
     },
     onError,
@@ -305,6 +329,23 @@ export function StatusControl({ task }: { task: Task }) {
         assigneeName={task.assignee?.display_name}
         onSubmit={() => accept.mutate()}
       />
+      <BlockersDialog
+        open={blockersOpen}
+        onOpenChange={setBlockersOpen}
+        note={blockersNote}
+        reason={overrideReason}
+        setReason={setOverrideReason}
+        error={overrideError}
+        pending={acceptWithOverride.isPending}
+        onSubmit={() => {
+          if (!overrideReason.trim()) {
+            setOverrideError("An override reason is required and is recorded in the audit trail.");
+            return;
+          }
+          setOverrideError(null);
+          acceptWithOverride.mutate(overrideReason.trim());
+        }}
+      />
       <RejectDialog
         open={rejectOpen}
         onOpenChange={setRejectOpen}
@@ -356,6 +397,79 @@ function AcceptDialog({
             {pending ? "Closing…" : "Accept & Close"}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Close-with-blockers (Phase 14 WS6, ADR-0023): the server returned 409
+ * because open `blocks` dependencies exist. Closing anyway requires an
+ * explicit override reason, which the server records in the audit trail.
+ */
+function BlockersDialog({
+  open,
+  onOpenChange,
+  note,
+  reason,
+  setReason,
+  error,
+  pending,
+  onSubmit,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  note: string | null;
+  reason: string;
+  setReason: (v: string) => void;
+  error: string | null;
+  pending: boolean;
+  onSubmit: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent role="alertdialog">
+        <DialogHeader>
+          <DialogTitle>Open dependencies block this close</DialogTitle>
+          <DialogDescription>
+            {note ?? "This task is blocked by open dependencies."} Provide a reason to close it
+            anyway — the override is recorded in the audit trail.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSubmit();
+          }}
+          noValidate
+          data-testid="blockers-override-form"
+        >
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="blockers-override-reason">Override reason</Label>
+            <Textarea
+              id="blockers-override-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Why is it safe to close this task before its dependencies?"
+              rows={3}
+              autoFocus
+              aria-invalid={Boolean(error)}
+              data-testid="blockers-reason-input"
+            />
+            {error ? (
+              <p className="text-2xs text-destructive" role="alert">{error}</p>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={pending} data-testid="blockers-override-submit">
+              {pending ? "Closing…" : "Close with override"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

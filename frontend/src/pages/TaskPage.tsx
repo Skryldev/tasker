@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -57,12 +57,28 @@ export function TaskPage() {
     projectId?: string;
   }>();
   const taskId = params.taskId;
+  const [searchParams] = useSearchParams();
+  const focusParam = searchParams.get("focus");
+
   const query = useQuery({
     queryKey: ["task", taskId],
     queryFn: () => api.getTask(taskId!),
     retry: (count, error) => error instanceof ApiError && error.status >= 500 && count < 2,
     enabled: Boolean(taskId),
   });
+
+  // Quick-action targets (Phase 14 WS5): notifications deep-link with
+  // ?focus=comments|dates — scroll to the anchored section once loaded.
+  useEffect(() => {
+    if (!focusParam || query.isLoading || !query.data) return;
+    const el = document.getElementById(focusParam === "comments" ? "task-comments" : "task-dates");
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-primary/40");
+      const t = setTimeout(() => el.classList.remove("ring-2", "ring-primary/40"), 1600);
+      return () => clearTimeout(t);
+    }
+  }, [focusParam, query.isLoading, query.data]);
 
   if (!taskId || query.isLoading) {
     return (

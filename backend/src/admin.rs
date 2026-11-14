@@ -95,11 +95,11 @@ async fn create_user(
     Json(body): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     require_owner(&state, &user).await?;
-    if let Some(bad_role) = body
+    if body
         .role
         .as_deref()
         .map(str::trim)
-        .filter(|r| !r.is_empty() && *r != users::INSTANCE_ROLE_MEMBER)
+        .is_some_and(|r| !r.is_empty() && r != users::INSTANCE_ROLE_MEMBER)
     {
         return Err(AppError::validation(
             "role",

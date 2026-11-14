@@ -221,6 +221,9 @@ pub struct Notification {
     pub summary: String,
     pub created_at: i64,
     pub read_at: Option<i64>,
+    /// Pinned items surface above the time groups (Phase 14 WS5, ADR-0022).
+    pub pinned: bool,
+    pub pinned_at: Option<i64>,
 }
 
 fn row_to_notification(row: &sqlx::any::AnyRow) -> Result<Notification, AppError> {
@@ -244,16 +247,25 @@ fn row_to_notification(row: &sqlx::any::AnyRow) -> Result<Notification, AppError
         summary: row.try_get("summary")?,
         created_at: row.try_get("created_at")?,
         read_at: row.try_get("read_at")?,
+        pinned: row
+            .try_get::<i64, _>("pinned")
+            .map(|v| v != 0)
+            .unwrap_or(false),
+        pinned_at: row.try_get("pinned_at").ok(),
     })
 }
 
 const NOTIFICATION_COLUMNS: &str = "n.id, n.event, n.task_id, n.actor_id, n.summary, n.created_at, n.read_at, \
-     u.display_name AS actor_name, u.email AS actor_email";
+     u.display_name AS actor_name, u.email AS actor_email, \
+     CASE WHEN n.pinned THEN 1 ELSE 0 END AS pinned, n.pinned_at";
 
 #[derive(Deserialize)]
 pub struct ListNotificationsQuery {
     #[serde(default)]
     pub unread: bool,
+    /// Only pinned items (the pinned section of the action center).
+    #[serde(default)]
+    pub pinned: bool,
     #[serde(default)]
     pub page: Option<u32>,
     #[serde(default)]
@@ -270,22 +282,26 @@ async fn list_notifications(
     let page_size = query.page_size.unwrap_or(20).clamp(1, 100);
     let offset = i64::from(page - 1) * i64::from(page_size);
 
-    let filter = if query.unread {
-        " AND n.read_at IS NULL"
-    } else {
-        ""
-    };
+    let mut filters = String::new();
+    if query.unread {
+        filters.push_str(" AND n.read_at IS NULL");
+    }
+    if query.pinned {
+        filters.push_str(" AND n.pinned = TRUE");
+    }
 
     let mut count_args = Args::new();
     count_args.s(&user.id);
     let total = conn
         .fetch_optional(
-            &format!("SELECT COUNT(*) AS n FROM notifications n WHERE n.recipient_id = ?{filter}"),
+            &format!("SELECT COUNT(*) AS n FROM notifications n WHERE n.recipient_id = ?{filters}"),
             count_args,
         )
         .await?
         .map_or(0, |r| r.try_get::<i64, _>("n").unwrap_or(0));
 
+    // Pinned first, then time — the client renders the pinned section from
+    // the same payload.
     let mut args = Args::new();
     args.s(&user.id).i(i64::from(page_size)).i(offset);
     let rows = conn
@@ -293,8 +309,8 @@ async fn list_notifications(
             &format!(
                 "SELECT {NOTIFICATION_COLUMNS} FROM notifications n \
                  LEFT JOIN users u ON u.id = n.actor_id \
-                 WHERE n.recipient_id = ?{filter} \
-                 ORDER BY n.created_at DESC, n.id DESC LIMIT ? OFFSET ?"
+                 WHERE n.recipient_id = ?{filters} \
+                 ORDER BY n.pinned DESC, n.pinned_at DESC, n.created_at DESC, n.id DESC LIMIT ? OFFSET ?"
             ),
             args,
         )
@@ -324,6 +340,91 @@ async fn unread_count(
         .await?
         .map_or(0, |r| r.try_get::<i64, _>("n").unwrap_or(0));
     Ok(Json(json!({ "count": count })))
+}
+
+/// Per-tab totals for the action center (Phase 14 WS5, ADR-0022):
+/// `mentions` = comment_mention events, `assigned` = task_assigned,
+/// `activity` = every other task event. Each tab carries its total and
+/// unread count.
+async fn tab_counts(
+    State(state): State<AppState>,
+    user: AuthedUser,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let mut conn = state.db.conn();
+    let mut args = Args::new();
+    args.s(&user.id);
+    let rows = conn
+        .fetch_all(
+            "SELECT event, COUNT(*) AS total, \
+             COUNT(CASE WHEN read_at IS NULL THEN 1 END) AS unread \
+             FROM notifications WHERE recipient_id = ? GROUP BY event",
+            args,
+        )
+        .await?;
+    let mut tabs = json!({
+        "all": { "total": 0, "unread": 0 },
+        "mentions": { "total": 0, "unread": 0 },
+        "assigned": { "total": 0, "unread": 0 },
+        "activity": { "total": 0, "unread": 0 },
+    });
+    for row in &rows {
+        let event: String = row.try_get("event")?;
+        let total: i64 = row.try_get("total")?;
+        let unread: i64 = row.try_get("unread").unwrap_or(0);
+        let mut bump = |tab: &str| {
+            let t = &mut tabs[tab];
+            t["total"] = serde_json::Value::from(t["total"].as_i64().unwrap_or(0) + total);
+            t["unread"] = serde_json::Value::from(t["unread"].as_i64().unwrap_or(0) + unread);
+        };
+        bump("all");
+        bump(match event.as_str() {
+            "comment_mention" => "mentions",
+            "task_assigned" => "assigned",
+            _ => "activity",
+        });
+    }
+    Ok(Json(tabs))
+}
+
+/// Pin toggle (Phase 14 WS5, ADR-0022). Pinned notifications float above
+/// the time groups; an explicit `{ "pinned": bool }` body wins, otherwise
+/// the request flips the current state.
+#[derive(Deserialize, Default)]
+pub struct PinRequest {
+    #[serde(default)]
+    pub pinned: Option<bool>,
+}
+
+async fn toggle_pin(
+    State(state): State<AppState>,
+    user: AuthedUser,
+    Path(notification_id): Path<String>,
+    body: Option<Json<PinRequest>>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let mut conn = state.db.conn();
+    let mut args = Args::new();
+    args.s(&notification_id).s(&user.id);
+    let row = conn
+        .fetch_optional(
+            "SELECT CASE WHEN pinned THEN 1 ELSE 0 END AS pinned, read_at \
+             FROM notifications WHERE id = ? AND recipient_id = ?",
+            args,
+        )
+        .await?
+        .ok_or(AppError::NotFound("notification not found"))?;
+    let current = row.try_get::<i64, _>("pinned").unwrap_or(0) != 0;
+    let target = body.and_then(|Json(b)| b.pinned).unwrap_or(!current);
+    if target != current {
+        let mut args = Args::new();
+        args.b(target).i(util::now_ms()).s(&notification_id).s(&user.id);
+        conn.execute(
+            "UPDATE notifications SET pinned = ?, pinned_at = ? \
+             WHERE id = ? AND recipient_id = ?",
+            args,
+        )
+        .await?;
+    }
+    Ok(Json(json!({ "pinned": target })))
 }
 
 /// Idempotent, recipient-scoped mark-as-read. A foreign or unknown id is a
@@ -380,6 +481,11 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/notifications", get(list_notifications))
         .route("/notifications/unread-count", get(unread_count))
+        .route("/notifications/counts", get(tab_counts))
         .route("/notifications/read-all", post(mark_all_read))
         .route("/notifications/{notification_id}/read", post(mark_read))
+        .route(
+            "/notifications/{notification_id}/pin",
+            post(toggle_pin),
+        )
 }

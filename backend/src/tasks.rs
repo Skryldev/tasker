@@ -298,6 +298,9 @@ pub async fn require_task_access(
         // Phase 13 team guests (Bug 7): an individual task READ requires
         // the explicit `view_task` grant (project scope). `view_project`
         // alone reaches the project surfaces, not the task detail.
+        // Phase 14 (ADR-0021): `view_task_own` is the assigned-tasks
+        // subset — mutually exclusive with `view_task` at grant time, and
+        // `view_task` wins here (broader grant covers the narrower one).
         || crate::guests::guest_has(
             conn,
             &task.team_id,
@@ -306,6 +309,15 @@ pub async fn require_task_access(
             Some(&task.project_id),
         )
         .await?
+        || (task.assignee_id.as_deref() == Some(user_id)
+            && crate::guests::guest_has(
+                conn,
+                &task.team_id,
+                user_id,
+                "view_task_own",
+                Some(&task.project_id),
+            )
+            .await?)
     {
         crate::projects::ProjectActor {
             membership: None,
@@ -871,7 +883,7 @@ async fn get_task(
     Path(task_id): Path<String>,
 ) -> Result<Json<Task>, AppError> {
     let mut conn = state.db.conn();
-    let (core, _) = require_task_access(&mut conn, &task_id, &user.id).await?;
+    let (core, actor) = require_task_access(&mut conn, &task_id, &user.id).await?;
     let mut task = embed_extras(&mut conn, vec![core])
         .await?
         .into_iter()
@@ -893,6 +905,21 @@ async fn get_task(
         .map(row_to_task_core)
         .collect::<Result<Vec<_>, AppError>>()?;
     task.subtasks = Some(embed_extras(&mut conn, subtask_cores).await?);
+
+    // Phase 14 (ADR-0021): dates are opt-in granular data — redact them
+    // for team guests without `view_task_dates` (Phase 3 viewers exempt).
+    if actor.is_guest()
+        && !crate::projects::guest_has_surface(
+            &mut conn,
+            &task.team_id,
+            &task.project_id,
+            &user.id,
+            "view_task_dates",
+        )
+        .await?
+    {
+        redact_task_dates(std::slice::from_mut(&mut task));
+    }
     Ok(Json(task))
 }
 
@@ -920,6 +947,10 @@ pub struct ListTasksQuery {
     pub page: Option<u32>,
     #[serde(default)]
     pub page_size: Option<u32>,
+    /// Phase 14 (ADR-0021): `view=timeline` requires the separate
+    /// `view_project_timeline` grant for team guests.
+    #[serde(default)]
+    pub view: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1079,6 +1110,18 @@ fn bind_values(args: &mut Args<'_>, values: &[FilterValue]) {
     }
 }
 
+/// Phase 14 (ADR-0021): guests without `view_task_dates` get dates
+/// redacted (null) — dates are opt-in granular data on every surface.
+fn redact_task_dates(tasks: &mut [Task]) {
+    for t in tasks {
+        t.due_date = None;
+        t.deadline = None;
+        if let Some(subs) = &mut t.subtasks {
+            redact_task_dates(subs);
+        }
+    }
+}
+
 async fn list_tasks(
     State(state): State<AppState>,
     user: AuthedUser,
@@ -1086,7 +1129,60 @@ async fn list_tasks(
     Query(query): Query<ListTasksQuery>,
 ) -> Result<Json<PaginatedTasks>, AppError> {
     let mut conn = state.db.conn();
-    require_project_access(&mut conn, &project_id, &user.id).await?;
+    let (project, actor) = require_project_access(&mut conn, &project_id, &user.id).await?;
+    let mut query = query;
+    let mut dates_redacted = false;
+    if actor.is_guest() {
+        // Phase 14 (ADR-0021): granular surface checks for team guests
+        // (Phase 3 viewers pass `guest_has_surface` unchanged).
+        if query.view.as_deref() == Some("timeline") {
+            let granted = crate::projects::guest_has_surface(
+                &mut conn,
+                &project.team_id,
+                &project_id,
+                &user.id,
+                "view_project_timeline",
+            )
+            .await?;
+            if !granted {
+                return Err(AppError::NotFound("project not found"));
+            }
+        } else {
+            let full = crate::projects::guest_has_surface(
+                &mut conn,
+                &project.team_id,
+                &project_id,
+                &user.id,
+                "view_project_tasks",
+            )
+            .await?;
+            // `view_task_own` (ADR-0021): the assigned-tasks subset — the
+            // list collapses to tasks assigned to the caller.
+            let own = !full
+                && crate::projects::guest_has_surface(
+                    &mut conn,
+                    &project.team_id,
+                    &project_id,
+                    &user.id,
+                    "view_task_own",
+                )
+                .await?;
+            if !full && !own {
+                return Err(AppError::NotFound("project not found"));
+            }
+            if own {
+                query.assignee_id = Some(user.id.clone());
+            }
+        }
+        dates_redacted = !crate::projects::guest_has_surface(
+            &mut conn,
+            &project.team_id,
+            &project_id,
+            &user.id,
+            "view_task_dates",
+        )
+        .await?;
+    }
 
     let (where_clause, values) = build_list_filters(&project_id, &query)?;
     let sort_sql = sort_expression(query.sort.as_deref())?;
@@ -1115,7 +1211,7 @@ async fn list_tasks(
         .filter_map(|r| r.try_get::<String, _>("id").ok())
         .collect();
 
-    let items = if ids.is_empty() {
+    let mut items = if ids.is_empty() {
         Vec::new()
     } else {
         let placeholders = vec!["?"; ids.len()].join(", ");
@@ -1137,6 +1233,9 @@ async fn list_tasks(
         let cores: Vec<TaskCore> = ids.iter().filter_map(|id| by_id.remove(id)).collect();
         embed_extras(&mut conn, cores).await?
     };
+    if dates_redacted {
+        redact_task_dates(&mut items);
+    }
 
     Ok(Json(PaginatedTasks {
         items,
@@ -1159,7 +1258,31 @@ async fn board(
     Query(query): Query<BoardQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let mut conn = state.db.conn();
-    let (project, _) = require_project_access(&mut conn, &project_id, &user.id).await?;
+    let (project, actor) = require_project_access(&mut conn, &project_id, &user.id).await?;
+    // Phase 14 (ADR-0021): the board is its own grantable surface for team
+    // guests (Phase 3 viewers pass `guest_has_surface` unchanged).
+    let mut dates_redacted = false;
+    if actor.is_guest() {
+        let granted = crate::projects::guest_has_surface(
+            &mut conn,
+            &project.team_id,
+            &project_id,
+            &user.id,
+            "view_project_board",
+        )
+        .await?;
+        if !granted {
+            return Err(AppError::NotFound("project not found"));
+        }
+        dates_redacted = !crate::projects::guest_has_surface(
+            &mut conn,
+            &project.team_id,
+            &project_id,
+            &user.id,
+            "view_task_dates",
+        )
+        .await?;
+    }
     let page_size = query.page_size.unwrap_or(50).clamp(1, 100);
 
     let mut args = Args::new();
@@ -1193,7 +1316,10 @@ async fn board(
             .iter()
             .map(row_to_task_core)
             .collect::<Result<Vec<_>, AppError>>()?;
-        let items = embed_extras(&mut conn, cores).await?;
+        let mut items = embed_extras(&mut conn, cores).await?;
+        if dates_redacted {
+            redact_task_dates(&mut items);
+        }
         columns.push(json!({
             "status": status,
             "total": totals.get(status).copied().unwrap_or(0),
@@ -1936,6 +2062,36 @@ async fn run_transition(
         .as_deref()
         .zip(task.reporter_id.as_deref())
         .is_some_and(|(a, r)| a == r);
+
+    // Phase 14 WS6: closing a task with open `blocks` dependencies requires
+    // an explicit override reason (audited in the activity log). Without a
+    // reason the endpoint returns 409 and lists the open blockers.
+    if to == "closed" {
+        let mut args = Args::new();
+        args.s(&task.id);
+        let open_blockers: Vec<(String, String)> = conn
+            .fetch_all(
+                "SELECT d.from_task_id, t.title                  FROM task_dependencies d JOIN tasks t ON t.id = d.from_task_id                  WHERE d.to_task_id = ? AND d.type = 'blocks'                    AND t.status NOT IN ('closed', 'resolved')",
+                args,
+            )
+            .await?
+            .into_iter()
+            .map(|r| Ok((r.try_get::<String, _>("from_task_id")?, r.try_get::<String, _>("title")?)))
+            .collect::<Result<Vec<_>, AppError>>()?;
+        if !open_blockers.is_empty() {
+            let override_given = reason.is_some();
+            if !override_given {
+                let titles: Vec<String> =
+                    open_blockers.iter().map(|(_, t)| format!("\"{t}\"")).collect();
+                return Err(AppError::Conflict(format!(
+                    "this task is blocked by {} open dependenc{}: {}; provide an override reason to close it anyway",
+                    open_blockers.len(),
+                    if open_blockers.len() == 1 { "y" } else { "ies" },
+                    titles.join(", ")
+                )));
+            }
+        }
+    }
 
     let kind = plan_transition(
         &task.status,

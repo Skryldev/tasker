@@ -196,7 +196,21 @@ async fn list_attachments(
     Path(task_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let mut conn = state.db.conn();
-    tasks::require_task_access(&mut conn, &task_id, &user.id).await?;
+    let (task, actor) = tasks::require_task_access(&mut conn, &task_id, &user.id).await?;
+    // Phase 14 (ADR-0021): a team guest lists files only with the
+    // `view_task_attachments` grant (Phase 3 viewers are exempt).
+    if actor.is_guest()
+        && !crate::projects::guest_has_surface(
+            &mut conn,
+            &task.team_id,
+            &task.project_id,
+            &user.id,
+            "view_task_attachments",
+        )
+        .await?
+    {
+        return Err(AppError::NotFound("task not found"));
+    }
     let mut args = Args::new();
     args.s(&task_id);
     let rows = conn
@@ -229,13 +243,32 @@ async fn upload_attachment(
     let mut conn = state.db.begin().await?;
     let (task, actor) = tasks::require_task_access(&mut conn, &task_id, &user.id).await?;
     tasks::ensure_task_mutable(&task)?;
-    // Attachments follow the task-edit rule: task editors only.
-    let can_update_any = actor.can(crate::authorization::Capability::UpdateAnyTask);
-    let is_own = task.created_by == user.id || task.assignee_id.as_deref() == Some(&user.id);
-    if !can_update_any && !is_own {
-        return Err(AppError::Forbidden(
-            "you can only attach files to tasks you created or are assigned to",
-        ));
+    // Phase 14 (ADR-0021): a team guest uploads only with the explicit
+    // `upload_task_attachments` grant; the task-edit rule still applies to
+    // members. Phase 3 viewers keep their read-only rule.
+    if actor.is_guest() {
+        let granted = crate::projects::guest_has_surface(
+            &mut conn,
+            &task.team_id,
+            &task.project_id,
+            &user.id,
+            "upload_task_attachments",
+        )
+        .await?;
+        if !granted {
+            return Err(AppError::Forbidden(
+                "guests need the upload_task_attachments grant to attach files",
+            ));
+        }
+    } else {
+        // Attachments follow the task-edit rule: task editors only.
+        let can_update_any = actor.can(crate::authorization::Capability::UpdateAnyTask);
+        let is_own = task.created_by == user.id || task.assignee_id.as_deref() == Some(&user.id);
+        if !can_update_any && !is_own {
+            return Err(AppError::Forbidden(
+                "you can only attach files to tasks you created or are assigned to",
+            ));
+        }
     }
     let project = crate::projects::find_project(&mut conn, &task.project_id).await?;
     if project.status == "archived" {
@@ -367,7 +400,23 @@ async fn download_attachment(
 ) -> Result<Response, AppError> {
     let mut conn = state.db.conn();
     let (attachment, storage_key, _) = load_attachment(&mut conn, &attachment_id).await?;
-    tasks::require_task_access(&mut conn, &attachment.task_id, &user.id).await?;
+    let (task, actor) =
+        tasks::require_task_access(&mut conn, &attachment.task_id, &user.id).await?;
+    // Phase 14 (ADR-0021): a team guest downloads bytes only with the
+    // `download_task_attachments` grant (viewing the list is a separate,
+    // weaker grant). Phase 3 viewers are exempt.
+    if actor.is_guest()
+        && !crate::projects::guest_has_surface(
+            &mut conn,
+            &task.team_id,
+            &task.project_id,
+            &user.id,
+            "download_task_attachments",
+        )
+        .await?
+    {
+        return Err(AppError::NotFound("attachment not found"));
+    }
     drop(conn);
 
     let storage = Storage::from_config(&state.config.attachments);
@@ -411,6 +460,13 @@ async fn delete_attachment(
     let (task, actor) =
         tasks::require_task_access(&mut conn, &attachment.task_id, &user.id).await?;
     tasks::ensure_task_mutable(&task)?;
+    // Phase 14 (ADR-0021): guests never delete attachments — the upload
+    // grant covers adding files, not removing them.
+    if actor.is_guest() {
+        return Err(AppError::Forbidden(
+            "guests have read-only attachment access",
+        ));
+    }
     // Attachments follow the task-edit rule: task editors only.
     let can_update_any = actor.can(crate::authorization::Capability::UpdateAnyTask);
     let is_own = task.created_by == user.id || task.assignee_id.as_deref() == Some(&user.id);

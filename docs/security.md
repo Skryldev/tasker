@@ -236,6 +236,30 @@ Secrets come from environment variables only (`.env` for Compose, gitignored;
 images or committed files, and `bootstrap-admin` accepts the password via
 hidden prompt or env var without echoing it.
 
+## Team guests: granular permission model (RBAC v2, ADR-0021)
+
+Team guests (ADR-0018) are non-members whose every capability is an
+explicitly granted row in `team_guest_permissions`. Since Phase 14 the
+permission set is granular — nineteen permissions across four domains
+(Team, Projects, Tasks, Administration), each granted either team-scoped
+or project-scoped (`scope_type` + `scope_id`). Enforcement is
+per-surface: every read endpoint resolves the specific permission it
+requires (board ≠ task list ≠ timeline ≠ task detail ≠ dates ≠ comments ≠
+attachments), guests never delete attachments, and `view_task`/`view_task_own`
+are mutually exclusive with `view_task` winning. Denials stay
+non-disclosing (404), matching ADR-0018. Date redaction (`view_task_dates`)
+nulls due dates/deadlines in every task payload for guests without the
+grant.
+
+The two-step invitation flow (`invite_guest` + `guest_invitations`)
+means a guest can only *request* an invitation; an Owner/Admin must
+approve before any access is created, and the decision (who approved what,
+when) is stored on the row.
+
+Legacy coarse grants migrate one-to-many (see the table in ADR-0021) so
+existing guests keep exactly the access they had; the CHECK constraint
+widens in the same transaction.
+
 ## Known limitations (Phase 1)
 
 - No 2FA / WebAuthn, no password reset e-mails (documented deferral).

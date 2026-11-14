@@ -8401,14 +8401,14 @@ async fn phase3_matrix() {
         let (code, _) = get_json(&app.app, &format!("/api/v1/tasks/{t1_id}"), &guest).await;
         assert_eq!(code, StatusCode::OK, "[{engine}] re-granted read");
 
-        // ---- Dependencies ------------------------------------------------------
+        // ---- Dependencies (Phase 14 engine, ADR-0023) ---------------------------
         // Guest cannot create; can read.
         let (code, _) = send_json(
             &app.app,
             "POST",
             &format!("/api/v1/tasks/{t2_id}/dependencies"),
             Some(&guest),
-            json!({"predecessor_task_id": t1_id}),
+            json!({"from_task_id": t1_id}),
         )
         .await;
         assert_eq!(
@@ -8423,7 +8423,6 @@ async fn phase3_matrix() {
         )
         .await;
         assert_eq!(code, StatusCode::OK, "[{engine}] guest dependency list");
-        assert_eq!(deps["can_manage"], false);
 
         // Valid edge: t1 blocks t2.
         let (code, edge) = send_json(
@@ -8431,11 +8430,14 @@ async fn phase3_matrix() {
             "POST",
             &format!("/api/v1/tasks/{t2_id}/dependencies"),
             Some(&member),
-            json!({"predecessor_task_id": t1_id}),
+            json!({"from_task_id": t1_id}),
         )
         .await;
         assert_eq!(code, StatusCode::CREATED, "[{engine}] create edge");
-        assert_eq!(edge["predecessor_task_id"].as_str().unwrap(), t1_id);
+        assert_eq!(edge["from_task_id"].as_str().unwrap(), t1_id);
+        assert_eq!(edge["to_task_id"].as_str().unwrap(), t2_id);
+        assert_eq!(edge["type"].as_str().unwrap(), "blocks");
+        let edge_id = edge["id"].as_str().unwrap().to_string();
 
         // Duplicate rejected.
         let (code, _) = send_json(
@@ -8443,7 +8445,7 @@ async fn phase3_matrix() {
             "POST",
             &format!("/api/v1/tasks/{t2_id}/dependencies"),
             Some(&member),
-            json!({"predecessor_task_id": t1_id}),
+            json!({"from_task_id": t1_id}),
         )
         .await;
         assert_eq!(code, StatusCode::CONFLICT, "[{engine}] duplicate edge");
@@ -8454,7 +8456,7 @@ async fn phase3_matrix() {
             "POST",
             &format!("/api/v1/tasks/{t1_id}/dependencies"),
             Some(&member),
-            json!({"predecessor_task_id": t1_id}),
+            json!({"from_task_id": t1_id}),
         )
         .await;
         assert_eq!(
@@ -8463,13 +8465,13 @@ async fn phase3_matrix() {
             "[{engine}] self edge"
         );
 
-        // Two-node cycle rejected.
+        // Two-node cycle rejected (blocks type only).
         let (code, _) = send_json(
             &app.app,
             "POST",
             &format!("/api/v1/tasks/{t1_id}/dependencies"),
             Some(&member),
-            json!({"predecessor_task_id": t2_id}),
+            json!({"from_task_id": t2_id}),
         )
         .await;
         assert_eq!(code, StatusCode::CONFLICT, "[{engine}] two-node cycle");
@@ -8480,7 +8482,7 @@ async fn phase3_matrix() {
             "POST",
             &format!("/api/v1/tasks/{t2_id}/dependencies"),
             Some(&member),
-            json!({"predecessor_task_id": t3_id}),
+            json!({"from_task_id": t3_id}),
         )
         .await;
         assert_eq!(
@@ -8495,7 +8497,7 @@ async fn phase3_matrix() {
             "POST",
             &format!("/api/v1/tasks/{t2_id}/dependencies"),
             Some(&member),
-            json!({"predecessor_task_id":"00000000-0000-0000-0000-000000000000"}),
+            json!({"from_task_id":"00000000-0000-0000-0000-000000000000"}),
         )
         .await;
         assert_eq!(
@@ -8504,8 +8506,40 @@ async fn phase3_matrix() {
             "[{engine}] unknown predecessor"
         );
 
-        // Multi-node cycle: create t2→t3' chain inside shared project with a
-        // third task, then attempt the closing edge.
+        // Unknown type rejected.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t2_id}/dependencies"),
+            Some(&member),
+            json!({"from_task_id": t3_id, "dep_type": "depends_on"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] unknown type"
+        );
+
+        // Informational types never constrain: the reverse pair edge is
+        // allowed for relates_to (would be a cycle for blocks).
+        let (code, info_edge) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/tasks/{t1_id}/dependencies"),
+            Some(&member),
+            json!({"from_task_id": t2_id, "dep_type": "relates_to"}),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::CREATED,
+            "[{engine}] relates_to bypasses cycle check"
+        );
+        assert_eq!(info_edge["type"].as_str().unwrap(), "relates_to");
+
+        // Multi-node cycle: t1 blocks t4, t4 blocks t2 — then the closing
+        // edge t2 blocks t1 would close the loop.
         let (code, t4) = send_json(
             &app.app,
             "POST",
@@ -8521,7 +8555,7 @@ async fn phase3_matrix() {
             "POST",
             &format!("/api/v1/tasks/{t4_id}/dependencies"),
             Some(&member),
-            json!({"predecessor_task_id": t1_id}),
+            json!({"from_task_id": t1_id}),
         )
         .await;
         assert_eq!(code, StatusCode::CREATED, "[{engine}] chain 1");
@@ -8531,7 +8565,7 @@ async fn phase3_matrix() {
             "POST",
             &format!("/api/v1/tasks/{t2_id}/dependencies"),
             Some(&member),
-            json!({"predecessor_task_id": t4_id}),
+            json!({"from_task_id": t4_id}),
         )
         .await;
         assert_eq!(code, StatusCode::CREATED, "[{engine}] chain 2");
@@ -8541,35 +8575,48 @@ async fn phase3_matrix() {
             "POST",
             &format!("/api/v1/tasks/{t1_id}/dependencies"),
             Some(&member),
-            json!({"predecessor_task_id": t2_id}),
+            json!({"from_task_id": t2_id}),
         )
         .await;
         assert_eq!(code, StatusCode::CONFLICT, "[{engine}] multi-node cycle");
 
-        // Blockers/successors listing correct.
+        // Grouped listing: blocked_by = edges INTO this task; blocking =
+        // edges OUT of this task.
         let (_code, deps) = get_json(
             &app.app,
             &format!("/api/v1/tasks/{t2_id}/dependencies"),
             &member,
         )
         .await;
-        let blockers = deps["blockers"].as_array().unwrap();
-        assert_eq!(blockers.len(), 2, "[{engine}] t2 has 2 blockers");
+        let blocked_by = deps["blocked_by"].as_array().unwrap();
+        assert_eq!(blocked_by.len(), 2, "[{engine}] t2 depends on t1 and t4");
         let (_code, deps) = get_json(
             &app.app,
             &format!("/api/v1/tasks/{t1_id}/dependencies"),
             &member,
         )
         .await;
-        // t1 blocks t2 (the first edge) and t4.
-        let blocked_ids: Vec<&str> = deps["blocked"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|b| b["task_id"].as_str().unwrap())
-            .collect();
-        assert_eq!(blocked_ids.len(), 2, "[{engine}] t1 blocks t2 and t4");
-        assert!(blocked_ids.contains(&t4_id));
+        // t1 blocks t2 and t4; the relates_to edge (from t2) shows in t1's
+        // blocked_by, not in its blocking.
+        let blocking = deps["blocking"].as_array().unwrap();
+        assert_eq!(blocking.len(), 2, "[{engine}] t1 blocks t2 and t4");
+        let t1_blocked_by = deps["blocked_by"].as_array().unwrap();
+        assert_eq!(t1_blocked_by.len(), 1, "[{engine}] relates_to lands in blocked_by");
+        assert_eq!(t1_blocked_by[0]["type"].as_str().unwrap(), "relates_to");
+
+        // Graph endpoint: blocks-only one-level expansion.
+        let (_code, graph) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{t2_id}/dependencies/graph"),
+            &member,
+        )
+        .await;
+        assert_eq!(graph["task_id"].as_str().unwrap(), t2_id);
+        assert_eq!(
+            graph["blocked_by"].as_array().unwrap().len(),
+            2,
+            "[{engine}] graph lists both blockers"
+        );
 
         // Deleting a task cascades its edges.
         let (code, _) = send_request(
@@ -8586,9 +8633,9 @@ async fn phase3_matrix() {
             &member,
         )
         .await;
-        let blockers = deps["blockers"].as_array().unwrap();
-        assert_eq!(blockers.len(), 1, "[{engine}] t4 edges cascaded");
-        assert_eq!(blockers[0]["task_id"].as_str().unwrap(), t1_id);
+        let blocked_by = deps["blocked_by"].as_array().unwrap();
+        assert_eq!(blocked_by.len(), 1, "[{engine}] t4 edges cascaded");
+        assert_eq!(blocked_by[0]["task_id"].as_str().unwrap(), t1_id);
 
         // Outsider cannot create dependencies.
         let (code, _) = send_json(
@@ -8596,7 +8643,7 @@ async fn phase3_matrix() {
             "POST",
             &format!("/api/v1/tasks/{t2_id}/dependencies"),
             Some(&outsider),
-            json!({"predecessor_task_id": t1_id}),
+            json!({"from_task_id": t1_id}),
         )
         .await;
         assert_eq!(
@@ -8605,11 +8652,11 @@ async fn phase3_matrix() {
             "[{engine}] outsider dependency"
         );
 
-        // Removing the edge works.
+        // Removing the edge works (by edge id — ADR-0023 surrogate key).
         let (code, _) = send_request(
             &app.app,
             "DELETE",
-            &format!("/api/v1/tasks/{t2_id}/dependencies/{t1_id}"),
+            &format!("/api/v1/tasks/{t2_id}/dependencies/{edge_id}"),
             Some(&member),
         )
         .await;
@@ -8620,8 +8667,9 @@ async fn phase3_matrix() {
             &member,
         )
         .await;
+        let blocked_by = deps["blocked_by"].as_array().unwrap();
         assert_eq!(
-            deps["blockers"].as_array().unwrap().len(),
+            blocked_by.len(),
             0,
             "[{engine}] edge removed"
         );
@@ -12068,7 +12116,7 @@ async fn guest_role_matrix() {
             "POST",
             &format!("/api/v1/projects/{project_id}/tasks"),
             Some(&owner),
-            json!({ "title": "P13G task" }),
+            json!({ "title": "P13G task", "due_date": "2026-03-01" }),
         )
         .await;
         assert_eq!(code, StatusCode::CREATED);
@@ -12121,8 +12169,19 @@ async fn guest_role_matrix() {
             );
         }
 
-        // Grant view_project → project + board + task LIST visible, but the
-        // individual task detail still 404s without view_task.
+        // ------------------------------------------------------------------
+        // The granular matrix (Phase 14 WS2, ADR-0021), organized by domain.
+        // Team-scoped permissions carry `scope_type: "team"`; everything
+        // else is project-scoped and requires the project id.
+        // ------------------------------------------------------------------
+        const TEAM_SCOPED: [&str; 6] = [
+            "view_team",
+            "view_team_members",
+            "view_team_activity",
+            "view_project_list",
+            "invite_guest",
+            "view_audit_log",
+        ];
         async fn grant(
             app: &TestApp,
             owner: &str,
@@ -12131,15 +12190,27 @@ async fn guest_role_matrix() {
             project_id: &str,
             permission: &str,
         ) -> (StatusCode, Value) {
+            let team_scoped = TEAM_SCOPED.contains(&permission);
+            let mut body = json!({
+                "permission": permission,
+                "scope_type": if team_scoped { "team" } else { "project" },
+            });
+            if !team_scoped {
+                body["project_id"] = json!(project_id);
+            }
             send_json(
                 &app.app,
                 "POST",
                 &format!("/api/v1/teams/{team_id}/guests2/{guest_id}/permissions"),
                 Some(owner),
-                json!({ "permission": permission, "scope_type": "project", "project_id": project_id }),
+                body,
             )
             .await
         }
+
+        // ---- Projects domain -------------------------------------------------
+        // view_project alone: project detail visible; the board, the task
+        // list, and the task detail stay dark (each surface is its own grant).
         let (code, _) = grant(
             &app,
             &owner,
@@ -12156,6 +12227,80 @@ async fn guest_role_matrix() {
             StatusCode::OK,
             "[{engine}] view_project grants the project"
         );
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/board"),
+            &guest,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] board needs view_project_board"
+        );
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            &guest,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] task list needs view_project_tasks"
+        );
+        let (code, _) = get_json(&app.app, &format!("/api/v1/tasks/{task_id}"), &guest).await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] task detail requires view_task"
+        );
+
+        // ---- Tasks domain (starts in isolation) ---------------------------------
+        // view_task_own alone: guests are never assignees (ADR-0021 —
+        // validate_assignee requires membership), so the list collapses to
+        // empty and foreign task detail stays dark. Granted BEFORE
+        // view_project_tasks so its collapsing filter is observable.
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "view_task_own",
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, own) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            &guest,
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(
+            own["total"], 0,
+            "[{engine}] view_task_own hides unassigned work"
+        );
+        let (code, _) = get_json(&app.app, &format!("/api/v1/tasks/{task_id}"), &guest).await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] view_task_own does not open foreign tasks"
+        );
+
+
+        // view_project_board → the board opens.
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "view_project_board",
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
         let (code, board) = get_json(
             &app.app,
             &format!("/api/v1/projects/{project_id}/board"),
@@ -12165,17 +12310,67 @@ async fn guest_role_matrix() {
         assert_eq!(
             code,
             StatusCode::OK,
-            "[{engine}] view_project grants the board"
+            "[{engine}] view_project_board grants the board"
         );
         assert!(board.to_string().contains("P13G task"));
-        let (code, _) = get_json(&app.app, &format!("/api/v1/tasks/{task_id}"), &guest).await;
+
+        // view_project_tasks → task list visible; timeline needs its own grant.
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "view_project_tasks",
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, list) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/tasks"),
+            &guest,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::OK,
+            "[{engine}] view_project_tasks grants the list"
+        );
+        assert_eq!(list["total"], 1, "[{engine}] guest sees the project task");
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/tasks?view=timeline"),
+            &guest,
+        )
+        .await;
         assert_eq!(
             code,
             StatusCode::NOT_FOUND,
-            "[{engine}] task detail requires view_task"
+            "[{engine}] timeline needs view_project_timeline"
+        );
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "view_project_timeline",
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/projects/{project_id}/tasks?view=timeline"),
+            &guest,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::OK,
+            "[{engine}] view_project_timeline grants the timeline"
         );
 
-        // Guest mutation attempts stay denied with the view_project grant.
+        // Guest mutation attempts stay denied with the read grants.
         let (code, _) = send_json(
             &app.app,
             "POST",
@@ -12189,11 +12384,74 @@ async fn guest_role_matrix() {
             "[{engine}] guest create denied: {code}"
         );
 
-        // view_task → task detail visible.
-        let (code, _) = grant(&app, &owner, &team_id, &guest_id, &project_id, "view_task").await;
+        // view_task → task detail visible; dates redacted without
+        // view_task_dates.
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "view_task",
+        )
+        .await;
         assert_eq!(code, StatusCode::CREATED);
-        let (code, _) = get_json(&app.app, &format!("/api/v1/tasks/{task_id}"), &guest).await;
+        let (code, detail) = get_json(&app.app, &format!("/api/v1/tasks/{task_id}"), &guest).await;
         assert_eq!(code, StatusCode::OK, "[{engine}] view_task grants the task");
+        assert!(
+            detail["due_date"].is_null(),
+            "[{engine}] dates redacted without view_task_dates"
+        );
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "view_task_dates",
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, detail) = get_json(&app.app, &format!("/api/v1/tasks/{task_id}"), &guest).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(
+            detail["due_date"], "2026-03-01",
+            "[{engine}] view_task_dates reveals the due date"
+        );
+
+        // Comments: hidden without view_task_comments.
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/comments"),
+            &guest,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] comments need view_task_comments"
+        );
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "view_task_comments",
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/comments"),
+            &guest,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::OK,
+            "[{engine}] view_task_comments grants the discussion"
+        );
 
         // comment_task → guest can comment.
         let (code, _) = grant(
@@ -12220,14 +12478,61 @@ async fn guest_role_matrix() {
             "[{engine}] comment_task grants commenting"
         );
 
-        // view_activity → activity visible.
+        // Attachments: listing is its own grant (upload/download are
+        // exercised in the Phase 14 permission matrix test).
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/attachments"),
+            &guest,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] attachments need view_task_attachments"
+        );
         let (code, _) = grant(
             &app,
             &owner,
             &team_id,
             &guest_id,
             &project_id,
-            "view_activity",
+            "view_task_attachments",
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/attachments"),
+            &guest,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::OK,
+            "[{engine}] view_task_attachments grants the file list"
+        );
+
+        // Activity: hidden without view_task_activity (the granular rename
+        // of the coarse `view_activity`; migration 0020 maps old rows).
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/tasks/{task_id}/activity"),
+            &guest,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] activity needs view_task_activity"
+        );
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "view_task_activity",
         )
         .await;
         assert_eq!(code, StatusCode::CREATED);
@@ -12240,7 +12545,198 @@ async fn guest_role_matrix() {
         assert_eq!(
             code,
             StatusCode::OK,
-            "[{engine}] view_activity grants activity"
+            "[{engine}] view_task_activity grants activity"
+        );
+
+        // ---- Team domain -----------------------------------------------------
+        // view_team → team metadata visible (and the switcher lists it).
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "view_team",
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, team_view) =
+            get_json(&app.app, &format!("/api/v1/teams/{team_id}"), &guest).await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] view_team grants the team");
+        assert_eq!(team_view["my_role"], "guest", "[{engine}] guest badge role");
+        let (code, teams) = get_json(&app.app, "/api/v1/teams", &guest).await;
+        assert_eq!(code, StatusCode::OK);
+        assert!(
+            teams.to_string().contains(&team_id),
+            "[{engine}] the switcher lists guest teams"
+        );
+
+        // view_team_members → roster visible.
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "view_team_members",
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, members) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/members"),
+            &guest,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::OK,
+            "[{engine}] view_team_members grants the roster"
+        );
+        assert!(
+            members.to_string().contains("P13G Owner"),
+            "[{engine}] roster lists the owner"
+        );
+
+        // view_project_list → the project index visible.
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "view_project_list",
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let (code, projects) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/projects"),
+            &guest,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::OK,
+            "[{engine}] view_project_list grants the index"
+        );
+        assert!(
+            projects.to_string().contains("P13G Project"),
+            "[{engine}] the index lists the project"
+        );
+
+        // Scope validation: a project-scope row for a team-scoped permission
+        // is a 422.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/guests2/{guest_id}/permissions"),
+            Some(&owner),
+            json!({
+                "permission": "view_team",
+                "scope_type": "project",
+                "project_id": project_id
+            }),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "[{engine}] view_team is team-scoped"
+        );
+
+        // ---- invite_guest: the two-step request/approve flow ------------------
+        let helper_email = format!("p13g-helper-{suffix}@test.local");
+        seed_user(&app.db, &helper_email, "P13G Helper").await;
+        let (code, _) = grant(
+            &app,
+            &owner,
+            &team_id,
+            &guest_id,
+            &project_id,
+            "invite_guest",
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        // The guest files the request; nobody gains access until approval.
+        let (code, request) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/guests/invite-requests"),
+            Some(&guest),
+            json!({ "email": helper_email }),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::CREATED,
+            "[{engine}] guest files invite request: {request}"
+        );
+        let request_id = request["id"].as_str().unwrap().to_string();
+        assert_eq!(request["status"], "pending");
+        // Duplicate pending request → 409.
+        let (code, _) = send_json(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/guests/invite-requests"),
+            Some(&guest),
+            json!({ "email": helper_email }),
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::CONFLICT,
+            "[{engine}] duplicate pending request"
+        );
+        // The guest can neither list nor decide requests (Owner/Admin only).
+        let (code, _) = get_json(
+            &app.app,
+            &format!("/api/v1/teams/{team_id}/guests/invite-requests"),
+            &guest,
+        )
+        .await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] invite list is Owner/Admin"
+        );
+        let (code, _) = send_request(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/guests/invite-requests/{request_id}/approve"),
+            Some(&guest),
+        )
+        .await;
+        assert!(
+            code == StatusCode::NOT_FOUND || code == StatusCode::FORBIDDEN,
+            "[{engine}] guest cannot approve: {code}"
+        );
+        // Owner approves → the helper becomes a guest of the team.
+        let (code, decided) = send_request(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/guests/invite-requests/{request_id}/approve"),
+            Some(&owner),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK, "[{engine}] approve: {decided}");
+        assert_eq!(decided["status"], "approved");
+        // Deciding twice → 409.
+        let (code, _) = send_request(
+            &app.app,
+            "POST",
+            &format!("/api/v1/teams/{team_id}/guests/invite-requests/{request_id}/approve"),
+            Some(&owner),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "[{engine}] already decided");
+        // The approved helper is a guest with no grants: default deny holds.
+        let helper = login_as(&app.app, &helper_email, "test-password-123").await;
+        let (code, _) = get_json(&app.app, &format!("/api/v1/teams/{team_id}"), &helper).await;
+        assert_eq!(
+            code,
+            StatusCode::NOT_FOUND,
+            "[{engine}] approved guest without grants sees nothing"
         );
 
         // view_team → team metadata visible (and the switcher lists it).

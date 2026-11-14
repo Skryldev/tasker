@@ -107,7 +107,7 @@ async fn list_task_activity(
                 &mut conn,
                 &task.team_id,
                 &user.id,
-                "view_activity",
+                "view_task_activity",
                 Some(&task.project_id),
             )
             .await?;

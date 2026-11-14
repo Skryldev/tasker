@@ -103,7 +103,7 @@ export function TimelinePage({ projectId: projectIdProp }: { projectId?: string 
       await Promise.all(
         items.map(async (t) => {
           const deps = await api.listDependencies(t.id);
-          map[t.id] = deps.blockers.map((d) => ({ id: d.task_id, title: d.title }));
+          map[t.id] = deps.blocked_by.map((d) => ({ id: d.task_id, title: d.title }));
         }),
       );
       return map;
