@@ -65,6 +65,7 @@ fn test_config(database_url: String) -> Config {
         static_dir: None,
         log_format_json: false,
         rules_worker: tasker::config::RulesWorkerConfig::default(),
+        webhook_worker: tasker::config::WebhookWorkerConfig::default(),
         integrations_key: Some(vec![19u8; 32]),
         attachments: tasker::config::AttachmentsConfig {
             mode: tasker::config::AttachmentsMode::Local,
@@ -6725,11 +6726,9 @@ async fn rules_dispatcher_email_conflict_dead_letters_immediately() {
     );
 }
 
-/// Task 6: rules management API — CRUD, authorization matrix, CAS updates,
-/// archive semantics, history access.
 /// Phase 8B Task 1: integration foundation — migrations, tenant isolation
-/// (composite FK), delivery idempotency, event vocabulary, and provenance
-/// columns.
+/// (composite FK), delivery idempotency (raw SQL + store contract), event
+/// vocabulary, and provenance columns.
 #[tokio::test]
 async fn integrations_foundation_matrix() {
     for (engine, url) in test_db_urls() {
@@ -6994,10 +6993,11 @@ async fn integrations_foundation_matrix() {
         }
 
         // ---- Delivery idempotency: duplicate delivery id is a no-op ----
-        {
+        let delivery_row_id = {
             let mut conn = db.conn();
+            let delivery_row_id = Uuid::now_v7().to_string();
             let mut args = tasker::db::Args::new();
-            args.s(Uuid::now_v7().to_string())
+            args.s(&delivery_row_id)
                 .s(&integration_id)
                 .s("gh-delivery-1")
                 .s("push")
@@ -7049,6 +7049,37 @@ async fn integrations_foundation_matrix() {
                 )
                 .await;
             assert!(bad_status.is_err(), "[{engine}] invalid status rejected");
+            delivery_row_id
+        };
+
+        // ---- Store contract: insert_delivery is idempotent (Ok(false) on
+        // ---- replay) so the intake path and the Task 2 worker share one
+        // ---- insert contract that never reports duplicates as errors. ----
+        {
+            let mut conn = db.conn();
+            let now = tasker::util::now_ms();
+            let first = tasker::integrations::store::insert_delivery(
+                &mut conn,
+                &integration_id,
+                "gh-delivery-store-1",
+                "push",
+                "{}",
+                now,
+            )
+            .await
+            .unwrap_or_else(|e| panic!("[{engine}] store delivery insert: {e}"));
+            assert!(first, "[{engine}] first store insert accepted");
+            let replay = tasker::integrations::store::insert_delivery(
+                &mut conn,
+                &integration_id,
+                "gh-delivery-store-1",
+                "push",
+                "{}",
+                now,
+            )
+            .await
+            .unwrap_or_else(|e| panic!("[{engine}] store delivery replay: {e}"));
+            assert!(!replay, "[{engine}] replayed delivery is a no-op");
         }
 
         // ---- Event vocabulary: integration events accepted, provenance
@@ -7069,8 +7100,8 @@ async fn integrations_foundation_matrix() {
                 .s("integration")
                 .opt_i(None) // causing_execution_id
                 .i(now) // occurred_at
-                .opt_i(None) // integration_id (Task 5 delivery wires it)
-                .opt_i(None); // source_delivery_id (Task 5 delivery wires it)
+                .opt_s(Some(integration_id.clone())) // provenance: integration
+                .opt_s(Some(delivery_row_id.clone())); // provenance: delivery
             conn.execute(
                 "INSERT INTO domain_events (id, event_type, schema_version, team_id, task_id, \
                  actor_id, previous_state, new_state, origin, causing_execution_id, \
@@ -7081,9 +7112,29 @@ async fn integrations_foundation_matrix() {
             .await
             .unwrap_or_else(|e| panic!("[{engine}] integration event insert: {e}"));
         }
-        // Unknown event type rejected.
+        // Unknown event type rejected. The insert carries valid provenance
+        // (its own delivery anchor) so the rejection is the vocabulary CHECK,
+        // not provenance consistency.
         {
             let mut conn = db.conn();
+            let anchor = Uuid::now_v7().to_string();
+            let mut args = tasker::db::Args::new();
+            args.s(&anchor)
+                .s(&integration_id)
+                .s("gh-delivery-3")
+                .s("push")
+                .s("{}")
+                .i(now)
+                .i(now)
+                .i(now);
+            conn.execute(
+                "INSERT INTO webhook_deliveries (id, integration_id, delivery_id, \
+                 event_type_raw, payload, status, attempts, next_attempt_at, created_at, \
+                 updated_at) VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)",
+                args,
+            )
+            .await
+            .unwrap_or_else(|e| panic!("[{engine}] unknown-type delivery anchor: {e}"));
             let mut args = tasker::db::Args::new();
             args.s(Uuid::now_v7().to_string())
                 .s("github_pushed")
@@ -7091,30 +7142,54 @@ async fn integrations_foundation_matrix() {
                 .s(&team_id)
                 .i(now)
                 .s("integration")
-                .i(now);
+                .opt_s(Some(integration_id.clone()))
+                .opt_s(Some(anchor));
             let unknown = conn
                 .execute(
                     "INSERT INTO domain_events (id, event_type, schema_version, team_id, \
-                     occurred_at, origin) VALUES (?, ?, ?, ?, ?, ?)",
+                     occurred_at, origin, integration_id, source_delivery_id) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     args,
                 )
                 .await;
             assert!(unknown.is_err(), "[{engine}] unknown event type rejected");
         }
-        // Unknown origin rejected.
+        // Unknown origin rejected, likewise with valid provenance so the
+        // origin CHECK is what fires.
         {
             let mut conn = db.conn();
+            let anchor = Uuid::now_v7().to_string();
+            let mut args = tasker::db::Args::new();
+            args.s(&anchor)
+                .s(&integration_id)
+                .s("gh-delivery-4")
+                .s("push")
+                .s("{}")
+                .i(now)
+                .i(now)
+                .i(now);
+            conn.execute(
+                "INSERT INTO webhook_deliveries (id, integration_id, delivery_id, \
+                 event_type_raw, payload, status, attempts, next_attempt_at, created_at, \
+                 updated_at) VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)",
+                args,
+            )
+            .await
+            .unwrap_or_else(|e| panic!("[{engine}] unknown-origin delivery anchor: {e}"));
             let mut args = tasker::db::Args::new();
             args.s(Uuid::now_v7().to_string())
                 .s("git_push")
                 .i(1i64)
                 .s(&team_id)
+                .i(now)
                 .s("provider")
-                .i(now);
+                .opt_s(Some(integration_id.clone()))
+                .opt_s(Some(anchor));
             let unknown_origin = conn
                 .execute(
                     "INSERT INTO domain_events (id, event_type, schema_version, team_id, \
-                     occurred_at, origin) VALUES (?, ?, ?, ?, ?, ?)",
+                     occurred_at, origin, integration_id, source_delivery_id) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     args,
                 )
                 .await;
@@ -7126,6 +7201,269 @@ async fn integrations_foundation_matrix() {
     }
 }
 
+/// Phase 8B Task 1: credential lifecycle — rotation versioning + CAS,
+/// revocation semantics, re-provisioning guards, and fail-closed
+/// verification. Exercised through the store/credentials contracts so the
+/// insert and guard bindings are proven, not assumed.
+#[tokio::test]
+async fn integrations_credential_lifecycle_matrix() {
+    for (engine, url) in test_db_urls() {
+        let app = spawn_app(&url).await;
+        let db = app.db.clone();
+        let suffix = Uuid::now_v7().simple();
+        let key = [19u8; 32];
+
+        // ---- Fixture: one team; the integration is created via the store
+        // ---- API so the Task 1 store contract is exercised too. ----
+        let admin_email = format!("int-cred-{suffix}@test.local");
+        let admin_id = seed_user(&db, &admin_email, "Cred Admin").await;
+        let admin = login_as(&app.app, &admin_email, "test-password-123").await;
+        let (code, team) = send_json(
+            &app.app,
+            "POST",
+            "/api/v1/teams",
+            Some(&admin),
+            json!({"name": "CREDCREW"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CREATED);
+        let team_id = team["id"].as_str().unwrap().to_string();
+        let integration_id = {
+            let mut conn = db.conn();
+            tasker::integrations::store::create_integration(
+                &mut conn,
+                &team_id,
+                &format!("cred-{suffix}"),
+                None,
+                tasker::integrations::Provider::GitHub,
+                &admin_id,
+            )
+            .await
+            .unwrap_or_else(|e| panic!("[{engine}] store integration create: {e}"))
+        };
+
+        // ---- Provision: version 1, active, verification works ----
+        let mut conn = db.conn();
+        let v1 = tasker::integrations::credentials::provision_credential(
+            &mut conn,
+            &integration_id,
+            "secret-v1",
+            &key,
+            &admin_id,
+            tasker::util::now_ms(),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("[{engine}] provision: {e}"));
+        assert_eq!(v1, 1, "[{engine}] first credential is version 1");
+        assert!(
+            tasker::integrations::credentials::verify_webhook_secret(
+                &mut conn,
+                &integration_id,
+                "secret-v1",
+                &key
+            )
+            .await
+            .expect("[{engine}] verify v1"),
+            "[{engine}] provisioned secret verifies"
+        );
+        assert_eq!(
+            tasker::integrations::credentials::load_active_credential(&mut conn, &integration_id)
+                .await
+                .expect("[{engine}] load active")
+                .map(|c| c.credential_version),
+            Some(1),
+            "[{engine}] active credential visible"
+        );
+
+        // ---- Rotation: version increments in place; the rotated-out secret
+        // ---- stops verifying immediately (single row, no plaintext reuse). ----
+        let v2 = tasker::integrations::credentials::rotate_credential(
+            &mut conn,
+            &integration_id,
+            "secret-v2",
+            &key,
+            v1,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("[{engine}] rotate 1->2: {e}"));
+        assert_eq!(v2, 2, "[{engine}] rotation increments the version");
+        assert!(
+            !tasker::integrations::credentials::verify_webhook_secret(
+                &mut conn,
+                &integration_id,
+                "secret-v1",
+                &key
+            )
+            .await
+            .expect("[{engine}] verify old after rotate"),
+            "[{engine}] rotated-out secret must stop verifying"
+        );
+        assert!(
+            tasker::integrations::credentials::verify_webhook_secret(
+                &mut conn,
+                &integration_id,
+                "secret-v2",
+                &key
+            )
+            .await
+            .expect("[{engine}] verify v2"),
+            "[{engine}] rotated-in secret verifies"
+        );
+
+        // ---- Concurrent-rotation CAS: two rotations from the same expected
+        // ---- version produce exactly one winner; the stale caller gets a
+        // ---- version conflict, never a silent overwrite. ----
+        assert!(
+            tasker::integrations::credentials::rotate_credential(
+                &mut conn,
+                &integration_id,
+                "stale-secret",
+                &key,
+                v1,
+            )
+            .await
+            .is_err(),
+            "[{engine}] rotation from a stale version must conflict"
+        );
+        let v3 = tasker::integrations::credentials::rotate_credential(
+            &mut conn,
+            &integration_id,
+            "secret-v3",
+            &key,
+            v2,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("[{engine}] rotate 2->3: {e}"));
+        assert_eq!(v3, 3, "[{engine}] the winning rotation increments once");
+
+        // ---- Revocation: explicit, terminal, fail-closed verification ----
+        let now = tasker::util::now_ms();
+        let revoked = tasker::integrations::credentials::revoke_credential(
+            &mut conn,
+            &integration_id,
+            v3,
+            now,
+        )
+        .await
+        .expect("[{engine}] revoke");
+        assert!(revoked, "[{engine}] first revocation performs the change");
+        assert!(
+            !tasker::integrations::credentials::verify_webhook_secret(
+                &mut conn,
+                &integration_id,
+                "secret-v3",
+                &key
+            )
+            .await
+            .expect("[{engine}] verify after revoke"),
+            "[{engine}] revoked credential fails closed"
+        );
+        assert!(
+            tasker::integrations::credentials::load_active_credential(&mut conn, &integration_id)
+                .await
+                .expect("[{engine}] load after revoke")
+                .is_none(),
+            "[{engine}] no active credential after revocation"
+        );
+        assert_eq!(
+            tasker::integrations::credentials::credential_state(&mut conn, &integration_id)
+                .await
+                .expect("[{engine}] state after revoke"),
+            Some((3, Some(now))),
+            "[{engine}] revocation is recorded with its timestamp"
+        );
+        // Rotation must never reactivate a revoked credential.
+        assert!(
+            tasker::integrations::credentials::rotate_credential(
+                &mut conn,
+                &integration_id,
+                "zombie",
+                &key,
+                v3,
+            )
+            .await
+            .is_err(),
+            "[{engine}] rotation of a revoked credential must conflict"
+        );
+        // A second revocation is an idempotent no-op.
+        assert!(
+            !tasker::integrations::credentials::revoke_credential(
+                &mut conn,
+                &integration_id,
+                v3,
+                now,
+            )
+            .await
+            .expect("[{engine}] revoke again"),
+            "[{engine}] second revocation is a no-op"
+        );
+
+        // ---- Re-provisioning: requires an observed revocation AND a
+        // ---- current version; reactivates with the new secret. ----
+        assert!(
+            tasker::integrations::credentials::re_provision_credential(
+                &mut conn,
+                &integration_id,
+                "secret-v4",
+                &key,
+                v3 - 1,
+                &admin_id,
+                now,
+            )
+            .await
+            .is_err(),
+            "[{engine}] re-provision from a stale version must conflict"
+        );
+        let v4 = tasker::integrations::credentials::re_provision_credential(
+            &mut conn,
+            &integration_id,
+            "secret-v4",
+            &key,
+            v3,
+            &admin_id,
+            now,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("[{engine}] re-provision: {e}"));
+        assert_eq!(v4, 4, "[{engine}] re-provisioning increments the version");
+        assert!(
+            tasker::integrations::credentials::verify_webhook_secret(
+                &mut conn,
+                &integration_id,
+                "secret-v4",
+                &key
+            )
+            .await
+            .expect("[{engine}] verify v4"),
+            "[{engine}] re-provisioned credential verifies"
+        );
+        // Re-provisioning an ACTIVE credential is rejected (the guard
+        // requires the caller to have observed the revocation).
+        assert!(
+            tasker::integrations::credentials::re_provision_credential(
+                &mut conn,
+                &integration_id,
+                "sneaky",
+                &key,
+                v4,
+                &admin_id,
+                now,
+            )
+            .await
+            .is_err(),
+            "[{engine}] re-provisioning an active credential must conflict"
+        );
+        assert_eq!(
+            tasker::integrations::credentials::credential_state(&mut conn, &integration_id)
+                .await
+                .expect("[{engine}] final state"),
+            Some((4, None)),
+            "[{engine}] credential ends active at version 4"
+        );
+    }
+}
+
+#[tokio::test]
 async fn rules_management_api_matrix() {
     for (engine, url) in test_db_urls() {
         let app = spawn_app(&url).await;
@@ -8601,7 +8939,11 @@ async fn phase3_matrix() {
         let blocking = deps["blocking"].as_array().unwrap();
         assert_eq!(blocking.len(), 2, "[{engine}] t1 blocks t2 and t4");
         let t1_blocked_by = deps["blocked_by"].as_array().unwrap();
-        assert_eq!(t1_blocked_by.len(), 1, "[{engine}] relates_to lands in blocked_by");
+        assert_eq!(
+            t1_blocked_by.len(),
+            1,
+            "[{engine}] relates_to lands in blocked_by"
+        );
         assert_eq!(t1_blocked_by[0]["type"].as_str().unwrap(), "relates_to");
 
         // Graph endpoint: blocks-only one-level expansion.
@@ -8668,11 +9010,7 @@ async fn phase3_matrix() {
         )
         .await;
         let blocked_by = deps["blocked_by"].as_array().unwrap();
-        assert_eq!(
-            blocked_by.len(),
-            0,
-            "[{engine}] edge removed"
-        );
+        assert_eq!(blocked_by.len(), 0, "[{engine}] edge removed");
 
         // ---- Workload -----------------------------------------------------------
         let (code, workload) = get_json(
@@ -12289,7 +12627,6 @@ async fn guest_role_matrix() {
             "[{engine}] view_task_own does not open foreign tasks"
         );
 
-
         // view_project_board → the board opens.
         let (code, _) = grant(
             &app,
@@ -12386,15 +12723,7 @@ async fn guest_role_matrix() {
 
         // view_task → task detail visible; dates redacted without
         // view_task_dates.
-        let (code, _) = grant(
-            &app,
-            &owner,
-            &team_id,
-            &guest_id,
-            &project_id,
-            "view_task",
-        )
-        .await;
+        let (code, _) = grant(&app, &owner, &team_id, &guest_id, &project_id, "view_task").await;
         assert_eq!(code, StatusCode::CREATED);
         let (code, detail) = get_json(&app.app, &format!("/api/v1/tasks/{task_id}"), &guest).await;
         assert_eq!(code, StatusCode::OK, "[{engine}] view_task grants the task");
@@ -12550,15 +12879,7 @@ async fn guest_role_matrix() {
 
         // ---- Team domain -----------------------------------------------------
         // view_team → team metadata visible (and the switcher lists it).
-        let (code, _) = grant(
-            &app,
-            &owner,
-            &team_id,
-            &guest_id,
-            &project_id,
-            "view_team",
-        )
-        .await;
+        let (code, _) = grant(&app, &owner, &team_id, &guest_id, &project_id, "view_team").await;
         assert_eq!(code, StatusCode::CREATED);
         let (code, team_view) =
             get_json(&app.app, &format!("/api/v1/teams/{team_id}"), &guest).await;

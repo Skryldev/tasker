@@ -303,7 +303,8 @@ async fn record_failure_and_observe(
 
 /// Process-local full-jitter source in `[0, 1000]`. Determinism is not
 /// required here; bounds are (verified by unit tests on the pure function).
-fn rand_jitter() -> i64 {
+/// Shared with the webhook delivery worker (`integrations::webhook::worker`).
+pub(crate) fn rand_jitter() -> i64 {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0u64, |d| u64::from(d.subsec_nanos()));

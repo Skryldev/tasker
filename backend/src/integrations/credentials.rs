@@ -145,6 +145,25 @@ async fn load_active_envelope(
     }))
 }
 
+/// Load the decrypted verification secret for the integration's active
+/// credential. HMAC-style verifiers (GitHub `X-Hub-Signature-256`) need the
+/// plaintext to sign/compare over the raw body; token-comparison verifiers
+/// can keep using [`verify_webhook_secret`]. **Fail-closed:** `Err` on
+/// missing key configuration or decryption failure, `None` when no active
+/// credential exists — never a fallback. The plaintext lives only in the
+/// caller's verification frame: never logged, persisted, or returned by any
+/// API.
+pub async fn load_verification_secret(
+    conn: &mut Conn<'_>,
+    integration_id: &str,
+    key: &[u8],
+) -> Result<Option<String>, AppError> {
+    let Some((_version, envelope)) = load_active_envelope(conn, integration_id).await? else {
+        return Ok(None);
+    };
+    open(key, &envelope).map(Some)
+}
+
 /// Verify a presented webhook secret against the integration's active
 /// credential. Fail-closed: no credential, revoked credential, missing key
 /// configuration, decryption failure, or mismatch all return `false`.

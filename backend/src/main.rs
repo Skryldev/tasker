@@ -111,7 +111,13 @@ async fn run_server(config: Config) -> i32 {
         return 1;
     }
 
-    let state = AppState::new(db, config.clone());
+    // Production provider adapters (Phase 8B, Task 3+): the webhook intake
+    // resolves verification and normalization through this registry.
+    let state = AppState::with_registry(
+        db,
+        config.clone(),
+        tasker::integrations::production_registry(),
+    );
     let router = build_router(state.clone());
     let addr = format!("{}:{}", config.http_host, config.http_port);
 
@@ -133,8 +139,23 @@ async fn run_server(config: Config) -> i32 {
         state.db.clone(),
         config.rules_worker.clone(),
         state.metrics.clone(),
-        worker_shutdown_rx,
+        worker_shutdown_rx.clone(),
     );
+
+    // Webhook delivery worker (Phase 8B, Task 2): same shutdown signal;
+    // started only when enabled. No production provider adapters are
+    // registered until Tasks 3-4, so an empty registry simply never claims.
+    let webhook_handle = if config.webhook_worker.enabled {
+        Some(tasker::integrations::webhook::worker::spawn(
+            state.db.clone(),
+            state.integrations.registry.clone(),
+            config.webhook_worker.clone(),
+            state.metrics.clone(),
+            worker_shutdown_rx,
+        ))
+    } else {
+        None
+    };
 
     let app_state = state.clone();
     let shutdown = async move {
@@ -150,8 +171,11 @@ async fn run_server(config: Config) -> i32 {
         .with_graceful_shutdown(shutdown)
         .await;
 
-    // Await the dispatcher drain, then close database resources cleanly.
+    // Await the dispatcher drains, then close database resources cleanly.
     let _ = worker_handle.await;
+    if let Some(handle) = webhook_handle {
+        let _ = handle.await;
+    }
     state.db.close().await;
 
     match result {

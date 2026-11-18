@@ -50,7 +50,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(crate::workspace::routes())
         .merge(crate::rules::api::routes())
         .merge(crate::goals::routes())
-        .merge(guests::routes());
+        .merge(guests::routes())
+        // Provider-facing webhook intake (Phase 8B, Task 2): carries its own
+        // route-scoped 15,000-byte body limit overriding the app default.
+        .merge(crate::integrations::webhook::intake::routes());
 
     let mut app = Router::new()
         .nest("/api/v1", api)

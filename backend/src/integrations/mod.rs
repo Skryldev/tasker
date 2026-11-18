@@ -19,13 +19,16 @@
 //! `origin = 'integration'` (see `rules::events::EventOrigin`).
 
 pub mod credentials;
+pub mod github;
+pub mod gitlab;
 pub mod store;
+pub mod webhook;
 
 use crate::error::FieldError;
 
 /// Supported Git providers. Closed enum: arbitrary provider strings are
 /// rejected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Provider {
     GitHub,
     GitLab,
@@ -65,6 +68,12 @@ pub mod limits {
     /// stored column. The HTTP byte limit (15,000 **bytes**) is enforced by
     /// the intake in Task 2; this column bound is the storage-side cap.
     pub const WEBHOOK_PAYLOAD_MAX_CHARS: usize = 15_000;
+    /// Maximum raw webhook request body, measured in **bytes** and enforced
+    /// by the intake before buffering (streaming-safe; never solely reliant
+    /// on `Content-Length`). Distinct from [`WEBHOOK_PAYLOAD_MAX_CHARS`]
+    /// (storage capacity in characters): a UTF-8 body within the byte limit
+    /// can never exceed the character capacity.
+    pub const WEBHOOK_BODY_MAX_BYTES: usize = 15_000;
     /// Maximum provider delivery-id length (GitHub GUID, GitLab numeric id).
     pub const DELIVERY_ID_MAX_CHARS: usize = 64;
     /// Maximum external actor (provider login) length.
@@ -176,6 +185,23 @@ pub fn validate_repo_full_name(raw: &str) -> Result<String, FieldError> {
         ));
     }
     Ok(trimmed.to_string())
+}
+
+/// The production provider adapter registry (Phase 8B): GitHub (Task 3) and
+/// GitLab (Task 4). Providers without a shipped adapter are simply absent —
+/// their intake paths resolve to the uniform 404 until registered.
+#[must_use]
+pub fn production_registry() -> webhook::ProviderRegistry {
+    let mut providers = std::collections::HashMap::new();
+    providers.insert(
+        Provider::GitHub,
+        std::sync::Arc::new(github::GitHubAdapter) as std::sync::Arc<dyn webhook::ProviderAdapter>,
+    );
+    providers.insert(
+        Provider::GitLab,
+        std::sync::Arc::new(gitlab::GitLabAdapter) as std::sync::Arc<dyn webhook::ProviderAdapter>,
+    );
+    webhook::ProviderRegistry::new(providers)
 }
 
 /// Integration aggregate as persisted (Task 1: managed at the store level;

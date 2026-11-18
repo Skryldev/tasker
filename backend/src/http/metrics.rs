@@ -54,13 +54,61 @@ pub enum OutboxEvent {
     StaleRejected,
 }
 
-/// In-process metrics registry. `Clone` so the dispatcher can fan counters
-/// out to its bounded execution tasks.
+/// Bounded webhook intake/worker counters (Phase 8B, Task 2). Fixed label
+/// set — no delivery, integration, or tenant identifiers; rejection reasons
+/// come from a closed static set (fixed cardinality by construction).
+#[derive(Default)]
+pub struct WebhookStats {
+    intake_accepted: AtomicU64,
+    intake_duplicate: AtomicU64,
+    rejected: Arc<Mutex<HashMap<&'static str, u64>>>,
+    claimed: AtomicU64,
+    processed: AtomicU64,
+    already_processed: AtomicU64,
+    unsupported: AtomicU64,
+    retryable_failed: AtomicU64,
+    dead_lettered: AtomicU64,
+    lease_recovered: AtomicU64,
+    stale_rejected: AtomicU64,
+    replays: AtomicU64,
+    processing_ms_total: AtomicU64,
+    processings: AtomicU64,
+}
+
+/// Webhook metric events.
+#[derive(Debug, Clone, Copy)]
+pub enum WebhookEvent {
+    /// First valid delivery durably persisted.
+    IntakeAccepted,
+    /// Duplicate delivery id: idempotent no-op.
+    IntakeDuplicate,
+    /// Rejected at intake; the label comes from a closed static set.
+    IntakeRejected(&'static str),
+    Claimed(u64),
+    /// Processing succeeded; event + completion committed atomically.
+    Processed {
+        duration_ms: f64,
+    },
+    /// Duplicate execution converged through provenance uniqueness.
+    AlreadyProcessed,
+    /// Recognized event outside the vocabulary: durable terminal record.
+    Unsupported,
+    RetryableFailed,
+    DeadLettered,
+    LeaseRecovered(u64),
+    StaleRejected,
+    /// Audited manual replay accepted.
+    Replayed,
+}
+
+/// In-process metrics registry. `Clone` so the dispatchers can fan counters
+/// out to their bounded execution tasks.
 #[derive(Default, Clone)]
 pub struct Metrics {
     routes: Arc<Mutex<HashMap<RouteKey, RouteStats>>>,
     requests_total: Arc<Mutex<u64>>,
     outbox: Arc<OutboxStats>,
+    webhook: Arc<WebhookStats>,
 }
 
 impl Metrics {
@@ -121,6 +169,62 @@ impl Metrics {
                 self.outbox.stale_rejected.fetch_add(1, Ordering::Relaxed)
             }
         };
+    }
+
+    /// Record one webhook intake/worker event.
+    pub fn observe_webhook(&self, event: WebhookEvent) {
+        match event {
+            WebhookEvent::IntakeAccepted => {
+                self.webhook.intake_accepted.fetch_add(1, Ordering::Relaxed);
+            }
+            WebhookEvent::IntakeDuplicate => {
+                self.webhook
+                    .intake_duplicate
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            WebhookEvent::IntakeRejected(reason) => {
+                if let Ok(mut rejected) = self.webhook.rejected.lock() {
+                    *rejected.entry(reason).or_insert(0) += 1;
+                }
+            }
+            WebhookEvent::Claimed(n) => {
+                self.webhook.claimed.fetch_add(n, Ordering::Relaxed);
+            }
+            WebhookEvent::Processed { duration_ms } => {
+                self.webhook.processed.fetch_add(1, Ordering::Relaxed);
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let ms = duration_ms.max(0.0) as u64; // millisecond-granularity counter
+                self.webhook
+                    .processing_ms_total
+                    .fetch_add(ms, Ordering::Relaxed);
+                self.webhook.processings.fetch_add(1, Ordering::Relaxed);
+            }
+            WebhookEvent::AlreadyProcessed => {
+                self.webhook
+                    .already_processed
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            WebhookEvent::Unsupported => {
+                self.webhook.unsupported.fetch_add(1, Ordering::Relaxed);
+            }
+            WebhookEvent::RetryableFailed => {
+                self.webhook
+                    .retryable_failed
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            WebhookEvent::DeadLettered => {
+                self.webhook.dead_lettered.fetch_add(1, Ordering::Relaxed);
+            }
+            WebhookEvent::LeaseRecovered(n) => {
+                self.webhook.lease_recovered.fetch_add(n, Ordering::Relaxed);
+            }
+            WebhookEvent::StaleRejected => {
+                self.webhook.stale_rejected.fetch_add(1, Ordering::Relaxed);
+            }
+            WebhookEvent::Replayed => {
+                self.webhook.replays.fetch_add(1, Ordering::Relaxed);
+            }
+        }
     }
 
     /// Render the Prometheus text exposition format.
@@ -236,6 +340,102 @@ impl Metrics {
         out.push_str(&format!(
             "tasker_outbox_execution_duration_seconds_count {}\n",
             self.outbox.executions.load(Ordering::Relaxed)
+        ));
+
+        // ---- Webhook intake + delivery worker (Phase 8B, Task 2) ----------
+        counter(
+            &mut out,
+            "tasker_webhook_intake_accepted_total",
+            "Webhook deliveries durably accepted at intake",
+            self.webhook.intake_accepted.load(Ordering::Relaxed),
+        );
+        counter(
+            &mut out,
+            "tasker_webhook_intake_duplicate_total",
+            "Duplicate webhook deliveries converged idempotently",
+            self.webhook.intake_duplicate.load(Ordering::Relaxed),
+        );
+        if let Ok(rejected) = self.webhook.rejected.lock() {
+            // Reasons come from a closed static set; sorted for stable
+            // exposition. Fixed cardinality by construction.
+            let mut reasons: Vec<(&str, u64)> = rejected.iter().map(|(k, v)| (*k, *v)).collect();
+            reasons.sort_unstable_by_key(|(k, _)| *k);
+            for (reason, value) in reasons {
+                out.push_str("# HELP tasker_webhook_intake_rejected_total Rejected webhook intakes by closed reason class.\n");
+                out.push_str("# TYPE tasker_webhook_intake_rejected_total counter\n");
+                out.push_str(&format!(
+                    "tasker_webhook_intake_rejected_total{{reason=\"{}\"}} {value}\n",
+                    sanitize_label(reason)
+                ));
+            }
+        }
+        counter(
+            &mut out,
+            "tasker_webhook_deliveries_claimed_total",
+            "Deliveries claimed by the webhook worker",
+            self.webhook.claimed.load(Ordering::Relaxed),
+        );
+        counter(
+            &mut out,
+            "tasker_webhook_deliveries_processed_total",
+            "Deliveries processed successfully (event + completion atomic)",
+            self.webhook.processed.load(Ordering::Relaxed),
+        );
+        counter(
+            &mut out,
+            "tasker_webhook_deliveries_already_processed_total",
+            "Duplicate executions converged through provenance uniqueness",
+            self.webhook.already_processed.load(Ordering::Relaxed),
+        );
+        counter(
+            &mut out,
+            "tasker_webhook_deliveries_unsupported_total",
+            "Deliveries durably recorded as outside the supported vocabulary",
+            self.webhook.unsupported.load(Ordering::Relaxed),
+        );
+        counter(
+            &mut out,
+            "tasker_webhook_deliveries_retryable_failures_total",
+            "Retryable processing failures recorded",
+            self.webhook.retryable_failed.load(Ordering::Relaxed),
+        );
+        counter(
+            &mut out,
+            "tasker_webhook_deliveries_dead_lettered_total",
+            "Deliveries moved to the terminal failure state",
+            self.webhook.dead_lettered.load(Ordering::Relaxed),
+        );
+        counter(
+            &mut out,
+            "tasker_webhook_leases_recovered_total",
+            "Expired delivery claims recovered after worker crashes",
+            self.webhook.lease_recovered.load(Ordering::Relaxed),
+        );
+        counter(
+            &mut out,
+            "tasker_webhook_stale_rejections_total",
+            "Completions rejected because the claim token was stale",
+            self.webhook.stale_rejected.load(Ordering::Relaxed),
+        );
+        counter(
+            &mut out,
+            "tasker_webhook_deliveries_replayed_total",
+            "Audited manual replays accepted",
+            self.webhook.replays.load(Ordering::Relaxed),
+        );
+        out.push_str(
+            "# HELP tasker_webhook_processing_duration_seconds Delivery processing duration.\n",
+        );
+        out.push_str("# TYPE tasker_webhook_processing_duration_seconds summary\n");
+        #[allow(clippy::cast_precision_loss)]
+        let processing_seconds =
+            self.webhook.processing_ms_total.load(Ordering::Relaxed) as f64 / 1000.0;
+        out.push_str(&format!(
+            "tasker_webhook_processing_duration_seconds_sum {processing_seconds:.6}\n"
+        ));
+        out.push_str(&format!(
+            "tasker_webhook_processing_duration_seconds_count {}\n",
+            self.webhook.processings.load(Ordering::Relaxed)
         ));
         out
     }

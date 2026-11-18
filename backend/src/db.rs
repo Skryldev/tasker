@@ -278,6 +278,10 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
         "0022_dependency_types",
         include_str!("../migrations/postgres/0022_dependency_types.sql"),
     ),
+    (
+        "0023_webhook_delivery_infrastructure",
+        include_str!("../migrations/postgres/0023_webhook_delivery_infrastructure.sql"),
+    ),
 ];
 const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -360,6 +364,10 @@ const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
         "0022_dependency_types",
         include_str!("../migrations/mysql/0022_dependency_types.sql"),
     ),
+    (
+        "0023_webhook_delivery_infrastructure",
+        include_str!("../migrations/mysql/0023_webhook_delivery_infrastructure.sql"),
+    ),
 ];
 const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -437,6 +445,10 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
         "0022_dependency_types",
         include_str!("../migrations/sqlite/0022_dependency_types.sql"),
+    ),
+    (
+        "0023_webhook_delivery_infrastructure",
+        include_str!("../migrations/sqlite/0023_webhook_delivery_infrastructure.sql"),
     ),
 ];
 
@@ -980,6 +992,7 @@ mod tests {
             static_dir: None,
             log_format_json: false,
             rules_worker: crate::config::RulesWorkerConfig::default(),
+            webhook_worker: crate::config::WebhookWorkerConfig::default(),
             integrations_key: Some(vec![19u8; 32]),
             attachments: crate::config::AttachmentsConfig {
                 mode: crate::config::AttachmentsMode::Disabled,
@@ -1006,7 +1019,7 @@ mod tests {
         .await
         .unwrap();
         let migrations = migrations_for(Driver::Sqlite);
-        assert_eq!(migrations.len(), 19, "expected migrations 0001..0022");
+        assert_eq!(migrations.len(), 20, "expected migrations 0001..0023");
         // Build the PRE-0005 schema: 0001..0004 only.
         for (version, sql) in &migrations[..4] {
             for statement in split_statements(sql) {

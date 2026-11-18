@@ -60,12 +60,15 @@ pub async fn create_integration(
 ) -> Result<String, AppError> {
     let id = util::new_id();
     let now = util::now_ms();
+    // Bind order matches the column order exactly (id, team_id, provider,
+    // name, description, enabled, created_by, created_at, updated_at,
+    // archived_at) — a positional drift here silently swaps name/provider.
     let mut args = Args::new();
     args.s(&id)
         .s(team_id)
+        .s(provider.as_str())
         .s(name)
         .opt_s(description)
-        .s(provider.as_str())
         .b(false)
         .s(created_by)
         .i(now)
@@ -293,9 +296,15 @@ pub async fn list_repository_projects(
 
 /// Durable webhook delivery record (schema-only in Task 1; intake writes it,
 /// the Task 2 worker processes it). Kept here so the intake path and the
-/// future worker share one insert contract. Replay protection is the
-/// unique constraint: a duplicate delivery id within one integration is a
-/// no-op (`Ok(false)`), not an error.
+/// future worker share one insert contract.
+///
+/// Replay protection follows the Phase 8A dispatcher doctrine: an existence
+/// pre-check plus a plain INSERT — never `rows_affected`, which is
+/// unreliable for duplicate detection under `CLIENT_FOUND_ROWS`. A duplicate
+/// delivery id within one integration is a no-op (`Ok(false)`), not an
+/// error; the `UNIQUE(integration_id, delivery_id)` constraint remains the
+/// backstop for a true concurrent race (that surfaces as a constraint error,
+/// which the intake treats as a duplicate).
 pub async fn insert_delivery(
     conn: &mut Conn<'_>,
     integration_id: &str,
@@ -305,20 +314,34 @@ pub async fn insert_delivery(
     now: i64,
 ) -> Result<bool, AppError> {
     let mut args = Args::new();
+    args.s(integration_id).s(delivery_id);
+    let replayed = conn
+        .fetch_optional(
+            "SELECT id FROM webhook_deliveries \
+             WHERE integration_id = ? AND delivery_id = ?",
+            args,
+        )
+        .await?;
+    if replayed.is_some() {
+        return Ok(false);
+    }
+    // Bind order matches the placeholders: id, integration_id, delivery_id,
+    // event_type_raw, payload, next_attempt_at, created_at, updated_at.
+    let mut args = Args::new();
     args.s(util::new_id())
         .s(integration_id)
         .s(delivery_id)
         .s(event_type_raw)
         .s(payload)
         .i(now)
+        .i(now)
         .i(now);
-    let affected = conn
-        .execute(
-            "INSERT INTO webhook_deliveries (id, integration_id, delivery_id, \
-             event_type_raw, payload, status, attempts, next_attempt_at, created_at, \
-             updated_at) VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)",
-            args,
-        )
-        .await?;
-    Ok(affected > 0)
+    conn.execute(
+        "INSERT INTO webhook_deliveries (id, integration_id, delivery_id, \
+         event_type_raw, payload, status, attempts, next_attempt_at, created_at, \
+         updated_at) VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)",
+        args,
+    )
+    .await?;
+    Ok(true)
 }

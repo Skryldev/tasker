@@ -84,6 +84,8 @@ pub struct Config {
     pub log_format_json: bool,
     /// Rules Engine outbox dispatcher (Phase 8A, Task 5).
     pub rules_worker: RulesWorkerConfig,
+    /// Webhook delivery worker (Phase 8B, Task 2).
+    pub webhook_worker: WebhookWorkerConfig,
     /// File attachment storage (Phase 12 WS11).
     pub attachments: AttachmentsConfig,
 }
@@ -217,6 +219,78 @@ impl Default for RulesWorkerConfig {
     }
 }
 
+/// Webhook delivery worker operational parameters (Phase 8B, Task 2).
+/// Defaults mirror the proven Rules dispatcher policy (1s poll, batch 16,
+/// 2 concurrent executions, 60s lease, 8 attempts, 1s/60s backoff) with the
+/// additions the delivery lifecycle requires. The full-jitter fraction is an
+/// internal constant (jitter in `[0, 1000]` on the shared backoff function),
+/// not a configuration surface.
+#[derive(Debug, Clone)]
+pub struct WebhookWorkerConfig {
+    /// Whether the worker starts with the server.
+    pub enabled: bool,
+    /// Poll interval between claim cycles.
+    pub poll_interval_ms: u64,
+    /// Maximum deliveries claimed per cycle.
+    pub batch_size: u32,
+    /// Maximum deliveries processed concurrently.
+    pub max_concurrent: u32,
+    /// Claim lease duration before a delivery is recoverable again.
+    pub lease_ms: u64,
+    /// Attempts (processing failures) before a delivery dead-letters.
+    pub max_attempts: u32,
+    /// Exponential backoff base: delay = base * 2^(attempt-1), jittered.
+    pub backoff_base_ms: u64,
+    /// Exponential backoff ceiling.
+    pub backoff_max_ms: u64,
+    /// Deliveries older than this dead-letter on their next failure instead
+    /// of retrying (bounded retry age; 7 days by default).
+    pub max_delivery_age_ms: u64,
+}
+
+impl Default for WebhookWorkerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            poll_interval_ms: 1_000,
+            batch_size: 16,
+            max_concurrent: 2,
+            lease_ms: 60_000,
+            max_attempts: 8,
+            backoff_base_ms: 1_000,
+            backoff_max_ms: 60_000,
+            max_delivery_age_ms: 7 * 24 * 60 * 60 * 1000,
+        }
+    }
+}
+
+impl WebhookWorkerConfig {
+    /// Cross-field validation beyond the per-field clamping applied during
+    /// env parsing: fail fast at startup when the values cannot form a
+    /// correct retry policy.
+    ///
+    /// # Errors
+    /// Returns a [`ConfigError`] describing the incoherent combination.
+    pub fn validated(self) -> Result<Self, ConfigError> {
+        if self.backoff_max_ms < self.backoff_base_ms {
+            return Err(ConfigError(
+                "TASKER_WEBHOOK_WORKER_BACKOFF_MAX_MS must be >= \
+                 TASKER_WEBHOOK_WORKER_BACKOFF_BASE_MS"
+                    .into(),
+            ));
+        }
+        if self.max_delivery_age_ms < self.lease_ms {
+            return Err(ConfigError(
+                "TASKER_WEBHOOK_WORKER_MAX_DELIVERY_AGE_MS must be >= \
+                 TASKER_WEBHOOK_WORKER_LEASE_MS (a delivery must not expire \
+                 while its first lease is still valid)"
+                    .into(),
+            ));
+        }
+        Ok(self)
+    }
+}
+
 impl Config {
     /// Load configuration from the environment, failing fast with precise
     /// messages when a required or malformed setting is encountered.
@@ -336,6 +410,24 @@ impl Config {
             backoff_max_ms: env_parsed("TASKER_RULES_WORKER_BACKOFF_MAX_MS", 60_000u64)?.max(1),
         };
 
+        let webhook_worker = WebhookWorkerConfig {
+            enabled: env_or("TASKER_WEBHOOK_WORKER_ENABLED", "true".to_string())?
+                .eq_ignore_ascii_case("true"),
+            poll_interval_ms: env_parsed("TASKER_WEBHOOK_WORKER_POLL_MS", 1_000u64)?.max(50),
+            batch_size: env_parsed("TASKER_WEBHOOK_WORKER_BATCH", 16u32)?.clamp(1, 1000),
+            max_concurrent: env_parsed("TASKER_WEBHOOK_WORKER_CONCURRENCY", 2u32)?.clamp(1, 64),
+            lease_ms: env_parsed("TASKER_WEBHOOK_WORKER_LEASE_MS", 60_000u64)?.max(1_000),
+            max_attempts: env_parsed("TASKER_WEBHOOK_WORKER_MAX_ATTEMPTS", 8u32)?.clamp(1, 100),
+            backoff_base_ms: env_parsed("TASKER_WEBHOOK_WORKER_BACKOFF_BASE_MS", 1_000u64)?.max(1),
+            backoff_max_ms: env_parsed("TASKER_WEBHOOK_WORKER_BACKOFF_MAX_MS", 60_000u64)?.max(1),
+            max_delivery_age_ms: env_parsed(
+                "TASKER_WEBHOOK_WORKER_MAX_DELIVERY_AGE_MS",
+                7 * 24 * 60 * 60 * 1_000u64,
+            )?
+            .max(60_000),
+        }
+        .validated()?;
+
         let attachments = AttachmentsConfig::from_env()?;
 
         Ok(Self {
@@ -361,6 +453,7 @@ impl Config {
             static_dir,
             log_format_json,
             rules_worker,
+            webhook_worker,
             attachments,
         })
     }
@@ -393,6 +486,52 @@ fn env_parsed<T: std::str::FromStr>(key: &str, default: T) -> Result<T, ConfigEr
 }
 
 #[cfg(test)]
+/// Webhook worker configuration validation (Phase 8B, Task 2): cross-field
+/// invariants fail fast at startup, coherent policies load cleanly.
+#[cfg(test)]
+mod webhook_worker_config_tests {
+    use super::WebhookWorkerConfig;
+
+    #[test]
+    fn defaults_are_coherent() {
+        assert!(WebhookWorkerConfig::default().validated().is_ok());
+    }
+
+    #[test]
+    fn backoff_ceiling_below_base_is_rejected() {
+        let config = WebhookWorkerConfig {
+            backoff_base_ms: 5_000,
+            backoff_max_ms: 1_000,
+            ..WebhookWorkerConfig::default()
+        };
+        let err = config.validated().unwrap_err();
+        assert!(err.0.contains("BACKOFF_MAX_MS"));
+    }
+
+    #[test]
+    fn delivery_age_below_lease_is_rejected() {
+        let config = WebhookWorkerConfig {
+            lease_ms: 60_000,
+            max_delivery_age_ms: 30_000,
+            ..WebhookWorkerConfig::default()
+        };
+        let err = config.validated().unwrap_err();
+        assert!(err.0.contains("MAX_DELIVERY_AGE_MS"));
+    }
+
+    #[test]
+    fn boundary_equality_is_accepted() {
+        let config = WebhookWorkerConfig {
+            backoff_base_ms: 1_000,
+            backoff_max_ms: 1_000,
+            lease_ms: 60_000,
+            max_delivery_age_ms: 60_000,
+            ..WebhookWorkerConfig::default()
+        };
+        assert!(config.validated().is_ok());
+    }
+}
+
 mod mfa_key_tests {
     // The key-parsing rules live in Config::from_env; the loadable-shape
     // invariants are pure and checked here without touching process env.
