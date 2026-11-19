@@ -18,6 +18,7 @@
 //! events enter the shared `domain_events` store with
 //! `origin = 'integration'` (see `rules::events::EventOrigin`).
 
+pub mod api;
 pub mod credentials;
 pub mod github;
 pub mod gitlab;

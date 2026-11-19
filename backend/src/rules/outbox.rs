@@ -79,6 +79,11 @@ pub fn classify_failure(err: &AppError) -> FailureClass {
         // The foreign holder of the reserved identity email never disappears,
         // so retrying can never succeed.
         "principal_email_conflict",
+        // Taskless integration intents (Phase 8B, Task 5): task-scoped
+        // actions on a taskless event cannot succeed by retrying — the rule
+        // configuration itself is the problem.
+        "integration action requires a task context",
+        "integration notification actions require explicit recipients",
     ];
     if matches!(err, E::BadRequest(_) | E::Validation(_) | E::NotFound(_))
         || permanent_markers.iter().any(|m| text.contains(m))
@@ -101,7 +106,9 @@ pub fn classify_failure(err: &AppError) -> FailureClass {
 
 /// The scope chain every intent must satisfy: outbox → execution → event →
 /// rule → task must all agree on team/task/rule/version identity. Mismatched
-/// references are corruption and fail loudly.
+/// references are corruption and fail loudly. `task_id` is `None` for
+/// taskless integration intents (Phase 8B, Task 5): the chain then asserts
+/// that execution and event are taskless too and agree on team identity.
 struct IntentScope {
     execution_id: String,
     action_type: String,
@@ -110,7 +117,9 @@ struct IntentScope {
     #[allow(dead_code)]
     rule_id: String,
     rule_version: i64,
-    task_id: String,
+    task_id: Option<String>,
+    /// The triggering event's type — taskless summaries cite it.
+    event_type: String,
     team_id: String,
 }
 
@@ -126,6 +135,7 @@ async fn load_intent_scope(conn: &mut Conn<'_>, outbox_id: &str) -> Result<Inten
                     e.team_id AS execution_team_id, \
                     e.rule_version AS execution_rule_version, \
                     de.task_id AS event_task_id, de.team_id AS event_team_id, \
+                    de.event_type AS event_type, \
                     r.team_id AS rule_team_id \
              FROM automation_outbox o \
              JOIN rule_executions e ON e.id = o.execution_id \
@@ -143,12 +153,13 @@ async fn load_intent_scope(conn: &mut Conn<'_>, outbox_id: &str) -> Result<Inten
         rule_id: row.try_get("rule_id")?,
         rule_version: row.try_get("rule_version")?,
         task_id: row.try_get("intent_task_id")?,
+        event_type: row.try_get("event_type")?,
         execution_id: row.try_get("execution_id")?,
         team_id: row.try_get("execution_team_id")?,
     };
-    let execution_task: String = row.try_get("execution_task_id")?;
+    let execution_task: Option<String> = row.try_get("execution_task_id")?;
     let execution_version: i64 = row.try_get("execution_rule_version")?;
-    let event_task: String = row.try_get("event_task_id")?;
+    let event_task: Option<String> = row.try_get("event_task_id")?;
     let event_team: String = row.try_get("event_team_id")?;
     let rule_team: String = row.try_get("rule_team_id")?;
 
@@ -201,9 +212,20 @@ pub async fn execute_internal_action(
         return Ok(ExecutionOutcome::ExternalPending);
     }
 
+    // ---- Taskless integration intents (Phase 8B, Task 5) ------------------
+    // No task context exists: task-scoped actions are permanent failures
+    // (a misconfigured rule cannot succeed by retrying); the one taskless
+    // action — explicit-recipient notifications — executes here.
+    if scope.task_id.is_none() {
+        return execute_taskless(conn, outbox_id, &scope, &action, claim_token).await;
+    }
+    let task_id = scope.task_id.as_deref().ok_or_else(|| {
+        AppError::internal("corrupted automation references: taskful intent lost its task id")
+    })?;
+
     // ---- Task existence / scope revalidation ------------------------------
     let mut args = Args::new();
-    args.s(&scope.task_id);
+    args.s(task_id);
     let task = conn
         .fetch_optional(
             "SELECT team_id, project_id, title, status, priority, assignee_id, reporter_id \
@@ -251,7 +273,7 @@ pub async fn execute_internal_action(
                 conn,
                 &scope.team_id,
                 &task_project,
-                &scope.task_id,
+                task_id,
                 &principal_id,
                 body,
             )
@@ -301,7 +323,7 @@ pub async fn execute_internal_action(
                 batch.push(crate::notifications::NewNotification {
                     event: crate::notifications::events::AUTOMATION_TRIGGERED,
                     recipient_id: recipient.clone(),
-                    task_id: scope.task_id.clone(),
+                    task_id: task_id.to_string(),
                     actor_id: principal_id.clone(),
                     summary: format!("Automation rule triggered on \"{title}\""),
                 });
@@ -385,6 +407,107 @@ pub(crate) async fn complete_intent(
         ));
     }
     Ok(())
+}
+
+/// Execute a taskless integration intent (Phase 8B, Task 5). Action
+/// compatibility is decided here, once, on the durable record:
+/// - `add_comment` — requires a task: permanent failure (a misconfigured
+///   rule cannot succeed by retrying);
+/// - `send_notification` with selector recipients (assignee/reporter) —
+///   selectors need a task: permanent failure;
+/// - `send_notification` with explicit recipients — the one taskless
+///   action: recipients revalidated as team members, notifications created
+///   with `task_id NULL`, summaries citing the integration event;
+/// - `send_message` — never claimed (handled upstream).
+///
+/// The ledger entry and the fenced completion commit with the effect, so
+/// crash semantics match the task path exactly.
+async fn execute_taskless(
+    conn: &mut Conn<'_>,
+    outbox_id: &str,
+    scope: &IntentScope,
+    action: &ActionDef,
+    claim_token: Option<&str>,
+) -> Result<ExecutionOutcome, AppError> {
+    // The Automation Principal is provisioned inside this transaction (same
+    // idempotent provisioning as the task path): every effect's actor FK
+    // needs the row.
+    let principal_id = crate::rules::actions::provision_principal(conn).await?;
+    let outcome_detail;
+    let recipient_id: Option<String>;
+    match action {
+        ActionDef::AddComment { .. } => {
+            return Err(AppError::internal(
+                "integration action requires a task context: add_comment on a taskless                  integration event cannot run",
+            ));
+        }
+        ActionDef::SendNotification { recipients } => {
+            if !recipients.selectors.is_empty() {
+                return Err(AppError::internal(
+                    "integration notification actions require explicit recipients: selector                      recipients need a task context",
+                ));
+            }
+            let mut targets: Vec<String> = Vec::new();
+            let mut skipped = 0usize;
+            for user_id in &recipients.users {
+                let mut args = Args::new();
+                args.s(&scope.team_id).s(user_id);
+                let member = conn
+                    .fetch_optional(
+                        "SELECT 1 AS one FROM team_members WHERE team_id = ? AND user_id = ?",
+                        args,
+                    )
+                    .await?;
+                if member.is_some() && !targets.contains(user_id) {
+                    targets.push(user_id.clone());
+                } else {
+                    skipped += 1;
+                }
+            }
+            let mut batch: Vec<crate::notifications::TasklessNotification> = Vec::new();
+            for recipient in &targets {
+                batch.push(crate::notifications::TasklessNotification {
+                    event: crate::notifications::events::AUTOMATION_TRIGGERED,
+                    recipient_id: recipient.clone(),
+                    actor_id: principal_id.clone(),
+                    summary: format!(
+                        "Automation rule triggered on integration event \"{}\"",
+                        scope.event_type
+                    ),
+                });
+            }
+            crate::notifications::record_taskless_batch(conn, &batch).await?;
+            outcome_detail = serde_json::json!({
+                "notified": batch.len(),
+                "skipped": skipped,
+                "taskless": true,
+            })
+            .to_string();
+            recipient_id = targets.first().cloned();
+        }
+        ActionDef::SendMessage { .. } => unreachable!("external actions returned above"),
+    }
+
+    // ---- Durable result + fenced outbox completion, same transaction ------
+    let now = util::now_ms();
+    let mut args = Args::new();
+    args.s(util::new_id())
+        .s(outbox_id)
+        .s(&scope.execution_id)
+        .s(&scope.action_type)
+        .s("completed")
+        .opt_s(recipient_id)
+        .opt_s(Some(principal_id))
+        .opt_s(None::<String>)
+        .opt_s(Some(outcome_detail))
+        .i(now);
+    conn.execute(
+        "INSERT INTO rule_action_results (id, outbox_id, execution_id, action_type,          outcome, recipient_id, author_id, body_hash, detail, created_at)          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        args,
+    )
+    .await?;
+    complete_intent(conn, outbox_id, claim_token, now).await?;
+    Ok(ExecutionOutcome::Completed)
 }
 
 /// Record a durable `skipped` outcome (no internal effect) and complete the

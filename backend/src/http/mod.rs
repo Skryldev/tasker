@@ -51,6 +51,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(crate::rules::api::routes())
         .merge(crate::goals::routes())
         .merge(guests::routes())
+        .merge(crate::integrations::api::routes())
         // Provider-facing webhook intake (Phase 8B, Task 2): carries its own
         // route-scoped 15,000-byte body limit overriding the app default.
         .merge(crate::integrations::webhook::intake::routes());

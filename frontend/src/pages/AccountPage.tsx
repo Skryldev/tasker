@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
 import { Check, KeyRound, Loader2, MonitorSmartphone } from "lucide-react";
 import {
@@ -29,13 +30,13 @@ import { STATUS_LABELS, TASK_STATUSES, timeAgo } from "@/lib/utils";
 import { MfaSettings } from "@/components/app/MfaSettings";
 
 /** The six notification events a user can toggle (contract vocabulary). */
-const PREF_EVENTS: { key: keyof NotificationPrefs; label: string; hint: string }[] = [
-  { key: "task_assigned", label: "Task assigned", hint: "Someone assigns a task to you" },
-  { key: "comment_mention", label: "Comment mention", hint: "Someone @mentions you in a comment" },
-  { key: "task_submitted", label: "Task submitted", hint: "An assignee submits work for review" },
-  { key: "task_accepted", label: "Task accepted", hint: "Your submission is accepted" },
-  { key: "task_rejected", label: "Task rejected", hint: "Your submission is rejected" },
-  { key: "task_status_changed", label: "Status changed", hint: "A task you reported changes status" },
+const PREF_EVENTS: { key: keyof NotificationPrefs; labelKey: string; hintKey: string }[] = [
+  { key: "task_assigned", labelKey: "prefs.task_assigned.label", hintKey: "prefs.task_assigned.hint" },
+  { key: "comment_mention", labelKey: "prefs.comment_mention.label", hintKey: "prefs.comment_mention.hint" },
+  { key: "task_submitted", labelKey: "prefs.task_submitted.label", hintKey: "prefs.task_submitted.hint" },
+  { key: "task_accepted", labelKey: "prefs.task_accepted.label", hintKey: "prefs.task_accepted.hint" },
+  { key: "task_rejected", labelKey: "prefs.task_rejected.label", hintKey: "prefs.task_rejected.hint" },
+  { key: "task_status_changed", labelKey: "prefs.task_status_changed.label", hintKey: "prefs.task_status_changed.hint" },
 ];
 
 /** Contract default: every event enabled (pre-Phase-9 behavior). */
@@ -57,6 +58,7 @@ function fieldError(error: unknown, field: string): string | undefined {
 }
 
 export function AccountPage() {
+  const { t } = useTranslation("settings");
   const { user } = useAuth();
   const { push } = useToast();
   const [currentPassword, setCurrentPassword] = useState("");
@@ -66,20 +68,20 @@ export function AccountPage() {
   const change = useMutation({
     mutationFn: () => api.changePassword(currentPassword, newPassword),
     onSuccess: () => {
-      push("success", "Password changed", "Other sessions were signed out.");
+      push("success", t("password.changedTitle"), t("password.changedBody"));
       setCurrentPassword("");
       setNewPassword("");
       setFormError(null);
     },
     onError: (err) =>
-      setFormError(err instanceof ApiError ? err.message : "Could not change the password."),
+      setFormError(err instanceof ApiError ? err.message : t("password.errors.change")),
   });
 
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <h1 className="mb-1 text-lg font-semibold">Profile</h1>
+      <h1 className="mb-1 text-lg font-semibold">{t("profile.title")}</h1>
       <p className="mb-6 text-xs text-muted-foreground">
-        Your work identity, notifications, and account security.
+        {t("profile.subtitle")}
       </p>
 
       {user ? <WorkIdentitySection user={user} /> : null}
@@ -98,8 +100,8 @@ export function AccountPage() {
 
       <Separator className="my-8" />
 
-      <section id="security" aria-label="Security" className="mb-8 scroll-mt-16">
-        <h2 className="mb-3 text-sm font-semibold">Security</h2>
+      <section id="security" aria-label={t("sections.security")} className="mb-8 scroll-mt-16">
+        <h2 className="mb-3 text-sm font-semibold">{t("sections.security")}</h2>
         <div className="mb-6">
           <MfaSettings enabled={Boolean(user?.mfa_enabled)} />
         </div>
@@ -116,13 +118,13 @@ export function AccountPage() {
           data-testid="change-password-form"
         >
           <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-            <KeyRound className="h-4 w-4" /> Change password
+            <KeyRound className="h-4 w-4" /> {t("password.change")}
           </h3>
           <p className="text-xs text-muted-foreground">
-            Changing your password signs out all other sessions.
+            {t("password.changeHint")}
           </p>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="current-password">Current password</Label>
+            <Label htmlFor="current-password">{t("password.current")}</Label>
             <Input
               id="current-password"
               type="password"
@@ -132,7 +134,7 @@ export function AccountPage() {
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="new-password">New password</Label>
+            <Label htmlFor="new-password">{t("password.new")}</Label>
             <Input
               id="new-password"
               type="password"
@@ -144,7 +146,7 @@ export function AccountPage() {
               <PasswordStrengthMeter password={newPassword} />
             ) : null}
             <p className="text-2xs text-muted-foreground">
-              At least 12 characters with upper, lower, digit and special.
+              {t("password.rules")}
             </p>
           </div>
           {formError ? <p className="text-2xs text-destructive" role="alert">{formError}</p> : null}
@@ -155,7 +157,7 @@ export function AccountPage() {
             disabled={!currentPassword || !newPassword || change.isPending}
             data-testid="change-password-submit"
           >
-            {change.isPending ? "Saving…" : "Change password"}
+            {change.isPending ? t("actions.saving") : t("password.change")}
           </Button>
         </form>
       </section>
@@ -168,6 +170,7 @@ export function AccountPage() {
 // ---------------------------------------------------------------------------
 
 function WorkIdentitySection({ user }: { user: User }) {
+  const { t } = useTranslation("settings");
   const { push } = useToast();
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -184,11 +187,11 @@ function WorkIdentitySection({ user }: { user: User }) {
     setLocalError(null);
     const usernameTrimmed = username.trim();
     if (usernameTrimmed && !/^[a-z0-9_]{3,32}$/.test(usernameTrimmed)) {
-      setLocalError("Username must be 3-32 characters of a-z, 0-9 or _.");
+      setLocalError(t("profile.errors.usernameFormat"));
       return;
     }
     if (bio.length > 200) {
-      setLocalError("Bio must be at most 200 characters.");
+      setLocalError(t("profile.errors.bioTooLong"));
       return;
     }
     update.mutate(
@@ -200,10 +203,10 @@ function WorkIdentitySection({ user }: { user: User }) {
         capacity_limit: Number(capacity) || undefined,
       },
       {
-        onSuccess: () => push("success", "Profile saved"),
+        onSuccess: () => push("success", t("profile.saved")),
         onError: (error) => {
           const message =
-            error instanceof ApiError ? error.message : "Could not save the profile.";
+            error instanceof ApiError ? error.message : t("profile.errors.save");
           setLocalError(message);
         },
       },
@@ -218,15 +221,15 @@ function WorkIdentitySection({ user }: { user: User }) {
       update.mutate(
         { avatar: dataUrl },
         {
-          onSuccess: () => push("success", "Avatar updated"),
+          onSuccess: () => push("success", t("profile.avatar.updated")),
           onError: (error) =>
             setLocalError(
-              error instanceof ApiError ? error.message : "Could not upload the avatar.",
+              error instanceof ApiError ? error.message : t("avatar.errors.upload"),
             ),
         },
       );
     } catch (error) {
-      setLocalError(error instanceof AvatarError ? error.message : "Could not read that file.");
+      setLocalError(error instanceof AvatarError ? error.message : t("avatar.errors.read"));
     }
   };
 
@@ -234,8 +237,8 @@ function WorkIdentitySection({ user }: { user: User }) {
   const bioError = fieldError(update.error, "bio");
   const timezoneError = fieldError(update.error, "timezone");
   return (
-    <section aria-label="Work identity">
-      <h2 className="mb-3 text-sm font-semibold">Work identity</h2>
+    <section aria-label={t("profile.workIdentity")}>
+      <h2 className="mb-3 text-sm font-semibold">{t("profile.workIdentity")}</h2>
       <form
         className="flex flex-col gap-4"
         onSubmit={(e) => {
@@ -254,7 +257,7 @@ function WorkIdentitySection({ user }: { user: User }) {
           />
           <div className="flex flex-col gap-1">
             <Label htmlFor="avatar-upload" className="text-xs">
-              Avatar — square JPG, PNG or WebP, up to 2 MB. It is center-cropped automatically.
+              {t("profile.avatar.label")}
             </Label>
             <input
               id="avatar-upload"
@@ -275,7 +278,7 @@ function WorkIdentitySection({ user }: { user: User }) {
                 onClick={() => fileInput.current?.click()}
                 data-testid="avatar-pick"
               >
-                Upload…
+                {t("actions.upload")}
               </Button>
               {user.id ? (
                 <Button
@@ -283,9 +286,9 @@ function WorkIdentitySection({ user }: { user: User }) {
                   variant="ghost"
                   size="sm"
                   disabled={update.isPending}
-                  onClick={() => update.mutate({ avatar: null }, { onSuccess: () => push("success", "Avatar removed") })}
+                  onClick={() => update.mutate({ avatar: null }, { onSuccess: () => push("success", t("profile.avatar.removed")) })}
                 >
-                  Remove
+                  {t("actions.remove")}
                 </Button>
               ) : null}
             </div>
@@ -294,7 +297,7 @@ function WorkIdentitySection({ user }: { user: User }) {
 
         <div className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="display-name">Display name</Label>
+            <Label htmlFor="display-name">{t("profile.displayName")}</Label>
             <Input
               id="display-name"
               value={displayName}
@@ -308,7 +311,7 @@ function WorkIdentitySection({ user }: { user: User }) {
             ) : null}
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="username">Username</Label>
+            <Label htmlFor="username">{t("profile.username")}</Label>
             <Input
               id="username"
               value={username}
@@ -319,7 +322,7 @@ function WorkIdentitySection({ user }: { user: User }) {
               data-testid="username-input"
             />
             <p className="text-2xs text-muted-foreground">
-              Unique across the instance; used for @mentions.
+              {t("profile.usernameHint")}
             </p>
             {usernameError ? (
               <p className="text-2xs text-destructive" role="alert">{usernameError}</p>
@@ -328,7 +331,7 @@ function WorkIdentitySection({ user }: { user: User }) {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="bio">Bio</Label>
+          <Label htmlFor="bio">{t("profile.bio")}</Label>
           <textarea
             id="bio"
             value={bio}
@@ -340,7 +343,7 @@ function WorkIdentitySection({ user }: { user: User }) {
             data-testid="bio-input"
           />
           <p className="text-2xs text-muted-foreground">
-            {bio.length}/200 — shown when teammates hover your avatar.
+            {t("profile.bioHint", { length: bio.length })}
           </p>
           {bioError ? (
             <p className="text-2xs text-destructive" role="alert">{bioError}</p>
@@ -348,7 +351,7 @@ function WorkIdentitySection({ user }: { user: User }) {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="timezone">Timezone</Label>
+          <Label htmlFor="timezone">{t("profile.timezone")}</Label>
           <div className="max-w-xs">
             <TimezoneSelect
               id="timezone"
@@ -358,8 +361,7 @@ function WorkIdentitySection({ user }: { user: User }) {
             />
           </div>
           <p className="text-2xs text-muted-foreground">
-            Applies to absolute timestamps. Due dates stay on the product's
-            Persian calendar regardless of timezone.
+            {t("profile.timezoneHint")}
           </p>
           {timezoneError ? (
             <p className="text-2xs text-destructive" role="alert">{timezoneError}</p>
@@ -367,7 +369,7 @@ function WorkIdentitySection({ user }: { user: User }) {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="capacity-limit">Capacity limit</Label>
+          <Label htmlFor="capacity-limit">{t("profile.capacity")}</Label>
           <Input
             id="capacity-limit"
             type="number"
@@ -379,8 +381,7 @@ function WorkIdentitySection({ user }: { user: User }) {
             data-testid="capacity-input"
           />
           <p className="text-2xs text-muted-foreground">
-            How many tasks you can comfortably carry (1–100). Shown as your
-            utilization target in the team Capacity view.
+            {t("profile.capacityHint")}
           </p>
           {fieldError(update.error, "capacity_limit") ? (
             <p className="text-2xs text-destructive" role="alert">
@@ -400,7 +401,7 @@ function WorkIdentitySection({ user }: { user: User }) {
           disabled={update.isPending || !displayName.trim()}
           data-testid="profile-save"
         >
-          {update.isPending ? "Saving…" : "Save profile"}
+          {update.isPending ? t("actions.saving") : t("profile.save")}
         </Button>
       </form>
     </section>
@@ -412,6 +413,7 @@ function WorkIdentitySection({ user }: { user: User }) {
 // ---------------------------------------------------------------------------
 
 function NotificationPrefsSection({ prefs }: { prefs: NotificationPrefs }) {
+  const { t } = useTranslation("settings");
   const { push } = useToast();
   const update = useUpdateNotificationPrefs();
   // Optimistic local state; the mutation is debounced (§6.4) so rapid
@@ -447,7 +449,7 @@ function NotificationPrefsSection({ prefs }: { prefs: NotificationPrefs }) {
             });
             push(
               "error",
-              "Could not save the preference",
+              t("prefs.errors.save"),
               error instanceof ApiError ? error.message : undefined,
             );
           },
@@ -459,10 +461,10 @@ function NotificationPrefsSection({ prefs }: { prefs: NotificationPrefs }) {
   const resolved = (key: keyof NotificationPrefs) => overrides[key] ?? prefs[key];
 
   return (
-    <section aria-label="Notification preferences">
-      <h2 className="mb-1 text-sm font-semibold">Notification preferences</h2>
+    <section aria-label={t("prefs.title")}>
+      <h2 className="mb-1 text-sm font-semibold">{t("prefs.title")}</h2>
       <p className="mb-3 text-xs text-muted-foreground">
-        In-app notifications only. All events are on by default.
+        {t("prefs.subtitle")}
       </p>
       <p
         className="mb-2 flex items-center gap-1 text-2xs text-success transition-opacity duration-150"
@@ -470,20 +472,20 @@ function NotificationPrefsSection({ prefs }: { prefs: NotificationPrefs }) {
         style={{ opacity: savedFlash ? 1 : 0 }}
         aria-live="polite"
       >
-        <Check className="h-3 w-3" aria-hidden /> Saved
+        <Check className="h-3 w-3" aria-hidden /> {t("prefs.saved")}
       </p>
-      <ul className="max-w-md overflow-hidden rounded-lg border" data-testid="notification-prefs">
-        {PREF_EVENTS.map(({ key, label, hint }) => (
+      <ul className="max-w-md overflow-hidden rounded-sg border" data-testid="notification-prefs">
+        {PREF_EVENTS.map(({ key, labelKey, hintKey }) => (
           <li key={key} className="flex items-center justify-between gap-3 border-b px-4 py-2.5 last:border-0">
             <div>
-              <p className="text-sm font-medium">{label}</p>
-              <p className="text-2xs text-muted-foreground">{hint}</p>
+              <p className="text-sm font-medium">{t(labelKey)}</p>
+              <p className="text-2xs text-muted-foreground">{t(hintKey)}</p>
             </div>
             <button
               type="button"
               role="switch"
               aria-checked={resolved(key)}
-              aria-label={label}
+              aria-label={t(labelKey)}
               disabled={update.isPending}
               onClick={() => toggle(key)}
               data-testid={`pref-${key.replaceAll("_", "-")}`}
@@ -492,8 +494,8 @@ function NotificationPrefsSection({ prefs }: { prefs: NotificationPrefs }) {
               }`}
             >
               <span
-                className={`absolute top-0.5 h-4 w-4 rounded-full bg-background shadow transition-all ${
-                  resolved(key) ? "left-[18px]" : "left-0.5"
+                className={`absolute top-0.5 h-4 w-4 rounded-full bg-background shadow transition-[inset-inline-start] ${
+                  resolved(key) ? "end-1" : "start-0.5"
                 }`}
               />
             </button>
@@ -509,14 +511,15 @@ function NotificationPrefsSection({ prefs }: { prefs: NotificationPrefs }) {
 // ---------------------------------------------------------------------------
 
 function MyWorkSummarySection() {
+  const { t } = useTranslation("settings");
   const summary = useMySummary();
 
   if (summary.isError) {
     return (
-      <section aria-label="My work summary">
-        <h2 className="mb-3 text-sm font-semibold">My work</h2>
+      <section aria-label={t("summary.aria")}>
+        <h2 className="mb-3 text-sm font-semibold">{t("summary.title")}</h2>
         <p className="text-xs text-destructive" role="alert">
-          Could not load your work summary.
+          {t("summary.errors.load")}
         </p>
       </section>
     );
@@ -527,7 +530,7 @@ function MyWorkSummarySection() {
   const tileLink = (to: string, label: string, count: number | undefined, testId: string) => (
     <Link
       to={to}
-      className="flex flex-col items-center gap-1 rounded-lg border p-3 transition-colors hover:bg-accent"
+      className="flex flex-col items-center gap-1 rounded-sg border p-3 transition-colors hover:bg-accent"
       data-testid={testId}
     >
       <span className="text-lg font-semibold">{count ?? "…"}</span>
@@ -536,10 +539,10 @@ function MyWorkSummarySection() {
   );
 
   return (
-    <section aria-label="My work summary">
-      <h2 className="mb-1 text-sm font-semibold">My work</h2>
+    <section aria-label={t("summary.aria")}>
+      <h2 className="mb-1 text-sm font-semibold">{t("summary.title")}</h2>
       <p className="mb-3 text-xs text-muted-foreground">
-        Counts are computed by the server; each number opens the matching list.
+        {t("summary.subtitle")}
       </p>
       <div className="grid grid-cols-4 gap-2 sm:grid-cols-8" data-testid="my-work-summary">
         {TASK_STATUSES.map((status) =>
@@ -552,10 +555,10 @@ function MyWorkSummarySection() {
         )}
       </div>
       <div className="mt-2 grid max-w-md grid-cols-2 gap-2">
-        {tileLink("/?overdue=1", "Overdue", summary.data?.overdue, "summary-overdue")}
+        {tileLink("/?overdue=1", t("summary.overdue"), summary.data?.overdue, "summary-overdue")}
         {tileLink(
           "/?mentioned=1",
-          "Unread mentions (7d)",
+          t("summary.unreadMentions"),
           summary.data?.unread_mentions_7d,
           "summary-mentions",
         )}
@@ -569,8 +572,12 @@ function MyWorkSummarySection() {
 // ---------------------------------------------------------------------------
 
 /** Best-effort device label from a stored User-Agent string. */
-function deviceLabel(userAgent: string | null | undefined): string {
-  if (!userAgent) return "Unknown device";
+function deviceLabel(
+  userAgent: string | null | undefined,
+  unknownLabel: string,
+  joiner: string,
+): string {
+  if (!userAgent) return unknownLabel;
   const ua = userAgent;
   const os = /Windows/.test(ua)
     ? "Windows"
@@ -594,10 +601,11 @@ function deviceLabel(userAgent: string | null | undefined): string {
           : /Safari\//.test(ua)
             ? "Safari"
             : null;
-  return [browser, os].filter(Boolean).join(" on ") || "Unknown device";
+  return [browser, os].filter(Boolean).join(joiner) || unknownLabel;
 }
 
 function SessionsSection() {
+  const { t } = useTranslation("settings");
   const sessions = useSessions();
   const revoke = useRevokeSession();
   const logout = useLogout();
@@ -612,11 +620,11 @@ function SessionsSection() {
       return;
     }
     revoke.mutate(session.id, {
-      onSuccess: () => push("success", "Session revoked"),
+      onSuccess: () => push("success", t("sessions.revoked")),
       onError: (error) =>
         push(
           "error",
-          "Could not revoke the session",
+          t("sessions.errors.revoke"),
           error instanceof ApiError ? error.message : undefined,
         ),
     });
@@ -625,33 +633,33 @@ function SessionsSection() {
   return (
     <div>
       <h3 className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
-        <MonitorSmartphone className="h-4 w-4" /> Active sessions
+        <MonitorSmartphone className="h-4 w-4" /> {t("sessions.title")}
       </h3>
       <p className="mb-3 text-xs text-muted-foreground">
-        Devices signed in to your account. Revoking a session signs that device out.
+        {t("sessions.subtitle")}
       </p>
       {sessions.isLoading ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="sessions-loading">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading sessions…
+          <Loader2 className="h-4 w-4 animate-spin" /> {t("sessions.loading")}
         </div>
       ) : (
-        <ul className="max-w-md overflow-hidden rounded-lg border" data-testid="session-list">
+        <ul className="max-w-md overflow-hidden rounded-sg border" data-testid="session-list">
           {sessions.data?.items.length === 0 ? (
-            <li className="px-4 py-3 text-xs text-muted-foreground">No active sessions.</li>
+            <li className="px-4 py-3 text-xs text-muted-foreground">{t("sessions.empty")}</li>
           ) : null}
           {sessions.data?.items.map((session) => (
             <li key={session.id} className="flex items-center justify-between gap-3 border-b px-4 py-2.5 last:border-0">
               <div className="min-w-0">
                 <p className="text-sm font-medium">
-                  {deviceLabel(session.user_agent)}
+                  {deviceLabel(session.user_agent, t("sessions.unknownDevice"), t("sessions.onJoiner"))}
                   {session.current ? (
-                    <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-2xs font-semibold text-primary">
-                      This device
+                    <span className="ms-2 rounded bg-primary/10 px-1.5 py-0.5 text-2xs font-semibold text-primary">
+                      {t("sessions.thisDevice")}
                     </span>
                   ) : null}
                 </p>
                 <p className="truncate text-2xs text-muted-foreground">
-                  Last seen {timeAgo(session.last_seen_at)}
+                  {t("sessions.lastSeen", { time: timeAgo(session.last_seen_at) })}
                   {session.ip_address ? ` · ${session.ip_address}` : ""}
                 </p>
               </div>
@@ -662,7 +670,7 @@ function SessionsSection() {
                 onClick={() => onRevoke(session)}
                 data-testid={`revoke-session-${session.current ? "current" : "other"}`}
               >
-                Revoke
+                {t("actions.revoke")}
               </Button>
             </li>
           ))}

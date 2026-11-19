@@ -187,9 +187,22 @@ pub fn validate_delivery_id(raw: &str) -> Result<String, &'static str> {
     validate_bounded_id(raw, limits::DELIVERY_ID_MAX_CHARS, "delivery_id")
 }
 
-/// Bounded provider event-header validation (e.g. GitHub `X-GitHub-Event`).
+/// Bounded provider event-header validation. GitLab event names contain
+/// spaces (`"Push Event"`, `"Merge Request Event"`), so unlike delivery ids
+/// internal whitespace is allowed; control characters and the 64-character
+/// bound (`event_type_raw` column) are still enforced.
 pub fn validate_event_type_raw(raw: &str) -> Result<String, &'static str> {
-    validate_bounded_id(raw, 64, "event_type_raw")
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("must not be empty");
+    }
+    if trimmed.chars().count() > 64 {
+        return Err("exceeds the length bound");
+    }
+    if trimmed.chars().any(char::is_control) {
+        return Err("must not contain control characters");
+    }
+    Ok(trimmed.to_string())
 }
 
 fn validate_bounded_id(raw: &str, max: usize, field: &'static str) -> Result<String, &'static str> {
@@ -256,9 +269,15 @@ mod tests {
     fn event_type_bounds() {
         assert!(validate_event_type_raw("push").is_ok());
         assert!(validate_event_type_raw("pull_request").is_ok());
+        // GitLab event names contain spaces.
+        assert!(validate_event_type_raw("Push Event").is_ok());
+        assert!(validate_event_type_raw("  Merge Request Event  ").is_ok());
         assert!(validate_event_type_raw("").is_err());
+        assert!(validate_event_type_raw("   ").is_err());
         let long = "e".repeat(65);
         assert!(validate_event_type_raw(&long).is_err());
+        // Control characters are rejected even with spaces allowed.
+        assert!(validate_event_type_raw("a\u{7}b").is_err());
     }
 
     #[test]

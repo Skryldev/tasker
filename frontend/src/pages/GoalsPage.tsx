@@ -168,7 +168,7 @@ export function GoalsPage() {
             <li key={goal.id}>
               <Link
                 to={`/goals/${goal.id}`}
-                className="block rounded-lg border bg-card p-4 transition-colors hover:border-primary/40"
+                className="block rounded-sg border bg-card p-4 transition-colors hover:border-primary/40"
                 data-testid={`goal-card-${goal.id}`}
               >
                 <div className="mb-2 flex items-center gap-2">

@@ -2,7 +2,73 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------------------
+   Self-hosted fonts (Phase 15, ADR-0024). Vazirmatn UI (fa) — the UI variant
+   has reduced vertical metrics so Persian lines align with Latin elements —
+   and Inter variable (en/fr). `font-display: swap` keeps text visible during
+   the swap; the active locale's primary fonts are preloaded from index.html.
+   Fonts are static assets in public/fonts — never part of the JS bundle.
+   --------------------------------------------------------------------------- */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/Inter-Variable-latin.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215;
+}
+@font-face {
+  font-family: "Vazirmatn UI";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/Vazirmatn-UI-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Vazirmatn UI";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/Vazirmatn-UI-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Vazirmatn UI";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/Vazirmatn-UI-SemiBold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Vazirmatn UI";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/Vazirmatn-UI-Bold.woff2") format("woff2");
+}
+
 @layer base {
+  /* Typographic scale tokens (Phase 15 §4.3). Persian gets a taller line
+     height for its connected script; Latin headings may tighten tracking,
+     Persian must never receive negative letter-spacing. */
+  :root {
+    --leading-body: 1.5;
+    --tracking-heading: -0.01em;
+  }
+  :lang(fa) {
+    --leading-body: 1.7;
+    --tracking-heading: 0em;
+  }
+  /* Locale-aware font stacks: Inter first for Latin locales, Vazirmatn UI
+     first for Persian — the other family stays as the mixed-script
+     fallback so Latin fragments inside Persian text render consistently. */
+  :root {
+    --font-sans: "Inter", "Vazirmatn UI", ui-sans-serif, system-ui, sans-serif;
+  }
+  :lang(fa) {
+    --font-sans: "Vazirmatn UI", "Inter", ui-sans-serif, system-ui, sans-serif;
+  }
+
   :root {
     --background: 0 0% 100%;
     --foreground: 240 10% 8%;
@@ -87,7 +153,9 @@
   }
 
   body {
-    @apply bg-background text-foreground font-sans antialiased;
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
+    line-height: var(--leading-body);
     font-feature-settings: "cv11", "ss01";
   }
 

@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState, ErrorState } from "@/components/app/EmptyState";
 import { Skeleton } from "@/components/ui/badge";
@@ -24,9 +25,10 @@ const TaskDetailPanel = lazy(() =>
 );
 import { TaskTable } from "@/components/app/TaskTable";
 import { DetailSidebar } from "@/components/app/DetailSidebar";
-import { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES, STATUS_LABELS } from "@/lib/utils";
+import { PRIORITIES, TASK_STATUSES, priorityKey, statusKey, formatNumber } from "@/lib/utils";
 
 export function MyTasksPage() {
+  const { t } = useTranslation("common");
   const { push } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
@@ -78,7 +80,7 @@ export function MyTasksPage() {
       api.setTaskPosition(taskId, beforeTaskId),
     onError: () => {
       void tasks.refetch();
-      push("error", "Could not reorder", "The order was restored.");
+      push("error", t("myTasks.reorderFailed"), t("myTasks.reorderRestored"));
     },
   });
   const reorderTask = (dragged: Task, beforeTaskId?: string) => {
@@ -104,9 +106,9 @@ export function MyTasksPage() {
       <div className="min-w-0 flex-1 overflow-y-auto scrollbar-thin p-6">
         <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-lg font-semibold">My Tasks</h1>
+            <h1 className="text-lg font-semibold">{t("nav.myTasks")}</h1>
             <p className="text-xs text-muted-foreground">
-              Everything assigned to you across all teams, due soonest first.
+              {t("myTasks.subtitle")}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2" data-testid="my-tasks-filters">
@@ -120,9 +122,9 @@ export function MyTasksPage() {
                   next.delete("overdue");
                   setSearchParams(next, { replace: true });
                 }}
-                aria-label="Clear overdue filter"
+                aria-label={t("myTasks.clearOverdueAria")}
               >
-                <CalendarClock className="h-3 w-3" /> Overdue <X className="h-3 w-3" />
+                <CalendarClock className="h-3 w-3" /> {t("myTasks.overdue")} <X className="h-3 w-3" />
               </button>
             ) : null}
             {mentionedOnly ? (
@@ -135,13 +137,13 @@ export function MyTasksPage() {
                   next.delete("mentioned");
                   setSearchParams(next, { replace: true });
                 }}
-                aria-label="Clear unread mentions filter"
+                aria-label={t("myTasks.clearMentionsAria")}
               >
-                <AtSign className="h-3 w-3" /> Unread mentions <X className="h-3 w-3" />
+                <AtSign className="h-3 w-3" /> {t("myTasks.unreadMentions")} <X className="h-3 w-3" />
               </button>
             ) : null}
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute start-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 ref={searchRef}
                 value={search}
@@ -149,9 +151,10 @@ export function MyTasksPage() {
                   setSearch(e.target.value);
                   setPage(1);
                 }}
-                placeholder="Search…"
-                className="w-48 pl-7"
-                aria-label="Search my tasks"
+                placeholder={t("myTasks.searchPlaceholder")}
+                className="w-48 ps-7"
+                dir="auto"
+                aria-label={t("myTasks.searchAria")}
                 data-testid="task-search"
               />
             </div>
@@ -162,14 +165,14 @@ export function MyTasksPage() {
                 setPage(1);
               }}
             >
-              <SelectTrigger className="w-auto min-w-[7.5rem]" aria-label="Filter by status">
-                <SelectValue placeholder="Status" />
+              <SelectTrigger className="w-auto min-w-[7.5rem]" aria-label={t("myTasks.filterStatusAria")}>
+                <SelectValue placeholder={t("myTasks.status")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="all">{t("myTasks.allStatuses")}</SelectItem>
                 {TASK_STATUSES.map((s) => (
                   <SelectItem key={s} value={s}>
-                    {STATUS_LABELS[s]}
+                    {t(statusKey(s))}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -181,14 +184,14 @@ export function MyTasksPage() {
                 setPage(1);
               }}
             >
-              <SelectTrigger className="w-auto min-w-[7.5rem]" aria-label="Filter by priority">
-                <SelectValue placeholder="Priority" />
+              <SelectTrigger className="w-auto min-w-[7.5rem]" aria-label={t("myTasks.filterPriorityAria")}>
+                <SelectValue placeholder={t("myTasks.priority")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All priorities</SelectItem>
+                <SelectItem value="all">{t("myTasks.allPriorities")}</SelectItem>
                 {PRIORITIES.map((p) => (
                   <SelectItem key={p} value={p}>
-                    {PRIORITY_LABELS[p]}
+                    {t(priorityKey(p))}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -197,12 +200,12 @@ export function MyTasksPage() {
         </header>
 
         {tasks.isError ? (
-          <ErrorState title="Could not load your tasks" onRetry={() => void tasks.refetch()} />
+          <ErrorState title={t("myTasks.loadFailed")} onRetry={() => void tasks.refetch()} />
         ) : !tasks.isLoading && (tasks.data?.items.length ?? 0) === 0 ? (
           <EmptyState
             icon={<ListTodo className="h-8 w-8" />}
-            title="You're all caught up"
-            description="No tasks are assigned to you. Pick work from a project board or ask your team."
+            title={t("myTasks.caughtUp")}
+            description={t("myTasks.caughtUpDesc")}
           />
         ) : (
           <TaskTable
@@ -220,12 +223,12 @@ export function MyTasksPage() {
         )}
 
         {totalPages > 1 ? (
-          <nav className="mt-3 flex items-center justify-end gap-2" aria-label="Pagination">
+          <nav className="mt-3 flex items-center justify-end gap-2" aria-label={t("myTasks.paginationAria")}>
             <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-              Previous
+              {t("myTasks.previous")}
             </Button>
             <span className="text-2xs text-muted-foreground">
-              Page {page} of {totalPages}
+              {t("myTasks.pageOf", { page: formatNumber(page), total: formatNumber(totalPages) })}
             </span>
             <Button
               variant="outline"
@@ -233,7 +236,7 @@ export function MyTasksPage() {
               disabled={page >= totalPages}
               onClick={() => setPage((p) => p + 1)}
             >
-              Next
+              {t("myTasks.next")}
             </Button>
           </nav>
         ) : null}

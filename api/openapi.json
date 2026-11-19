@@ -5580,6 +5580,860 @@
           }
         }
       }
+    },
+    "/teams/{team_id}/integrations": {
+      "post": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Create an integration (Owner/Admin)",
+        "description": "Creates a team integration and provisions its webhook credential atomically. The plaintext webhook secret is returned in this response ONLY — it is never retrievable again. Names are unique per team.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntegrationCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Integration created with a v1 credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationWithSecret"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "List team integrations (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated integrations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/integrations/{integration_id}": {
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Integration details (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The integration with its credential state (no secrets).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Integration"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Update integration metadata (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntegrationUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated integration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Integration"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Archive an integration (Owner/Admin)",
+        "description": "Irreversible: stops intake and delivery processing, keeps history and credential audit state. Archived integrations are read-only.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The archived integration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Integration"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/integrations/{integration_id}/enable": {
+      "post": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Enable an integration (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The enabled integration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Integration"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/integrations/{integration_id}/disable": {
+      "post": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Disable an integration (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The disabled integration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Integration"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/integrations/{integration_id}/secret/rotate": {
+      "post": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Rotate the webhook secret (Owner/Admin)",
+        "description": "Replaces the encrypted secret in place and increments the credential version under an optimistic-concurrency guard. The new plaintext secret is returned in this response ONLY.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretRotate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The integration with the new credential version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationWithSecret"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/integrations/{integration_id}/secret/revoke": {
+      "post": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Revoke the webhook secret (Owner/Admin)",
+        "description": "Verification fails closed immediately; re-provisioning requires an observed revocation.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The integration with the revoked credential state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Integration"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/integrations/{integration_id}/secret": {
+      "post": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Re-provision a revoked webhook secret (Owner/Admin)",
+        "description": "Requires a revoked credential; reactivates with a new secret (returned once) and increments the version.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The integration with the new credential version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationWithSecret"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/integrations/{integration_id}/repositories": {
+      "post": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Register an external repository (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepositoryRegister"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Repository registered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Repository"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "List registered repositories (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated repositories.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/integrations/{integration_id}/repositories/{repository_id}": {
+      "delete": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Remove a registered repository (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          },
+          {
+            "name": "repository_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/integrations/{integration_id}/repositories/{repository_id}/mappings": {
+      "post": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Map a repository to a project (Owner/Admin)",
+        "description": "Cross-team mappings are unrepresentable (composite foreign keys); a foreign project yields 404.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          },
+          {
+            "name": "repository_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MappingCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Mapping created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Mapping"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "List the repository's project mappings (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          },
+          {
+            "name": "repository_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The repository's mappings with project names.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Mapping"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/integrations/{integration_id}/repositories/{repository_id}/mappings/{mapping_id}": {
+      "delete": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Remove a repository→project mapping (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          },
+          {
+            "name": "repository_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mapping_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/integrations/{integration_id}/deliveries": {
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "List webhook deliveries (Owner/Admin)",
+        "description": "Bounded metadata projection — webhook payloads are never returned by the management API.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "processing",
+                "processed",
+                "retryable_failed",
+                "dead_letter",
+                "unsupported"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated delivery metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryPage"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem422"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/integrations/{integration_id}/deliveries/{delivery_id}": {
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Delivery details (Owner/Admin)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          },
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delivery metadata (no payload).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Delivery"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          }
+        }
+      }
+    },
+    "/teams/{team_id}/integrations/{integration_id}/deliveries/{delivery_id}/replay": {
+      "post": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Replay a dead-lettered delivery (Owner/Admin)",
+        "description": "Only `dead_letter` deliveries replay; the transition is CAS-guarded and audited (who, when, why) with the original history preserved and a fresh retry budget.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TeamId"
+          },
+          {
+            "$ref": "#/components/parameters/IntegrationId"
+          },
+          {
+            "name": "delivery_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryReplay"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The delivery re-entered the queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem409"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5591,6 +6445,15 @@
       }
     },
     "parameters": {
+      "IntegrationId": {
+        "name": "integration_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
       "TeamId": {
         "name": "team_id",
         "in": "path",
@@ -5827,6 +6690,331 @@
       }
     },
     "schemas": {
+      "IntegrationCreate": {
+        "type": "object",
+        "required": [
+          "name",
+          "provider"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "nullable": true
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "github",
+              "gitlab"
+            ]
+          }
+        }
+      },
+      "Integration": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "github",
+              "gitlab"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "integer"
+          },
+          "archived_at": {
+            "type": "integer",
+            "nullable": true
+          },
+          "webhook_url_path": {
+            "type": "string",
+            "description": "The provider-facing intake path for this integration."
+          },
+          "credential": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "credential_version": {
+                "type": "integer"
+              },
+              "revoked_at": {
+                "type": "integer",
+                "nullable": true
+              },
+              "active": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "IntegrationWithSecret": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Integration"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "webhook_secret": {
+                "type": "string",
+                "description": "The plaintext webhook secret — returned exactly once, at creation/rotation/re-provisioning, and never again."
+              }
+            }
+          }
+        ]
+      },
+      "IntegrationUpdate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "nullable": true
+          }
+        }
+      },
+      "SecretRotate": {
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "description": "The current credential version (optimistic concurrency)."
+          },
+          "new_secret": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "Optional explicit secret; generated when omitted."
+          }
+        }
+      },
+      "RepositoryRegister": {
+        "type": "object",
+        "required": [
+          "external_repo_id",
+          "full_name"
+        ],
+        "properties": {
+          "external_repo_id": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "full_name": {
+            "type": "string",
+            "maxLength": 255
+          }
+        }
+      },
+      "Repository": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "integration_id": {
+            "type": "string"
+          },
+          "external_repo_id": {
+            "type": "string"
+          },
+          "full_name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "RepositoryPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Repository"
+            }
+          },
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "MappingCreate": {
+        "type": "object",
+        "required": [
+          "project_id"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        }
+      },
+      "Mapping": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "repository_id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "project_name": {
+            "type": "string"
+          },
+          "mapped_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "Delivery": {
+        "type": "object",
+        "description": "Bounded delivery metadata; payloads are never served.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "delivery_id": {
+            "type": "string",
+            "description": "The provider delivery identifier."
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "processed",
+              "retryable_failed",
+              "dead_letter",
+              "unsupported"
+            ]
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "next_attempt_at": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "integer"
+          },
+          "completed_at": {
+            "type": "integer",
+            "nullable": true
+          },
+          "last_error_category": {
+            "type": "string",
+            "nullable": true
+          },
+          "last_error_detail": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "DeliveryPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Delivery"
+            }
+          },
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "DeliveryReplay": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "nullable": true
+          }
+        }
+      },
+      "IntegrationPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Integration"
+            }
+          },
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
       "Problem": {
         "type": "object",
         "description": "RFC 9457 Problem Details with a field-error extension.",

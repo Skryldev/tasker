@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { Search, ShieldOff, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 import { ApiError, type AdminUser } from "@/api/client";
 import { adminApi } from "@/api/admin-client";
@@ -50,6 +51,7 @@ function generateTemporaryPassword(): string {
 }
 
 export default function AdminUsersPage() {
+  const { t } = useTranslation("settings");
   const { push } = useToast();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
@@ -74,18 +76,18 @@ export default function AdminUsersPage() {
     mutationFn: ({ id, active }: { id: string; active: boolean }) =>
       adminApi.updateAdminUser(id, { active }),
     onSuccess: (_user, vars) => {
-      push("success", vars.active ? "Account activated" : "Account deactivated");
+      push("success", vars.active ? t("adminUsers.toasts.activated") : t("adminUsers.toasts.deactivated"));
       void qc.invalidateQueries({ queryKey: ["admin-users"] });
     },
     onError: (error) =>
-      push("error", "Could not update account", error instanceof Error ? error.message : undefined),
+      push("error", t("adminUsers.toasts.updateFailed"), error instanceof Error ? error.message : undefined),
   });
 
   const hardDelete = useMutation({
     mutationFn: () =>
       adminApi.deleteAdminUser(deleteTarget!.id, deleteConfirmEmail.trim(), deletePassword),
     onSuccess: () => {
-      push("success", "Account deleted");
+      push("success", t("adminUsers.toasts.deleted"));
       setDeleteTarget(null);
       setDeleteConfirmEmail("");
       setDeletePassword("");
@@ -95,8 +97,8 @@ export default function AdminUsersPage() {
       const message =
         error instanceof ApiError
           ? error.problem.errors?.[0]?.message ?? error.message
-          : "Could not delete the account.";
-      push("error", "Delete refused", message);
+          : t("adminUsers.errors.delete");
+      push("error", t("adminUsers.toasts.deleteRefused"), message);
     },
   });
 
@@ -107,24 +109,25 @@ export default function AdminUsersPage() {
     <div className="mx-auto w-full max-w-4xl p-4" data-testid="admin-users-page">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-lg font-semibold">Users</h1>
+          <h1 className="text-lg font-semibold">{t("adminUsers.title")}</h1>
           <p className="text-2xs text-muted-foreground">
-            Instance-wide accounts — created here by an Owner, assigned to teams separately.
+            {t("adminUsers.subtitle")}
           </p>
         </div>
         <Button size="sm" onClick={() => setCreateOpen(true)} data-testid="admin-create-user">
-          <UserPlus /> Create user
+          <UserPlus /> {t("adminUsers.createUser")}
         </Button>
       </div>
 
       <div className="relative mb-3">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden />
+        <Search className="absolute start-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden />
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by email, name or username…"
-          aria-label="Search users"
-          className="pl-8"
+          placeholder={t("adminUsers.searchPlaceholder")}
+          dir="auto"
+              aria-label={t("adminUsers.searchAria")}
+          className="ps-8"
           data-testid="admin-users-search"
         />
       </div>
@@ -138,31 +141,31 @@ export default function AdminUsersPage() {
       ) : users.isError ? (
         <EmptyState
           icon={<UserPlus className="h-6 w-6" />}
-          title="Could not load users"
-          description="You may not be an instance Owner."
+          title={t("adminUsers.errors.load")}
+          description={t("adminUsers.errors.loadHint")}
           action={
             <Button variant="outline" size="sm" onClick={() => void users.refetch()}>
-              Retry
+              {t("actions.retry")}
             </Button>
           }
         />
       ) : emptyFiltered ? (
         <EmptyState
           icon={<Search className="h-6 w-6" />}
-          title="No users match"
-          description="Try a different search."
+          title={t("adminUsers.noMatch")}
+          description={t("adminUsers.noMatchHint")}
         />
       ) : (
-        <div className="overflow-x-auto rounded-lg border" data-testid="admin-users-table">
+        <div className="overflow-x-auto rounded-sg border" data-testid="admin-users-table">
           <table className="w-full border-collapse text-sm">
             <thead>
-              <tr className="border-b bg-muted/50 text-left">
-                {["User", "Email", "Username", "Teams", "Status", "Created", ""].map((h) => (
+              <tr className="border-b bg-muted/50 text-start">
+                {["user", "email", "username", "teams", "status", "created", ""].map((h) => (
                   <th
                     key={h}
                     className="px-3 py-2 text-2xs font-medium uppercase tracking-wide text-muted-foreground"
                   >
-                    {h}
+                    {h ? t(`adminUsers.columns.${h}`) : h}
                   </th>
                 ))}
               </tr>
@@ -176,7 +179,7 @@ export default function AdminUsersPage() {
                   <td className="px-3">
                     <span className="flex flex-wrap gap-1">
                       {u.teams.length === 0 ? (
-                        <span className="text-2xs text-muted-foreground">No teams</span>
+                        <span className="text-2xs text-muted-foreground">{t("adminUsers.noTeams")}</span>
                       ) : (
                         u.teams.map((t) => (
                           <span
@@ -198,7 +201,7 @@ export default function AdminUsersPage() {
                       }
                       data-testid={`user-status-${u.id}`}
                     >
-                      {u.active ? "Active" : "Deactivated"}
+                      {u.active ? t("adminUsers.active") : t("adminUsers.deactivated")}
                     </span>
                   </td>
                   <td className="px-3 text-2xs text-muted-foreground"><Timestamp value={u.created_at} /></td>
@@ -207,7 +210,7 @@ export default function AdminUsersPage() {
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        aria-label={u.active ? `Deactivate ${u.display_name}` : `Activate ${u.display_name}`}
+                        aria-label={u.active ? t("adminUsers.deactivateAria", { name: u.display_name }) : t("adminUsers.activateAria", { name: u.display_name })}
                         onClick={() => setActive.mutate({ id: u.id, active: !u.active })}
                         data-testid={`user-toggle-${u.id}`}
                       >
@@ -216,7 +219,7 @@ export default function AdminUsersPage() {
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        aria-label={`Delete ${u.display_name}`}
+                        aria-label={t("adminUsers.deleteAria", { name: u.display_name })}
                         onClick={() => setDeleteTarget(u)}
                         data-testid={`user-delete-${u.id}`}
                       >
@@ -238,9 +241,9 @@ export default function AdminUsersPage() {
         onOpenChange={(v) => {
           if (!v) setDeleteTarget(null);
         }}
-        title={`Delete ${deleteTarget?.display_name ?? "this account"}?`}
-        description="Soft-deactivate happens automatically. A hard delete requires typing the account's email and your password — it is refused while the account still has teams, tasks or comments."
-        confirmLabel={deleteConfirmEmail && deletePassword ? "Hard delete" : "Deactivate"}
+        title={t("adminUsers.deleteConfirm.title", { name: deleteTarget?.display_name ?? t("adminUsers.thisAccount") })}
+        description={t("adminUsers.deleteConfirm.description")}
+        confirmLabel={deleteConfirmEmail && deletePassword ? t("adminUsers.hardDelete") : t("adminUsers.deactivate")}
         pending={hardDelete.isPending}
         onConfirm={() => {
           if (deleteConfirmEmail.trim() && deletePassword) {
@@ -252,7 +255,7 @@ export default function AdminUsersPage() {
               { id: deleteTarget.id, active: false },
               {
                 onSuccess: () => {
-                  push("info", "Account deactivated");
+                  push("info", t("adminUsers.toasts.deactivated"));
                   setDeleteTarget(null);
                 },
               },
@@ -263,7 +266,7 @@ export default function AdminUsersPage() {
         {deleteTarget ? (
           <div className="flex flex-col gap-2">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="delete-confirm-email">Type the account email to hard-delete</Label>
+              <Label htmlFor="delete-confirm-email">{t("adminUsers.typeEmail")}</Label>
               <Input
                 id="delete-confirm-email"
                 value={deleteConfirmEmail}
@@ -274,7 +277,7 @@ export default function AdminUsersPage() {
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="delete-confirm-password">Your password</Label>
+              <Label htmlFor="delete-confirm-password">{t("adminUsers.yourPassword")}</Label>
               <Input
                 id="delete-confirm-password"
                 type="password"
@@ -285,7 +288,7 @@ export default function AdminUsersPage() {
               />
             </div>
             <p className="text-2xs text-muted-foreground">
-              Leave both fields empty to just deactivate the account.
+              {t("adminUsers.deactivateHint")}
             </p>
           </div>
         ) : null}
@@ -301,6 +304,7 @@ function CreateUserDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const { t } = useTranslation("settings");
   const { push } = useToast();
   const qc = useQueryClient();
   const [email, setEmail] = useState("");
@@ -328,7 +332,7 @@ function CreateUserDialog({
         temporary_password: tempPassword,
       }),
     onSuccess: (user) => {
-      push("success", "Account created", user.email);
+      push("success", t("adminUsers.toasts.created"), user.email);
       void qc.invalidateQueries({ queryKey: ["admin-users"] });
       onOpenChange(false);
     },
@@ -336,7 +340,7 @@ function CreateUserDialog({
       if (err instanceof ApiError && err.problem.errors) {
         setError(err.problem.errors.map((e) => `${e.field}: ${e.message}`).join(" · "));
       } else {
-        setError(err instanceof Error ? err.message : "Could not create the account.");
+        setError(err instanceof Error ? err.message : t("adminUsers.errors.create"));
       }
     },
   });
@@ -344,7 +348,7 @@ function CreateUserDialog({
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !displayName.trim()) {
-      setError("Email and display name are required.");
+      setError(t("adminUsers.errors.required"));
       return;
     }
     setError(null);
@@ -355,17 +359,18 @@ function CreateUserDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create instance user</DialogTitle>
+          <DialogTitle>{t("adminUsers.createDialog.title")}</DialogTitle>
           <DialogDescription>
-            The account exists instance-wide — assign it to teams from each team's settings.
+            {t("adminUsers.createDialog.description")}
           </DialogDescription>
         </DialogHeader>
         <form className="flex flex-col gap-3" onSubmit={submit} noValidate data-testid="create-user-form">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="new-user-email">Email</Label>
+            <Label htmlFor="new-user-email">{t("adminUsers.createDialog.email")}</Label>
             <Input
               id="new-user-email"
               type="email"
+              dir="ltr"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="teammate@company.com"
@@ -375,7 +380,7 @@ function CreateUserDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="new-user-name">Display name</Label>
+              <Label htmlFor="new-user-name">{t("adminUsers.createDialog.displayName")}</Label>
               <Input
                 id="new-user-name"
                 value={displayName}
@@ -384,18 +389,18 @@ function CreateUserDialog({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="new-user-username">Username (optional)</Label>
+              <Label htmlFor="new-user-username">{t("adminUsers.createDialog.usernameOptional")}</Label>
               <Input
                 id="new-user-username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="3-32 chars: a-z 0-9 _"
+                placeholder={t("adminUsers.createDialog.usernameHint")}
                 data-testid="new-user-username"
               />
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="new-user-password">Temporary password</Label>
+            <Label htmlFor="new-user-password">{t("adminUsers.createDialog.tempPassword")}</Label>
             <div className="flex gap-2">
               <Input
                 id="new-user-password"
@@ -411,20 +416,20 @@ function CreateUserDialog({
                 onClick={() => setTempPassword(generateTemporaryPassword())}
                 data-testid="generate-password"
               >
-                Generate
+                {t("adminUsers.createDialog.generate")}
               </Button>
             </div>
             <p className="text-2xs text-muted-foreground">
-              ≥ 12 characters with upper, lower, digit and special — enforced server-side.
+              {t("adminUsers.createDialog.tempPasswordHint")}
             </p>
           </div>
           {error ? <p className="text-2xs text-destructive" role="alert">{error}</p> : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("actions.cancel")}
             </Button>
             <Button type="submit" disabled={create.isPending} data-testid="create-user-submit">
-              {create.isPending ? "Creating…" : "Create user"}
+              {create.isPending ? t("adminUsers.creating") : t("adminUsers.createUser")}
             </Button>
           </DialogFooter>
         </form>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, Play, SendHorizonal, Undo2 } from "lucide-react";
 import { api, ApiError, type Task } from "@/api/client";
@@ -22,7 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Label, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { STATUS_LABELS, type TaskStatus } from "@/lib/utils";
+import { statusKey, type TaskStatus } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 /**
@@ -52,14 +53,14 @@ const STATUS_DOT: Record<TaskStatus, string> = {
   closed: "bg-status-closed",
 };
 
-/** Why a (task, actor) pair cannot move to `target` — shown as the tooltip. */
+/** Why a (task, actor) pair cannot move to `target` — i18n key shown as the tooltip. */
 function transitionBlocker(
   task: Task,
   isAssignee: boolean,
   isReporter: boolean,
   target: TaskStatus,
 ): string | null {
-  if (target === task.status) return "This is the current status";
+  if (target === task.status) return "status.currentStatus";
   const pair = `${task.status}->${target}` as const;
   const actorOk =
     (pair === "backlog->todo" ||
@@ -71,12 +72,12 @@ function transitionBlocker(
         : false;
   if (!actorOk) {
     return pair === "in_review->closed"
-      ? "Only the reporter can accept this task"
+      ? "status.blocker.onlyReporterAccept"
       : pair === "resolved->in_review"
-        ? "Only the reporter can submit this task for review"
+        ? "status.blocker.onlyReporterSubmit"
         : pair === "in_review->in_progress"
-          ? "Only the reporter can reject this task"
-          : "Only the assignee can perform this transition";
+          ? "status.blocker.onlyReporterReject"
+          : "status.blocker.onlyAssignee";
   }
   return null;
 }
@@ -91,6 +92,7 @@ const LEGAL_TARGETS: Record<TaskStatus, TaskStatus[]> = {
 };
 
 export function StatusControl({ task }: { task: Task }) {
+  const { t } = useTranslation("tasks");
   const { user } = useAuth();
   const { push } = useToast();
   const qc = useQueryClient();
@@ -118,8 +120,8 @@ export function StatusControl({ task }: { task: Task }) {
   const onError = (error: unknown) => {
     push(
       "error",
-      "Action not allowed",
-      error instanceof ApiError ? error.message : "The task state may have changed; refresh and retry.",
+      t("status.toast.notAllowed"),
+      error instanceof ApiError ? error.message : t("status.toast.stateChanged"),
     );
   };
 
@@ -203,7 +205,7 @@ export function StatusControl({ task }: { task: Task }) {
   if (isAssignee && (status === "backlog" || status === "todo")) {
     actions.push({
       testId: "start-task",
-      label: status === "backlog" ? "Pick up" : "Start work",
+      label: status === "backlog" ? t("status.pickUp") : t("status.startWork"),
       icon: <Play />,
       onClick: () => startProgress.mutate(),
       tone: "default",
@@ -212,7 +214,7 @@ export function StatusControl({ task }: { task: Task }) {
   if (isAssignee && status === "in_progress") {
     actions.push({
       testId: "resolve-task",
-      label: "Mark resolved",
+      label: t("status.markResolved"),
       icon: <SendHorizonal />,
       onClick: () => resolve.mutate(),
       tone: "default",
@@ -221,7 +223,7 @@ export function StatusControl({ task }: { task: Task }) {
   if (status === "resolved" && isReporter && !isAssignee) {
     actions.push({
       testId: "submit-task",
-      label: "Submit for review",
+      label: t("status.submitForReview"),
       icon: <SendHorizonal />,
       onClick: () => submit.mutate(),
       tone: "default",
@@ -230,14 +232,14 @@ export function StatusControl({ task }: { task: Task }) {
   if (status === "in_review" && isReporter && !isAssignee) {
     actions.push({
       testId: "accept-task",
-      label: "Accept & Close",
+      label: t("status.acceptClose"),
       icon: <Check />,
       onClick: () => setAcceptOpen(true),
       tone: "default",
     });
     actions.push({
       testId: "reject-task",
-      label: "Reject",
+      label: t("status.reject"),
       icon: <Undo2 />,
       onClick: () => setRejectOpen(true),
       tone: "destructive",
@@ -257,23 +259,23 @@ export function StatusControl({ task }: { task: Task }) {
             variant="outline"
             size="sm"
             className="gap-2 font-medium"
-            aria-label={`Status: ${STATUS_LABELS[status]}. Open transition menu`}
+            aria-label={t("status.aria.menu", { status: t(statusKey(status)) })}
             data-testid="status-control-trigger"
             disabled={pending}
           >
             <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT[status])} aria-hidden />
-            {STATUS_LABELS[status]}
+            {t(statusKey(status))}
             <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-60">
-          <DropdownMenuLabel>Move to</DropdownMenuLabel>
+          <DropdownMenuLabel>{t("status.moveTo")}</DropdownMenuLabel>
           {targets.length === 0 ? (
             <DropdownMenuItem disabled className="text-2xs">
-              Closed is a terminal state
+              {t("status.closedTerminal")}
             </DropdownMenuItem>
           ) : null}
-          {(Object.keys(STATUS_LABELS) as TaskStatus[]).map((target) => {
+          {(Object.keys(STATUS_DOT) as TaskStatus[]).map((target) => {
             const blocker = transitionBlocker(task, isAssignee, isReporter, target);
             const isCurrent = target === status;
             const isTarget = targets.includes(target) && !blocker;
@@ -281,14 +283,14 @@ export function StatusControl({ task }: { task: Task }) {
               <DropdownMenuItem
                 key={target}
                 disabled={isCurrent || !isTarget}
-                title={isCurrent ? "This is the current status" : (blocker ?? undefined)}
+                title={isCurrent ? t("status.currentStatus") : blocker ? t(blocker) : undefined}
                 onSelect={() => perform(target)}
                 data-testid={`transition-${target.replaceAll("_", "-")}`}
                 className={cn("justify-between", target === "in_progress" && status === "in_review" && "text-destructive focus:text-destructive")}
               >
                 <span className="flex items-center gap-2">
                   <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT[target])} aria-hidden />
-                  {STATUS_LABELS[target]}
+                  {t(statusKey(target))}
                 </span>
                 {isCurrent ? <Check className="h-3.5 w-3.5" /> : null}
               </DropdownMenuItem>
@@ -296,7 +298,7 @@ export function StatusControl({ task }: { task: Task }) {
           })}
           <DropdownMenuSeparator />
           <p className="px-2 py-1.5 text-2xs text-muted-foreground">
-            The server validates every transition against the workflow and your role.
+            {t("status.serverValidates")}
           </p>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -317,7 +319,7 @@ export function StatusControl({ task }: { task: Task }) {
         ))}
         {status === "in_review" && isReporter && isAssignee ? (
           <p className="text-2xs text-muted-foreground">
-            This task has overlapping assignee and reporter; the workflow needs distinct users.
+            {t("status.overlapWarning")}
           </p>
         ) : null}
       </div>
@@ -339,7 +341,7 @@ export function StatusControl({ task }: { task: Task }) {
         pending={acceptWithOverride.isPending}
         onSubmit={() => {
           if (!overrideReason.trim()) {
-            setOverrideError("An override reason is required and is recorded in the audit trail.");
+            setOverrideError(t("status.blockers.overrideRequired"));
             return;
           }
           setOverrideError(null);
@@ -355,7 +357,7 @@ export function StatusControl({ task }: { task: Task }) {
         pending={reject.isPending}
         onSubmit={() => {
           if (!reason.trim()) {
-            setReasonError("A rejection reason is required.");
+            setReasonError(t("status.reject.reasonRequired"));
             return;
           }
           setReasonError(null);

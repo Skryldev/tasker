@@ -233,7 +233,7 @@ export function NotificationBellContent({
                   notification.read_at ? "text-muted-foreground" : "font-medium",
                 )}
               >
-                {notification.summary}
+                <bdi>{notification.summary}</bdi>
               </span>
               {!notification.read_at ? (
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-label="unread" />
@@ -282,7 +282,7 @@ export function NotificationBellContent({
               label="View Task"
               title="Open the task"
               onClick={() => openNotification(notification)}
-              icon={<ArrowRight className="h-3.5 w-3.5" />}
+              icon={<ArrowRight className="h-3.5 w-3.5 rtl:rotate-180" />}
               testId={`view-${notification.id}`}
             />
             <QuickAction
@@ -299,7 +299,7 @@ export function NotificationBellContent({
               <div
                 key={f.id}
                 className={cn(
-                  "flex cursor-pointer items-start gap-2.5 border-t px-3 py-1.5 pl-12 hover:bg-accent/40",
+                  "flex cursor-pointer items-start gap-2.5 border-t px-3 py-1.5 ps-12 hover:bg-accent/40",
                   !f.read_at && "bg-primary/5",
                 )}
                 onClick={() => openNotification(f)}
@@ -317,7 +317,7 @@ export function NotificationBellContent({
         {extraCount > 0 && !isOpen ? (
           <button
             type="button"
-            className="w-full border-t px-3 py-1 text-left text-2xs text-primary hover:bg-accent/40"
+            className="w-full border-t px-3 py-1 text-start text-2xs text-primary hover:bg-accent/40"
             onClick={() =>
               setExpanded((prev) => {
                 const next = new Set(prev);
@@ -375,7 +375,7 @@ export function NotificationBellContent({
             >
               {t.label}
               {tabCount > 0 ? (
-                <span className="ml-1 rounded-full bg-primary/15 px-1.5 text-2xs font-semibold text-primary">
+                <span className="ms-1 rounded-full bg-primary/15 px-1.5 text-2xs font-semibold text-primary">
                   {tabCount > 99 ? "99+" : tabCount}
                 </span>
               ) : null}
@@ -385,7 +385,7 @@ export function NotificationBellContent({
       </div>
       <div className="relative px-3 pb-2">
         <Search
-          className="pointer-events-none absolute left-5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+          className="pointer-events-none absolute start-5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
           aria-hidden
         />
         <input
@@ -393,7 +393,8 @@ export function NotificationBellContent({
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search notifications…"
           aria-label="Search notifications"
-          className="h-8 w-full rounded-md border bg-background pl-8 pr-2 text-xs outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+          className="h-8 w-full rounded-md border bg-background ps-8 pe-2 text-xs outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+          dir="auto"
           data-testid="notification-search"
         />
       </div>

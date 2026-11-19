@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, Separator } from "@/components/ui/avatar";
 import { useTheme, type ThemeId } from "@/lib/theme";
+import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import { setOpenSettingsHandler } from "@/components/app/shortcut-refs";
 
 // Bundle offset (Phase 13): the team switcher menu is code-split — the
@@ -62,6 +63,7 @@ function ShortcutsManagerSlot() {
     </Suspense>
   );
 }
+import { useTranslation } from "react-i18next";
 import { useAuth, useLogout } from "@/lib/auth";
 import { teamLink, WorkspaceProvider, useWorkspace } from "@/lib/workspace";
 import { teamAvatarUrl } from "@/lib/avatar-version";
@@ -74,6 +76,7 @@ function TeamSwitcher({
   onNavigate?: () => void;
   collapsed?: boolean;
 }) {
+  const { t } = useTranslation();
   const { teams, teamId } = useWorkspace();
   const [open, setOpen] = useState(false);
   const [opened, setOpened] = useState(false);
@@ -111,8 +114,8 @@ function TeamSwitcher({
           <Button
             variant="ghost"
             className="h-9 w-full justify-center px-0 focus-visible:ring-inset"
-            title={active?.name ?? "Select team"}
-            aria-label={`Team: ${active?.name ?? "none"}`}
+            title={active?.name ?? t("team.select")}
+            aria-label={t("team.aria", { name: active?.name ?? t("team.none") })}
             data-testid="team-switcher"
           >
             {avatar}
@@ -145,7 +148,7 @@ function TeamSwitcher({
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="h-9 w-full justify-start gap-2 px-2" data-testid="team-switcher">
           {avatar}
-          <span className="truncate text-sm font-medium">{active?.name ?? "Select team"}</span>
+          <span className="truncate text-sm font-medium">{active?.name ?? t("team.select")}</span>
         </Button>
       </DropdownMenuTrigger>
       {opened ? (
@@ -220,18 +223,19 @@ export function SidebarNav({
   firstLinkRef?: React.RefObject<HTMLAnchorElement | null>;
 }) {
   const { teamId } = useWorkspace();
+  const { t } = useTranslation();
   return (
     <>
       <TeamSwitcher onNavigate={onNavigate} collapsed={collapsed} />
       <Separator className="my-2" />
-      <nav className="flex flex-col gap-0.5" aria-label="Main">
-        <SidebarLink linkRef={firstLinkRef} to={teamLink(teamId, "tasks")} icon={<ListTodo className="h-4 w-4" />} label="My Tasks" end onNavigate={onNavigate} collapsed={collapsed} />
+      <nav className="flex flex-col gap-0.5" aria-label={t("nav.mainNav")}>
+        <SidebarLink linkRef={firstLinkRef} to={teamLink(teamId, "tasks")} icon={<ListTodo className="h-4 w-4" />} label={t("nav.myTasks")} end onNavigate={onNavigate} collapsed={collapsed} />
         {teamId ? (
           <>
             <SidebarLink
               to={`/projects?team=${teamId}`}
               icon={<FolderKanban className="h-4 w-4" />}
-              label="Projects"
+              label={t("nav.projects")}
               matchPrefix="/projects"
               onNavigate={onNavigate}
               collapsed={collapsed}
@@ -239,7 +243,7 @@ export function SidebarNav({
             <SidebarLink
               to={`/teams/${teamId}/goals`}
               icon={<Target className="h-4 w-4" />}
-              label="Goals"
+              label={t("nav.goals")}
               matchPrefix={`/teams/${teamId}/goals`}
               onNavigate={onNavigate}
               collapsed={collapsed}
@@ -247,7 +251,7 @@ export function SidebarNav({
             <SidebarLink
               to={`/teams/${teamId}/dashboard`}
               icon={<Gauge className="h-4 w-4" />}
-              label="Dashboard"
+              label={t("nav.dashboard")}
               matchPrefix={`/teams/${teamId}/dashboard`}
               onNavigate={onNavigate}
               collapsed={collapsed}
@@ -255,7 +259,7 @@ export function SidebarNav({
             <SidebarLink
               to={`/teams/${teamId}/workload`}
               icon={<ListTree className="h-4 w-4" />}
-              label="Workload"
+              label={t("nav.workload")}
               matchPrefix={`/teams/${teamId}/workload`}
               onNavigate={onNavigate}
               collapsed={collapsed}
@@ -263,7 +267,7 @@ export function SidebarNav({
             <SidebarLink
               to={`/teams/${teamId}/capacity`}
               icon={<Gauge className="h-4 w-4" />}
-              label="Capacity"
+              label={t("nav.capacity")}
               matchPrefix={`/teams/${teamId}/capacity`}
               onNavigate={onNavigate}
               collapsed={collapsed}
@@ -271,7 +275,7 @@ export function SidebarNav({
             <SidebarLink
               to={`/teams/${teamId}/settings`}
               icon={<Settings className="h-4 w-4" />}
-              label="Team Settings"
+              label={t("nav.teamSettings")}
               matchPrefix={`/teams/${teamId}/settings`}
               onNavigate={onNavigate}
               collapsed={collapsed}
@@ -290,6 +294,7 @@ const SIDEBAR_OPEN_KEY = "tasker:sidebar-open";
     slide would need a second paint surface and clip the focus ring — width
     on a 240px column is a cheap, honest choice. */
 function Sidebar() {
+  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_OPEN_KEY) === "collapsed";
@@ -334,29 +339,29 @@ function Sidebar() {
   return (
     <aside
       className={cn(
-        "flex h-full shrink-0 flex-col gap-1 overflow-hidden border-r bg-sidebar text-sidebar-foreground transition-[width] duration-200 ease-out",
+        "flex h-full shrink-0 flex-col gap-1 overflow-hidden border-e bg-sidebar text-sidebar-foreground transition-[width] duration-200 ease-out",
         collapsed ? "w-12 px-1.5 py-3" : "w-60 p-3",
       )}
       data-testid="app-sidebar"
-      aria-label="Main navigation"
+      aria-label={t("nav.mainNav")}
     >
       <button
         type="button"
         ref={toggleRef}
         onClick={toggle}
         aria-expanded={!collapsed}
-        aria-label={collapsed ? "Expand navigation sidebar" : "Collapse navigation sidebar"}
+        aria-label={collapsed ? t("sidebar.expandAria") : t("sidebar.collapseAria")}
         className="mb-1 flex h-8 w-full items-center justify-center gap-2 rounded-md text-sidebar-foreground/70 transition-colors hover:bg-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         data-testid="sidebar-toggle"
       >
         <PanelLeftClose className={cn("h-4 w-4 shrink-0 transition-transform duration-200", collapsed && "rotate-180")} />
-        {collapsed ? null : <span className="text-xs font-medium">Collapse</span>}
+        {collapsed ? null : <span className="text-xs font-medium">{t("sidebar.collapse")}</span>}
       </button>
       <div className={cn("flex min-h-0 flex-1 flex-col", collapsed && "items-center")}>
         <SidebarNav collapsed={collapsed} firstLinkRef={firstLinkRef} />
       </div>
       {collapsed ? null : (
-        <div className="pb-1 pl-2 text-2xs text-muted-foreground">Tasker 0.1</div>
+        <div className="pb-1 ps-2 text-2xs text-muted-foreground">Tasker 0.1</div>
       )}
     </aside>
   );
@@ -414,16 +419,17 @@ function ThemeSwitcher() {
     restricted, explicitly granted access. Only when the active context is
     a guest membership. */
 function GuestBadge() {
+  const { t } = useTranslation();
   const { myRole } = useWorkspace();
   if (myRole !== "guest") return <NotificationBell />;
   return (
     <>
       <span
         className="inline-flex items-center gap-1 rounded-full border border-warning/50 bg-warning/10 px-2 py-0.5 text-2xs font-medium text-warning"
-        title="You are a guest of this team — access is limited to what the Owner granted."
+        title={t("guest.badgeTitle")}
         data-testid="guest-badge"
       >
-        <ShieldAlert className="h-3 w-3" aria-hidden /> Guest
+        <ShieldAlert className="h-3 w-3" aria-hidden /> {t("guest.badge")}
       </span>
       <NotificationBell />
     </>
@@ -431,6 +437,7 @@ function GuestBadge() {
 }
 
 function Topbar() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const logout = useLogout();
   const navigate = useNavigate();
@@ -452,7 +459,7 @@ function Topbar() {
           variant="ghost"
           size="icon-sm"
           className="sm:hidden"
-          aria-label="Open navigation"
+          aria-label={t("topbar.openNav")}
           aria-expanded={navOpen}
           onClick={() => setNavOpen(true)}
           data-testid="mobile-nav"
@@ -465,6 +472,7 @@ function Topbar() {
       <div className="flex items-center gap-1.5">
         <GuestBadge />
         <ShortcutsManagerSlot />
+        <LanguageSwitcher compact />
         <ThemeSwitcher />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -482,10 +490,10 @@ function Topbar() {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => navigate("/settings")} data-testid="menu-settings">
-              <Settings /> Settings
+              <Settings /> {t("topbar.settings")}
             </DropdownMenuItem>
             <DropdownMenuItem destructive onSelect={() => logout.mutate()} data-testid="logout">
-              <LogOut /> Log out
+              <LogOut /> {t("topbar.logout")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -496,25 +504,27 @@ function Topbar() {
 
 /** Fallback while a lazily imported route chunk loads. */
 function RouteFallback() {
+  const { t } = useTranslation();
   return (
     <div className="flex h-full min-h-40 items-center justify-center" aria-busy="true" role="status">
       <span
         className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent"
-        aria-label="Loading"
+        aria-label={t("a11y.loading")}
       />
     </div>
   );
 }
 
 function AppShellInner() {
+  const { t } = useTranslation();
   return (
     <div className="flex h-screen flex-col">
       {/* Skip link: first focusable element, visible only when focused. */}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-[60] focus:rounded-md focus:bg-primary focus:px-3 focus:py-1.5 focus:text-sm focus:text-primary-foreground"
+        className="sr-only focus:not-sr-only focus:absolute focus:start-2 focus:top-2 focus:z-[60] focus:rounded-md focus:bg-primary focus:px-3 focus:py-1.5 focus:text-sm focus:text-primary-foreground"
       >
-        Skip to main content
+        {t("a11y.skip")}
       </a>
       <Topbar />
       <div className="flex min-h-0 flex-1">

@@ -122,7 +122,7 @@ export function ProjectGuestsPage() {
           }
         />
       ) : (
-        <ul className="overflow-hidden rounded-lg border" data-testid="guest-list">
+        <ul className="overflow-hidden rounded-sg border" data-testid="guest-list">
           {guests.data!.items.map((guest) => (
             <li
               key={guest.user.id}
@@ -132,7 +132,7 @@ export function ProjectGuestsPage() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">
                   {guest.user.display_name}
-                  <Badge variant="muted" className="ml-2">
+                  <Badge variant="muted" className="ms-2">
                     {guest.role}
                   </Badge>
                 </p>
@@ -193,6 +193,7 @@ export function ProjectGuestsPage() {
               <Input
                 id="guest-email"
                 type="email"
+                dir="ltr"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="guest@company.com"

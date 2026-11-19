@@ -27,14 +27,16 @@ import type { SwimlaneMode } from "@/components/app/KanbanBoard";
 import { TaskTable } from "@/components/app/TaskTable";
 import { TaskDetailPanel } from "@/components/app/TaskDetailPanel";
 import { TaskDialog } from "@/components/app/TaskDialog";
+import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState, ErrorState } from "@/components/app/EmptyState";
-import { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES, STATUS_LABELS } from "@/lib/utils";
+import { PRIORITIES, TASK_STATUSES, priorityKey, statusKey, formatNumber } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 type View = "list" | "board" | "timeline";
 
 export function ProjectPage() {
+  const { t } = useTranslation("common");
   const { projectId } = useParams<{ projectId: string }>();
   const [params, setParams] = useSearchParams();
   const updateTask = useUpdateTask();
@@ -163,8 +165,8 @@ export function ProjectPage() {
     return (
       <div className="p-6">
         <ErrorState
-          title="Project unavailable"
-          detail="It may have been archived by an administrator or you may lack access."
+          title={t("project.unavailable")}
+          detail={t("project.unavailableDetail")}
           onRetry={() => void project.refetch()}
         />
       </div>
@@ -191,29 +193,29 @@ export function ProjectPage() {
             <h1 className="text-lg font-semibold">{project.data!.name}</h1>
             {project.data!.status === "archived" ? (
               <span className="rounded-full bg-muted px-2 py-0.5 text-2xs text-muted-foreground">
-                Archived
+                {t("projects.archived")}
               </span>
             ) : null}
           </div>
           {view === "board" ? (
             <Select value={swimlane} onValueChange={(v) => setSwimlane(v as SwimlaneMode)}>
-              <SelectTrigger className="h-8 w-[10.5rem]" aria-label="Group board by" data-testid="swimlane-selector">
+              <SelectTrigger className="h-8 w-[10.5rem]" aria-label={t("project.groupBoardBy")} data-testid="swimlane-selector">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">No swimlanes</SelectItem>
-                <SelectItem value="assignee">Group by assignee</SelectItem>
-                <SelectItem value="priority">Group by priority</SelectItem>
-                <SelectItem value="label">Group by label</SelectItem>
+                <SelectItem value="none">{t("project.swimlaneNone")}</SelectItem>
+                <SelectItem value="assignee">{t("project.swimlaneAssignee")}</SelectItem>
+                <SelectItem value="priority">{t("project.swimlanePriority")}</SelectItem>
+                <SelectItem value="label">{t("project.swimlaneLabel")}</SelectItem>
               </SelectContent>
             </Select>
           ) : null}
-          <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5" role="tablist" aria-label="View switcher">
+          <div className="flex items-center gap-1 rounded-sg bg-muted p-0.5" role="tablist" aria-label={t("project.viewSwitcher")}>
             {(
               [
-                ["list", "List", <ListTodo key="l" />],
-                ["board", "Board", <KanbanSquare key="k" />],
-                ["timeline", "Timeline", <CalendarRange key="c" />],
+                ["list", t("project.viewList"), <ListTodo key="l" />],
+                ["board", t("project.viewBoard"), <KanbanSquare key="k" />],
+                ["timeline", t("project.viewTimeline"), <CalendarRange key="c" />],
               ] as const
             ).map(([key, label, icon]) => (
               <Link
@@ -248,65 +250,66 @@ export function ProjectPage() {
         {view === "list" ? (
           <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="task-filters">
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute start-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={search}
                 onChange={(e) => {
                   setSearch(e.target.value);
                   setPage(1);
                 }}
-                placeholder="Search tasks…"
-                className="w-52 pl-7"
-                aria-label="Search tasks"
+                placeholder={t("project.searchTasks")}
+                className="w-52 ps-7"
+                dir="auto"
+                aria-label={t("project.searchTasksAria")}
               />
             </div>
             <FilterSelect
-              label="Status"
+              label={t("myTasks.status")}
               value={statusFilter}
               onChange={(v) => {
                 setStatusFilter(v);
                 setPage(1);
               }}
-              allLabel="All statuses"
-              options={TASK_STATUSES.map((s) => [s, STATUS_LABELS[s]])}
+              allLabel={t("myTasks.allStatuses")}
+              options={TASK_STATUSES.map((s) => [s, t(statusKey(s))])}
             />
             <FilterSelect
-              label="Priority"
+              label={t("myTasks.priority")}
               value={priorityFilter}
               onChange={(v) => {
                 setPriorityFilter(v);
                 setPage(1);
               }}
-              allLabel="All priorities"
-              options={PRIORITIES.map((p) => [p, PRIORITY_LABELS[p]])}
+              allLabel={t("myTasks.allPriorities")}
+              options={PRIORITIES.map((p) => [p, t(priorityKey(p))])}
             />
             <FilterSelect
-              label="Assignee"
+              label={t("project.assignee")}
               value={assigneeFilter}
               onChange={(v) => {
                 setAssigneeFilter(v);
                 setPage(1);
               }}
-              allLabel="Anyone"
+              allLabel={t("project.anyone")}
               options={[
-                ["none", "Unassigned"],
+                ["none", t("project.unassigned")],
                 ...(members.data?.items.map((m) => [m.user.id, m.user.display_name] as const) ?? []),
               ]}
             />
             {labels.data && labels.data.items.length > 0 ? (
               <FilterSelect
-                label="Label"
+                label={t("project.label")}
                 value={labelFilter}
                 onChange={(v) => {
                   setLabelFilter(v);
                   setPage(1);
                 }}
-                allLabel="All labels"
+                allLabel={t("project.allLabels")}
                 options={labels.data.items.map((l) => [l.id, l.name])}
               />
             ) : null}
             <FilterSelect
-              label="Sort"
+              label={t("project.sort")}
               value={`${sort}:${order}`}
               onChange={(v) => {
                 const [s, o] = v.split(":");
@@ -315,22 +318,24 @@ export function ProjectPage() {
               }}
               allLabel={undefined}
               options={[
-                ["created_at:desc", "Newest"],
-                ["created_at:asc", "Oldest"],
-                ["due_date:asc", "Due soonest"],
-                ["priority:asc", "Priority ↑"],
-                ["priority:desc", "Priority ↓"],
-                ["title:asc", "Title A–Z"],
-                ["updated_at:desc", "Recently updated"],
+                ["created_at:desc", t("project.sortNewest")],
+                ["created_at:asc", t("project.sortOldest")],
+                ["due_date:asc", t("project.sortDueSoon")],
+                ["priority:asc", t("project.sortPriorityUp")],
+                ["priority:desc", t("project.sortPriorityDown")],
+                ["title:asc", t("project.sortTitleAZ")],
+                ["updated_at:desc", t("project.sortRecentlyUpdated")],
               ]}
             />
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ms-auto flex items-center gap-2">
               <span className="text-2xs text-muted-foreground">
-                {tasks.data ? `${tasks.data.total} task${tasks.data.total === 1 ? "" : "s"}` : ""}
+                {tasks.data
+                  ? t("project.taskCount", { count: tasks.data.total })
+                  : ""}
               </span>
               {isGuestProject ? null : (
                 <Button size="sm" onClick={() => openCreate()} data-testid="create-task">
-                  <Plus /> New task
+                  <Plus /> {t("project.newTask")}
                 </Button>
               )}
             </div>
@@ -339,7 +344,7 @@ export function ProjectPage() {
           <div className="mt-3 flex justify-end">
             {isGuestProject ? null : (
               <Button size="sm" onClick={() => openCreate()} data-testid="create-task-board">
-                <Plus /> New task
+                <Plus /> {t("project.newTask")}
               </Button>
             )}
           </div>
@@ -351,7 +356,7 @@ export function ProjectPage() {
           className="border-b bg-primary/5 px-6 py-2 text-xs text-muted-foreground"
           data-testid="guest-banner"
         >
-          You have read-only guest access to this project.
+          {t("project.guestBanner")}
         </div>
       ) : null}
 
@@ -359,15 +364,15 @@ export function ProjectPage() {
         <div className="min-w-0 flex-1 overflow-y-auto scrollbar-thin p-4">
           {view === "timeline" ? null : view === "list" ? (
             tasks.isError ? (
-              <ErrorState title="Could not load tasks" onRetry={() => void tasks.refetch()} />
+              <ErrorState title={t("project.loadFailed")} onRetry={() => void tasks.refetch()} />
             ) : (tasks.data?.items.length ?? 0) === 0 && !tasks.isLoading ? (
               <EmptyState
                 icon={<ListFilter className="h-8 w-8" />}
-                title="No tasks match"
-                description="Adjust the filters, or create the first task in this project."
+                title={t("project.noTasksMatch")}
+                description={t("project.noTasksMatchDesc")}
                 action={
                   <Button onClick={() => openCreate()}>
-                    <Plus /> New task
+                    <Plus /> {t("project.newTask")}
                   </Button>
                 }
               />
@@ -381,17 +386,17 @@ export function ProjectPage() {
                   isLoading={tasks.isLoading}
                 />
                 {totalPages > 1 ? (
-                  <nav className="mt-3 flex items-center justify-end gap-2" aria-label="Pagination">
+                  <nav className="mt-3 flex items-center justify-end gap-2" aria-label={t("myTasks.paginationAria")}>
                     <Button
                       variant="outline"
                       size="sm"
                       disabled={page <= 1}
                       onClick={() => setPage((p) => p - 1)}
                     >
-                      Previous
+                      {t("myTasks.previous")}
                     </Button>
                     <span className="text-2xs text-muted-foreground">
-                      Page {page} of {totalPages}
+                      {t("myTasks.pageOf", { page: formatNumber(page), total: formatNumber(totalPages) })}
                     </span>
                     <Button
                       variant="outline"
@@ -399,7 +404,7 @@ export function ProjectPage() {
                       disabled={page >= totalPages}
                       onClick={() => setPage((p) => p + 1)}
                     >
-                      Next
+                      {t("myTasks.next")}
                     </Button>
                   </nav>
                 ) : null}
@@ -422,9 +427,9 @@ export function ProjectPage() {
                     {
                       onSuccess: () => {
                         void board.refetch();
-                        push("success", "Task reassigned", undefined, {
+                        push("success", t("project.taskReassigned"), undefined, {
                           action: {
-                            label: "Undo",
+                            label: t("projects.undo"),
                             onClick: () => {
                               updateTask.mutate(
                                 { taskId: task.id, body: { assignee_id: previous } },
@@ -436,7 +441,7 @@ export function ProjectPage() {
                         });
                       },
                       onError: (error) =>
-                        push("error", "Could not reassign", error instanceof Error ? error.message : undefined),
+                        push("error", t("project.reassignFailed"), error instanceof Error ? error.message : undefined),
                     },
                   );
                 } else if (field === "priority") {
@@ -445,10 +450,10 @@ export function ProjectPage() {
                     {
                       onSuccess: () => {
                         void board.refetch();
-                        push("success", "Priority updated");
+                        push("success", t("project.priorityUpdated"));
                       },
                       onError: (error) =>
-                        push("error", "Could not update priority", error instanceof Error ? error.message : undefined),
+                        push("error", t("project.priorityFailed"), error instanceof Error ? error.message : undefined),
                     },
                   );
                 } else if (field === "label" && value) {
@@ -457,10 +462,10 @@ export function ProjectPage() {
                     {
                       onSuccess: () => {
                         void board.refetch();
-                        push("success", "Label added");
+                        push("success", t("project.labelAdded"));
                       },
                       onError: (error) =>
-                        push("error", "Could not add label", error instanceof Error ? error.message : undefined),
+                        push("error", t("project.labelFailed"), error instanceof Error ? error.message : undefined),
                     },
                   );
                 }
@@ -470,7 +475,7 @@ export function ProjectPage() {
           )}
           {view === "timeline" ? (
             <div className="min-h-0 flex-1">
-              <Suspense fallback={<div className="p-6 animate-pulse rounded-lg bg-muted" />}>
+              <Suspense fallback={<div className="p-6 animate-pulse rounded-sg bg-muted" />}>
                 <TimelinePageInner projectId={projectId!} />
               </Suspense>
             </div>

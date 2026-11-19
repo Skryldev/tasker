@@ -12,9 +12,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
+import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/ui/toast";
 
 export function CreateTeamPage() {
+  const { t } = useTranslation("common");
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { push } = useToast();
@@ -26,11 +28,11 @@ export function CreateTeamPage() {
   const create = useMutation({
     mutationFn: () => api.createTeam(name, description || undefined),
     onSuccess: (team) => {
-      push("success", "Team created", team.name);
+      push("success", t("team.created"), team.name);
       void qc.invalidateQueries({ queryKey: ["teams"] });
       navigate(`/?team=${team.id}`, { replace: true });
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : "Could not create the team."),
+    onError: (err) => setError(err instanceof ApiError ? err.message : t("team.createFailed")),
   });
 
   return (
@@ -42,9 +44,9 @@ export function CreateTeamPage() {
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create a team</DialogTitle>
+          <DialogTitle>{t("team.create")}</DialogTitle>
           <DialogDescription>
-            You will be the team Owner and can invite teammates afterwards.
+            {t("team.createDesc")}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -52,7 +54,7 @@ export function CreateTeamPage() {
           onSubmit={(e) => {
             e.preventDefault();
             if (!name.trim()) {
-              setError("Team name is required.");
+              setError(t("team.nameRequired"));
               return;
             }
             setError(null);
@@ -62,32 +64,32 @@ export function CreateTeamPage() {
           data-testid="create-team-form"
         >
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="team-new-name">Name</Label>
+            <Label htmlFor="team-new-name">{t("projects.nameLabel")}</Label>
             <Input
               id="team-new-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Acme Inc"
+              placeholder={t("team.namePlaceholder")}
               autoFocus
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="team-new-description">Description</Label>
+            <Label htmlFor="team-new-description">{t("projects.descriptionLabel")}</Label>
             <Textarea
               id="team-new-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="What does this team work on?"
+              placeholder={t("team.descriptionPlaceholder")}
               rows={3}
             />
           </div>
           {error ? <p className="text-2xs text-destructive" role="alert">{error}</p> : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => navigate(-1)}>
-              Cancel
+              {t("actions.cancel")}
             </Button>
             <Button type="submit" disabled={create.isPending} data-testid="create-team-submit">
-              {create.isPending ? "Creating…" : "Create team"}
+              {create.isPending ? t("team.creating") : t("team.create")}
             </Button>
           </DialogFooter>
         </form>

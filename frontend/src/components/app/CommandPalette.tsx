@@ -6,6 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { api } from "@/api/client";
@@ -34,6 +35,7 @@ interface CommandItem {
 }
 
 export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { t } = useTranslation("common");
   const navigate = useNavigate();
   const { teamId, teams } = useWorkspace();
   const { setTheme } = useTheme();
@@ -66,58 +68,58 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
     const items: CommandItem[] = [
       {
         id: "go-tasks",
-        label: "My Tasks",
-        section: "Navigate",
+        label: t("nav.myTasks"),
+        section: t("palette.sectionNavigate"),
         keywords: "tasks home",
         run: () => navigate("/"),
       },
       {
         id: "go-projects",
-        label: "Projects",
-        section: "Navigate",
+        label: t("nav.projects"),
+        section: t("palette.sectionNavigate"),
         keywords: "projects",
         run: () => navigate(activeTeam ? `/projects?team=${activeTeam}` : "/projects"),
       },
       {
         id: "go-goals",
-        label: "Goals",
-        section: "Navigate",
+        label: t("nav.goals"),
+        section: t("palette.sectionNavigate"),
         keywords: "goals okr",
         run: () => activeTeam && navigate(`/teams/${activeTeam}/goals`),
       },
       {
         id: "go-workload",
-        label: "Workload",
-        section: "Navigate",
+        label: t("nav.workload"),
+        section: t("palette.sectionNavigate"),
         keywords: "workload",
         run: () => activeTeam && navigate(`/teams/${activeTeam}/workload`),
       },
       {
         id: "go-capacity",
-        label: "Capacity",
-        section: "Navigate",
+        label: t("nav.capacity"),
+        section: t("palette.sectionNavigate"),
         keywords: "capacity utilization",
         run: () => activeTeam && navigate(`/teams/${activeTeam}/capacity`),
       },
       {
         id: "go-settings",
-        label: "Team Settings",
-        section: "Navigate",
+        label: t("nav.teamSettings"),
+        section: t("palette.sectionNavigate"),
         keywords: "settings team",
         run: () => activeTeam && navigate(`/teams/${activeTeam}/settings?team=${activeTeam}`),
       },
       {
         id: "go-account",
-        label: "Account",
-        section: "Navigate",
+        label: t("palette.account"),
+        section: t("palette.sectionNavigate"),
         keywords: "profile account",
         run: () => navigate("/account"),
       },
       {
         id: "new-task",
-        label: "New task…",
-        section: "Create",
-        hint: activeTeam && firstProject.data?.items.length ? undefined : "needs a project",
+        label: t("palette.newTask"),
+        section: t("palette.sectionCreate"),
+        hint: activeTeam && firstProject.data?.items.length ? undefined : t("palette.needsProject"),
         keywords: "create task add",
         run: () =>
           navigate(
@@ -128,8 +130,8 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
       },
       {
         id: "new-project",
-        label: "New project…",
-        section: "Create",
+        label: t("palette.newProject"),
+        section: t("palette.sectionCreate"),
         keywords: "create project add",
         run: () => navigate(activeTeam ? `/projects?team=${activeTeam}&new=project` : "/projects"),
       },
@@ -141,14 +143,14 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
     for (const definition of THEMES) {
       items.push({
         id: `theme-${definition.id}`,
-        label: `Theme: ${definition.label}`,
-        section: "Theme",
+        label: t("palette.themeLabel", { theme: definition.label }),
+        section: t("palette.sectionTheme"),
         keywords: `theme appearance ${definition.id}`,
         run: () => setTheme(definition.id),
       });
     }
     return items;
-  }, [navigate, activeTeam, firstProject.data, setTheme]);
+  }, [navigate, activeTeam, firstProject.data, setTheme, t]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -212,14 +214,14 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
         onKeyDown={onKeyDown}
         aria-describedby={undefined}
       >
-        <DialogTitle className="sr-only">Command palette</DialogTitle>
+        <DialogTitle className="sr-only">{t("palette.title")}</DialogTitle>
         <div className="flex items-center gap-2 border-b px-3">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search tasks or type a command…"
-            aria-label="Search commands"
+            placeholder={t("palette.placeholder")}
+            aria-label={t("palette.searchAria")}
             autoFocus
             data-testid="palette-input"
             className="h-11 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
@@ -228,13 +230,13 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
         <div
           ref={listRef}
           role="listbox"
-          aria-label="Commands"
+          aria-label={t("palette.title")}
           className="max-h-80 overflow-y-auto scrollbar-thin p-2"
           data-testid="palette-list"
         >
           {flatCount === 0 ? (
             <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-              No matching commands or tasks.
+              {t("palette.noMatches")}
             </p>
           ) : null}
           {filtered.map((item, i) => (
@@ -261,8 +263,8 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                 index={index}
                 active={active === index}
                 label={task.title}
-                hint="Task"
-                section={i === 0 ? "Tasks" : undefined}
+                hint={t("palette.taskHint")}
+                section={i === 0 ? t("palette.sectionTasks") : undefined}
                 onHover={() => setActive(index)}
                 onRun={() => runAt(index)}
               />
@@ -270,7 +272,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
           })}
         </div>
         <p className="border-t px-3 py-2 text-2xs text-muted-foreground">
-          ↑↓ navigate · Enter run · Esc close — press ? anywhere for all shortcuts
+          {t("palette.hintFooter")}
         </p>
       </DialogContent>
     </Dialog>

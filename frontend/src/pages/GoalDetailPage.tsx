@@ -179,7 +179,7 @@ export function GoalDetailPage() {
       {confirmElement}
       <div className="mb-4">
         <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
-          <ArrowLeft /> Back
+          <ArrowLeft className="rtl:rotate-180" /> Back
         </Button>
       </div>
 
@@ -205,7 +205,7 @@ export function GoalDetailPage() {
         </div>
 
         {/* Measured progress — distinct from task execution stats below */}
-        <div className="mt-4 rounded-lg border p-3.5" data-testid="goal-progress-section">
+        <div className="mt-4 rounded-sg border p-3.5" data-testid="goal-progress-section">
           <p className="mb-2 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
             Measured progress (key results)
           </p>
@@ -270,7 +270,7 @@ export function GoalDetailPage() {
             <Button
               variant="ghost"
               size="sm"
-              className="ml-auto text-destructive hover:bg-destructive/10"
+              className="ms-auto text-destructive hover:bg-destructive/10"
               onClick={() =>
                 confirm({
                   title: "Delete this goal?",
@@ -316,7 +316,7 @@ export function GoalDetailPage() {
         ) : (
           <ul className="flex flex-col gap-3" data-testid="kr-list">
             {krs.map((kr) => (
-              <li key={kr.id} className="rounded-lg border p-3.5" data-testid={`kr-${kr.id}`}>
+              <li key={kr.id} className="rounded-sg border p-3.5" data-testid={`kr-${kr.id}`}>
                 <div className="mb-1.5 flex items-start gap-2">
                   <span
                     className={cn(
@@ -431,7 +431,7 @@ export function GoalDetailPage() {
         </div>
 
         <div
-          className="mb-4 rounded-lg border border-dashed p-3.5"
+          className="mb-4 rounded-sg border border-dashed p-3.5"
           data-testid="execution-summary"
         >
           <p className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">

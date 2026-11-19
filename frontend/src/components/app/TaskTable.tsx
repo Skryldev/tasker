@@ -204,7 +204,7 @@ export function TaskTable({
         className={cn(
           "h-9 cursor-pointer border-b transition-colors duration-100 last:border-0 hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-none",
           selected &&
-            "border-l-2 border-l-primary bg-primary/5 hover:bg-primary/5 focus-visible:bg-primary/5",
+            "border-s-2 border-s-primary bg-primary/5 hover:bg-primary/5 focus-visible:bg-primary/5",
         )}
         data-testid={`task-row-${task.id}`}
         aria-selected={selected}
@@ -216,7 +216,7 @@ export function TaskTable({
           <span className="flex items-center gap-2">
             <span className="min-w-0">
               <span className="block truncate font-medium leading-tight">
-                {task.title}
+                <bdi>{task.title}</bdi>
               </span>
               {renderContext ? (
                 <span className="block truncate text-2xs text-muted-foreground">
@@ -282,10 +282,10 @@ export function TaskTable({
   };
 
   return (
-    <div className="overflow-hidden rounded-lg border" data-testid="task-table">
+    <div className="overflow-hidden rounded-sg border" data-testid="task-table">
       <table className="w-full border-collapse text-sm">
         <thead>
-          <tr className="border-b bg-muted/50 text-left">
+          <tr className="border-b bg-muted/50 text-start">
             {columns.map((c) => (
               <th
                 key={c}

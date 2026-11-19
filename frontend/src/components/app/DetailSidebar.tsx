@@ -80,7 +80,7 @@ export function DetailSidebar({
 
   if (collapsed) {
     return (
-      <div className="hidden shrink-0 border-l lg:block" data-testid={`${testId}-collapsed`}>
+      <div className="hidden shrink-0 border-s lg:block" data-testid={`${testId}-collapsed`}>
         <Button
           variant="ghost"
           size="icon-sm"
@@ -97,7 +97,7 @@ export function DetailSidebar({
 
   return (
     <aside
-      className="relative shrink-0 border-l lg:block"
+      className="relative shrink-0 border-s lg:block"
       style={{
         width: `${width}px`,
         // Bug 8 (Phase 13.5): an inline display wins over Tailwind's
@@ -114,13 +114,13 @@ export function DetailSidebar({
         aria-orientation="vertical"
         aria-label="Resize sidebar"
         onPointerDown={startDrag}
-        className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize transition-colors hover:bg-primary/30"
+        className="absolute inset-y-0 start-0 z-10 w-1.5 cursor-col-resize transition-colors hover:bg-primary/30"
         data-testid="sidebar-resize"
       />
       {/* Collapse control: bottom-right corner — the panel header's top-right
           hosts the task actions menu, so a top placement would intercept its
           clicks (found by E2E). */}
-      <div className="absolute bottom-2 right-2 z-10">
+      <div className="absolute bottom-2 end-2 z-10">
         <Button
           variant="ghost"
           size="icon-sm"

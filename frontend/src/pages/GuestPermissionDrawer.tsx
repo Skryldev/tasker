@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import {
   Activity,
   Calendar,
@@ -31,7 +32,7 @@ import { chipTextColor, chipBackground } from "@/lib/chip-color";
 import { useToast } from "@/components/ui/toast";
 
 /**
- * Guest permission drawer (Phase 14 WS2, ADR-0021): a right-side drawer
+ * Guest permission drawer (Phase 14 WS2, ADR-0021): a end-side drawer
  * with domain-grouped accordions (Team / Projects / Tasks /
  * Administration), per-project scoping, switch toggles with dependency
  * rules, a live grant summary, and a transactional save (applied changes
@@ -40,7 +41,7 @@ import { useToast } from "@/components/ui/toast";
 
 export type PermDomain = "team" | "projects" | "tasks" | "admin";
 
-/** Category identity per permission: color + icon + human label + domain. */
+/** Category identity per permission: color + icon + i18n label keys + domain. */
 export const PERM_META: Record<
   GuestPermissionKey,
   {
@@ -54,24 +55,24 @@ export const PERM_META: Record<
 > = {
   // Team domain (team-scoped).
   view_team: {
-    label: "See the team",
-    description: "Team name and description appear in the switcher.",
+    label: "perm.view_team.label",
+    description: "perm.view_team.description",
     icon: Globe,
     color: "#64748b",
     domain: "team",
     teamScoped: true,
   },
   view_team_members: {
-    label: "See the roster",
-    description: "Member names, roles and emails are visible.",
+    label: "perm.view_team_members.label",
+    description: "perm.view_team_members.description",
     icon: Users,
     color: "#0ea5e9",
     domain: "team",
     teamScoped: true,
   },
   view_team_activity: {
-    label: "See team activity",
-    description: "Team-level activity feeds are visible.",
+    label: "perm.view_team_activity.label",
+    description: "perm.view_team_activity.description",
     icon: Activity,
     color: "#f59e0b",
     domain: "team",
@@ -79,40 +80,40 @@ export const PERM_META: Record<
   },
   // Projects domain.
   view_project_list: {
-    label: "Browse the project index",
-    description: "The list of the team's projects is visible (names only).",
+    label: "perm.view_project_list.label",
+    description: "perm.view_project_list.description",
     icon: FolderOpen,
     color: "#3b82f6",
     domain: "projects",
     teamScoped: true,
   },
   view_project: {
-    label: "Open the project",
-    description: "Project details are visible.",
+    label: "perm.view_project.label",
+    description: "perm.view_project.description",
     icon: FileText,
     color: "#3b82f6",
     domain: "projects",
     teamScoped: false,
   },
   view_project_tasks: {
-    label: "See the task list",
-    description: "The project's task list is visible.",
+    label: "perm.view_project_tasks.label",
+    description: "perm.view_project_tasks.description",
     icon: ListTodo,
     color: "#10b981",
     domain: "projects",
     teamScoped: false,
   },
   view_project_board: {
-    label: "See the board",
-    description: "The kanban board is visible.",
+    label: "perm.view_project_board.label",
+    description: "perm.view_project_board.description",
     icon: Columns3,
     color: "#10b981",
     domain: "projects",
     teamScoped: false,
   },
   view_project_timeline: {
-    label: "See the timeline",
-    description: "The schedule timeline is visible.",
+    label: "perm.view_project_timeline.label",
+    description: "perm.view_project_timeline.description",
     icon: GanttChart,
     color: "#10b981",
     domain: "projects",
@@ -120,72 +121,72 @@ export const PERM_META: Record<
   },
   // Tasks domain (project-scoped).
   view_task: {
-    label: "Open tasks",
-    description: "Task titles and details are visible.",
+    label: "perm.view_task.label",
+    description: "perm.view_task.description",
     icon: FileText,
     color: "#10b981",
     domain: "tasks",
     teamScoped: false,
   },
   view_task_own: {
-    label: "Open own tasks",
-    description: "Only tasks assigned to this guest are visible.",
+    label: "perm.view_task_own.label",
+    description: "perm.view_task_own.description",
     icon: CircleUser,
     color: "#14b8a6",
     domain: "tasks",
     teamScoped: false,
   },
   view_task_dates: {
-    label: "See due dates",
-    description: "Due dates and deadlines are visible.",
+    label: "perm.view_task_dates.label",
+    description: "perm.view_task_dates.description",
     icon: Calendar,
     color: "#f59e0b",
     domain: "tasks",
     teamScoped: false,
   },
   view_task_activity: {
-    label: "See task activity",
-    description: "Non-sensitive workflow events are visible.",
+    label: "perm.view_task_activity.label",
+    description: "perm.view_task_activity.description",
     icon: History,
     color: "#f59e0b",
     domain: "tasks",
     teamScoped: false,
   },
   view_task_comments: {
-    label: "Read the discussion",
-    description: "Comments marked visible to guests are readable.",
+    label: "perm.view_task_comments.label",
+    description: "perm.view_task_comments.description",
     icon: MessagesSquare,
     color: "#8b5cf6",
     domain: "tasks",
     teamScoped: false,
   },
   comment_task: {
-    label: "Comment on tasks",
-    description: "The guest can post comments on tasks.",
+    label: "perm.comment_task.label",
+    description: "perm.comment_task.description",
     icon: MessageSquare,
     color: "#8b5cf6",
     domain: "tasks",
     teamScoped: false,
   },
   view_task_attachments: {
-    label: "See the file list",
-    description: "Attachment names and metadata are visible.",
+    label: "perm.view_task_attachments.label",
+    description: "perm.view_task_attachments.description",
     icon: Paperclip,
     color: "#ec4899",
     domain: "tasks",
     teamScoped: false,
   },
   download_task_attachments: {
-    label: "Download files",
-    description: "Attachment contents can be downloaded.",
+    label: "perm.download_task_attachments.label",
+    description: "perm.download_task_attachments.description",
     icon: Download,
     color: "#ec4899",
     domain: "tasks",
     teamScoped: false,
   },
   upload_task_attachments: {
-    label: "Attach files",
-    description: "The guest can upload attachments (implies commenting).",
+    label: "perm.upload_task_attachments.label",
+    description: "perm.upload_task_attachments.description",
     icon: Upload,
     color: "#ec4899",
     domain: "tasks",
@@ -193,16 +194,16 @@ export const PERM_META: Record<
   },
   // Administration domain (team-scoped).
   invite_guest: {
-    label: "Request guest invitations",
-    description: "The guest can ask you to invite someone; you approve or reject.",
+    label: "perm.invite_guest.label",
+    description: "perm.invite_guest.description",
     icon: UserPlus,
     color: "#8b5cf6",
     domain: "admin",
     teamScoped: true,
   },
   view_audit_log: {
-    label: "Read the audit log",
-    description: "The team's audit trail is visible.",
+    label: "perm.view_audit_log.label",
+    description: "perm.view_audit_log.description",
     icon: ScrollText,
     color: "#64748b",
     domain: "admin",
@@ -210,11 +211,12 @@ export const PERM_META: Record<
   },
 };
 
+/** i18n keys per domain (resolved with t() at the call site). */
 export const DOMAIN_LABELS: Record<PermDomain, string> = {
-  team: "Team",
-  projects: "Projects",
-  tasks: "Tasks",
-  admin: "Administration",
+  team: "domain.team",
+  projects: "domain.projects",
+  tasks: "domain.tasks",
+  admin: "domain.admin",
 };
 
 export function PermissionBadge({
@@ -224,6 +226,7 @@ export function PermissionBadge({
   permission: GuestPermission;
   onRemove?: () => void;
 }) {
+  const { t } = useTranslation("settings");
   const meta =
     PERM_META[permission.permission as GuestPermissionKey] ?? PERM_META.view_team;
   const dark = document.documentElement.classList.contains("dark");
@@ -233,17 +236,17 @@ export function PermissionBadge({
     <span
       className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-2xs font-medium"
       style={{ backgroundColor: bg, borderColor: `${meta.color}55`, color: text }}
-      title={meta.description}
+      title={t(meta.description)}
       data-testid={`perm-badge-${permission.id}`}
     >
       <meta.icon className="h-3 w-3" aria-hidden />
-      <span className="truncate">{meta.label}</span>
+      <span className="truncate">{t(meta.label)}</span>
       {onRemove ? (
         <button
           type="button"
-          aria-label={`Remove permission ${meta.label}`}
+          aria-label={t("perm.removeAria", { label: t(meta.label) })}
           onClick={onRemove}
-          className="ml-0.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+          className="ms-0.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10"
           data-testid={`perm-remove-${permission.id}`}
         >
           <X className="h-3 w-3" />
@@ -291,8 +294,8 @@ function Switch({
     >
       <span
         className={cn(
-          "absolute top-1/2 block h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-background shadow transition-[left] duration-150",
-          checked ? "left-[15px]" : "left-[2px]",
+          "absolute top-1/2 block h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-background shadow transition-[inset-inline-start] duration-150",
+          checked ? "end-[3px]" : "start-[2px]",
         )}
       />
     </button>
@@ -313,13 +316,14 @@ function DrawerSection({
   onToggleOpen: () => void;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation("settings");
   return (
-    <section aria-label={`${DOMAIN_LABELS[label as PermDomain] ?? label} permissions`}>
+    <section aria-label={t("perm.sectionAria", { domain: t(DOMAIN_LABELS[label as PermDomain] ?? label) })}>
       <button
         type="button"
         aria-expanded={open}
         onClick={onToggleOpen}
-        className="flex w-full items-center justify-between rounded-md px-1 py-1.5 text-left hover:bg-accent/50"
+        className="flex w-full items-center justify-between rounded-md px-1 py-1.5 text-start hover:bg-accent/50"
         data-testid={`perm-section-${label}`}
       >
         <span className="flex items-center gap-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -327,7 +331,7 @@ function DrawerSection({
             className={cn("h-3.5 w-3.5 transition-transform duration-150", !open && "-rotate-90")}
             aria-hidden
           />
-          {DOMAIN_LABELS[label as PermDomain] ?? label}
+          {t(DOMAIN_LABELS[label as PermDomain] ?? label)}
         </span>
         {count > 0 ? (
           <span className="rounded-full bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
@@ -351,6 +355,7 @@ export function GuestPermissionDrawer({
   projects: { id: string; name: string }[];
   onClose: () => void;
 }) {
+  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   const { push } = useToast();
 
@@ -462,7 +467,7 @@ export function GuestPermissionDrawer({
           }),
         );
       }
-      push("success", "Permissions updated");
+      push("success", t("perm.toasts.updated"));
       void qc.invalidateQueries({ queryKey: ["team-guests2", teamId] });
       onClose();
     } catch (error) {
@@ -478,7 +483,7 @@ export function GuestPermissionDrawer({
       void qc.invalidateQueries({ queryKey: ["team-guests2", teamId] });
       push(
         "error",
-        "Could not save permissions — changes rolled back",
+        t("perm.toasts.rollback"),
         error instanceof Error ? error.message : undefined,
       );
     } finally {
@@ -503,16 +508,16 @@ export function GuestPermissionDrawer({
       className="fixed inset-0 z-50 flex"
       role="dialog"
       aria-modal
-      aria-label={`Permissions for ${guest.user.display_name}`}
+      aria-label={t("perm.drawerAria", { name: guest.user.display_name })}
     >
       <button
         type="button"
-        aria-label="Close permissions drawer"
+        aria-label={t("perm.closeDrawerAria")}
         className="flex-1 bg-black/40"
         onClick={onClose}
       />
       <aside
-        className="flex w-full max-w-md flex-col border-l bg-background shadow-xl"
+        className="flex w-full max-w-md flex-col border-s bg-background shadow-xl"
         data-testid="permission-drawer"
       >
         <header className="flex items-center justify-between border-b px-4 py-3">
@@ -524,11 +529,11 @@ export function GuestPermissionDrawer({
             <span
               className="rounded-full border px-2 py-0.5 text-2xs font-medium text-muted-foreground"
               data-testid="perm-summary"
-              aria-label={`${grantCount} grants active`}
+              aria-label={t("perm.grantsAria", { grants: grantCount })}
             >
-              {grantCount} {grantCount === 1 ? "grant" : "grants"}
+              {t("perm.summary", { count: grantCount })}
             </span>
-            <Button variant="ghost" size="icon-sm" aria-label="Close" onClick={onClose}>
+            <Button variant="ghost" size="icon-sm" aria-label={t("perm.close")} onClick={onClose}>
               <X />
             </Button>
           </div>
@@ -573,7 +578,7 @@ export function GuestPermissionDrawer({
               testId="perm-toggle-view_project_list"
             />
             {projects.map((p) => (
-              <div key={p.id} className="rounded-lg border p-3">
+              <div key={p.id} className="rounded-sg border p-3">
                 <p className="mb-2 truncate text-xs font-medium">{p.name}</p>
                 <div className="flex flex-col gap-2">
                   {(
@@ -605,7 +610,7 @@ export function GuestPermissionDrawer({
             onToggleOpen={() => setOpenSections((s) => ({ ...s, tasks: !s.tasks }))}
           >
             {projects.map((p) => (
-              <div key={p.id} className="rounded-lg border p-3">
+              <div key={p.id} className="rounded-sg border p-3">
                 <p className="mb-2 truncate text-xs font-medium">{p.name}</p>
                 <div className="flex flex-col gap-2">
                   {(
@@ -633,7 +638,7 @@ export function GuestPermissionDrawer({
                         disabled={blockedByViewTask}
                         blockedNote={
                           blockedByViewTask
-                            ? "Covered by “Open tasks” — view_task already includes own tasks."
+                            ? t("perm.blockedByViewTask", { label: t("perm.view_task.label") })
                             : undefined
                         }
                         onToggle={() => toggle(perm, p.id)}
@@ -665,18 +670,16 @@ export function GuestPermissionDrawer({
           </DrawerSection>
 
           <p className="text-2xs leading-relaxed text-muted-foreground">
-            {teamGrants} team-scoped {teamGrants === 1 ? "grant" : "grants"}; the rest are scoped
-            per project. Saving applies every add and removal in one pass — a failed step rolls the
-            batch back.
+            {t("perm.footer", { count: teamGrants })}
           </p>
         </div>
 
         <footer className="flex justify-end gap-2 border-t p-4">
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("actions.cancel")}
           </Button>
           <Button onClick={() => void save()} disabled={saving} data-testid="perm-save">
-            <ShieldCheck /> Save permissions
+            <ShieldCheck /> {t("perm.save")}
           </Button>
         </footer>
       </aside>
@@ -699,6 +702,7 @@ function PermRow({
   onToggle: () => void;
   testId: string;
 }) {
+  const { t } = useTranslation("settings");
   const meta = PERM_META[perm];
   return (
     <div
@@ -715,17 +719,17 @@ function PermRow({
         checked={checked}
         disabled={disabled}
         onToggle={onToggle}
-        label={meta.label}
-        title={blockedNote ?? meta.description}
+        label={t(meta.label)}
+        title={blockedNote ?? t(meta.description)}
         testId={`${testId}-switch`}
       />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5 text-xs font-medium">
           <meta.icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-          {meta.label}
+          {t(meta.label)}
         </span>
         <span className="block text-2xs text-muted-foreground">
-          {blockedNote ?? meta.description}
+          {blockedNote ?? t(meta.description)}
         </span>
       </span>
     </div>

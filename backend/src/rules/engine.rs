@@ -22,7 +22,7 @@
 //! I/O occurs here and no action is executed — intents only (Task 4/5
 //! execute).
 
-use serde_json::json;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 
@@ -33,7 +33,9 @@ use crate::util;
 use super::RuleError;
 use super::actions::ActionDef;
 use super::conditions::{Condition, EvalContext};
-use super::events::{DomainEvent, EventOrigin, EventState, TriggerType, should_evaluate};
+use super::events::{
+    DomainEvent, EventOrigin, EventState, IntegrationTriggerType, TriggerType, should_evaluate,
+};
 
 /// The authoritative task state after the mutation, as read/validated by the
 /// caller from server-side data (never from raw request fields).
@@ -217,6 +219,7 @@ pub async fn capture_and_evaluate(
             event_trigger: event.event_type,
             event_origin: origin,
             event_causing_execution_id: None,
+            integration: None,
         };
         if !condition.evaluate(&ctx) {
             // Non-matching rules produce no records (Task 3 spec §5).
@@ -303,6 +306,254 @@ pub async fn capture_and_evaluate(
                 .s("pending")
                 .i(0i64)
                 .i(now) // next_attempt_at: eligible for the Task 5 worker
+                .i(now)
+                .i(now);
+            conn.execute(
+                "INSERT INTO automation_outbox (id, execution_id, event_id, rule_id, \
+                 rule_version, task_id, action_type, schema_version, payload, \
+                 idempotency_key, status, attempts, next_attempt_at, created_at, \
+                 updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                args,
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Taskless integration evaluation (Phase 8B, Task 5)
+// ---------------------------------------------------------------------------
+
+/// One already-persisted integration domain event to evaluate rules against.
+/// The event row (with `origin = 'integration'` and full provenance) was
+/// written by the webhook worker in the SAME transaction this evaluation
+/// runs in, so executions and intents commit atomically with it.
+pub struct IntegrationEventContext<'a> {
+    pub team_id: &'a str,
+    /// The persisted domain event id (`source_delivery_id` provenance chain).
+    pub event_id: &'a str,
+    pub trigger: IntegrationTriggerType,
+    /// The normalized provider-neutral snapshot (the domain event's
+    /// `new_state`): carries the `integration.*` condition values.
+    pub state: &'a serde_json::Value,
+}
+
+/// Evaluate integration rules against one taskless integration event.
+/// **Must run inside the caller's transaction** (the webhook worker's
+/// processing transaction): matched rules persist executions
+/// (`task_id NULL`) and one outbox intent per configured action
+/// (`task_id NULL`), atomically with the event and the delivery completion.
+///
+/// Action compatibility is NOT decided here: intents carry the rule's
+/// configured actions verbatim, and the dispatcher (Task 5 semantics)
+/// dead-letters task-scoped actions on taskless intents with a diagnosable
+/// category — the durable record shows what was planned and why it could not
+/// run. Rule-authoring validation (Task 6 API) will reject incompatible
+/// combinations up front.
+///
+/// # Errors
+/// Propagates database failures; a stored rule definition that fails
+/// validation fails the transaction loudly (same policy as the task path).
+pub async fn evaluate_integration_event(
+    conn: &mut Conn<'_>,
+    ctx: &IntegrationEventContext<'_>,
+) -> Result<(), AppError> {
+    let now = util::now_ms();
+
+    // ---- Rule selection + version loading (same two-query pattern) -------
+    let mut args = Args::new();
+    args.s(ctx.trigger.as_str()).s(ctx.team_id);
+    let rule_rows = conn
+        .fetch_all(
+            "SELECT id, current_version FROM rules              WHERE trigger_type = ? AND enabled = TRUE AND team_id = ?",
+            args,
+        )
+        .await?;
+    let mut selected: Vec<(String, i64)> = Vec::with_capacity(rule_rows.len());
+    for row in &rule_rows {
+        selected.push((row.try_get("id")?, row.try_get("current_version")?));
+    }
+    // An active rule whose current_version row is missing is schema-level
+    // corruption (the application always writes both atomically): it must
+    // fail the transaction loudly, never silently omit the rule.
+    let mut definitions: Vec<(String, i64, String, String)> = Vec::new();
+    if !selected.is_empty() {
+        let placeholders = vec!["?"; selected.len()].join(", ");
+        let mut args = Args::new();
+        for (rule_id, _) in &selected {
+            args.s(rule_id.clone());
+        }
+        let rows = conn
+            .fetch_all(
+                &format!(
+                    "SELECT rule_id, version, condition_json, actions_json \
+                     FROM rule_versions WHERE rule_id IN ({placeholders})"
+                ),
+                args,
+            )
+            .await?;
+        for (rule_id, current_version) in &selected {
+            let definition = rows
+                .iter()
+                .find(|row| {
+                    row.try_get::<String, _>("rule_id").unwrap_or_default() == *rule_id
+                        && row.try_get::<i64, _>("version").unwrap_or_default() == *current_version
+                })
+                .ok_or_else(|| {
+                    AppError::internal(format!(
+                        "active rule {rule_id} references missing rule version {current_version}"
+                    ))
+                })?;
+            definitions.push((
+                rule_id.clone(),
+                *current_version,
+                definition.try_get("condition_json")?,
+                definition.try_get("actions_json")?,
+            ));
+        }
+    }
+
+    // ---- Normalized snapshot → integration condition values --------------
+    // Bounded strings resolved from the persisted snapshot; numeric fields
+    // surface as their string form (condition scalars are bounded text).
+    let provider = ctx
+        .state
+        .get("provider")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let event_type = ctx
+        .state
+        .get("event_type")
+        .and_then(Value::as_str)
+        .unwrap_or(ctx.trigger.as_str());
+    let text_field = |key: &str| -> Option<String> {
+        ctx.state.get(key).map(|v| match v {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            other => other.to_string(),
+        })
+    };
+    let branch = text_field("branch");
+    let repository = text_field("repository");
+    let actor = text_field("actor");
+    let commit_count = text_field("commit_count");
+
+    for (rule_id, rule_version, condition_json, actions_json) in definitions {
+        // Integration rules' conditions are authored in the integration
+        // namespace; parsing under that namespace re-validates consistency.
+        let condition = Condition::from_json_str_for(
+            &condition_json,
+            super::events::TriggerNamespace::Integration,
+        )
+        .map_err(|e| rule_definition_error(&e))?;
+        let actions =
+            ActionDef::list_from_json_str(&actions_json).map_err(|e| rule_definition_error(&e))?;
+        let integration = super::conditions::IntegrationEvalContext {
+            provider,
+            event_type,
+            branch: branch.as_deref(),
+            repository: repository.as_deref(),
+            actor: actor.as_deref(),
+            commit_count: commit_count.as_deref(),
+        };
+        let eval_ctx = EvalContext {
+            task_status: "",
+            task_priority: "",
+            task_assignee_id: None,
+            task_reporter_id: None,
+            event_actor_id: None, // external actors never become Tasker users
+            event_previous_status: None,
+            event_new_status: None,
+            event_previous_priority: None,
+            event_new_priority: None,
+            // Unused on this path: namespace consistency guarantees
+            // integration conditions never read task or task-trigger fields.
+            event_trigger: TriggerType::TaskStatusChanged,
+            event_origin: EventOrigin::Integration,
+            event_causing_execution_id: None,
+            integration: Some(integration),
+        };
+        if !condition.evaluate(&eval_ctx) {
+            // Non-matching rules produce no records (same as the task path).
+            continue;
+        }
+
+        // ---- Execution record (taskless): idempotent per (rule, event) ----
+        // The explicit existence check follows the CLIENT_FOUND_ROWS
+        // doctrine; UNIQUE(rule_id, event_id) stays the final defense.
+        let already_processed: i64 = {
+            let mut args = Args::new();
+            args.s(&rule_id).s(ctx.event_id);
+            let row = conn
+                .fetch_optional(
+                    "SELECT 1 AS one FROM rule_executions WHERE rule_id = ? AND event_id = ?",
+                    args,
+                )
+                .await?;
+            row.map_or(0, |r| r.try_get::<i64, _>("one").unwrap_or(0))
+        };
+        if already_processed == 1 {
+            continue;
+        }
+        let execution_id = util::new_id();
+        // Placeholders in order (11): id, rule_id, rule_version, event_id,
+        // team_id, task_id, trigger_type, condition_result, status,
+        // planned_actions, created_at. task_id NULL via opt_i(None) — the
+        // established NULL-binding idiom across engines.
+        let mut args = Args::new();
+        args.s(&execution_id)
+            .s(&rule_id)
+            .i(rule_version)
+            .s(ctx.event_id)
+            .s(ctx.team_id)
+            .opt_i(None::<i64>) // taskless: no task context
+            .s(event_type)
+            .s("matched")
+            .s("planned")
+            .opt_s(Some(planned_actions_json(&actions)))
+            .i(now);
+        conn.execute(
+            "INSERT INTO rule_executions (id, rule_id, rule_version, event_id, team_id, \
+             task_id, trigger_type, condition_result, status, planned_actions, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            args,
+        )
+        .await?;
+
+        // ---- Action intents, deterministic declaration order ---------------
+        for (index, action) in actions.iter().enumerate() {
+            let payload = serde_json::to_string(&action.to_json_value())
+                .expect("canonical action serialization cannot fail");
+            let idempotency_key = idempotency_key(ctx.event_id, &rule_id, rule_version, index);
+            let already_queued: i64 = {
+                let mut args = Args::new();
+                args.s(&idempotency_key);
+                let row = conn
+                    .fetch_optional(
+                        "SELECT 1 AS one FROM automation_outbox WHERE idempotency_key = ?",
+                        args,
+                    )
+                    .await?;
+                row.map_or(0, |r| r.try_get::<i64, _>("one").unwrap_or(0))
+            };
+            if already_queued == 1 {
+                continue;
+            }
+            let mut args = Args::new();
+            args.s(util::new_id())
+                .s(&execution_id)
+                .s(ctx.event_id)
+                .s(&rule_id)
+                .i(rule_version)
+                .opt_i(None::<i64>) // taskless: no task context
+                .s(action_type_of(action))
+                .i(i64::from(DomainEvent::SCHEMA_VERSION))
+                .s(&payload)
+                .s(&idempotency_key)
+                .s("pending")
+                .i(0i64)
+                .i(now)
                 .i(now)
                 .i(now);
             conn.execute(

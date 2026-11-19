@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { Check, Search, ShieldCheck, Trash2, X } from "lucide-react";
 import {
   api,
@@ -42,6 +43,7 @@ export function TeamGuestsSection({
   projects: { id: string; name: string }[];
   canManage: boolean;
 }) {
+  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   const { push } = useToast();
   const { confirm, element: confirmElement } = useConfirmDialog();
@@ -60,11 +62,11 @@ export function TeamGuestsSection({
   const revoke = useMutation({
     mutationFn: (guestId: string) => api.revokeTeamGuest2(teamId, guestId),
     onSuccess: () => {
-      push("success", "Guest access revoked");
+      push("success", t("guests.accessRevoked"));
       invalidate();
     },
     onError: (error) =>
-      push("error", "Could not revoke access", error instanceof Error ? error.message : undefined),
+      push("error", t("guests.errors.revoke"), error instanceof Error ? error.message : undefined),
   });
 
 
@@ -72,11 +74,11 @@ export function TeamGuestsSection({
     mutationFn: (vars: { guestId: string; permissionId: string }) =>
       api.revokeGuestPermission(teamId, vars.guestId, vars.permissionId),
     onSuccess: () => {
-      push("success", "Permission removed");
+      push("success", t("teamGuests.permissionRemoved"));
       invalidate();
     },
     onError: (error) =>
-      push("error", "Could not remove permission", error instanceof Error ? error.message : undefined),
+      push("error", t("teamGuests.errors.removePermission"), error instanceof Error ? error.message : undefined),
   });
 
   const invitations = useQuery({
@@ -91,7 +93,7 @@ export function TeamGuestsSection({
     onSuccess: (row) => {
       push(
         "success",
-        row.status === "approved" ? "Invitation approved" : "Invitation rejected",
+        row.status === "approved" ? t("teamGuests.queue.invitationApproved") : t("teamGuests.queue.invitationRejected"),
         row.invitee_email,
       );
       void qc.invalidateQueries({ queryKey: ["guest-invite-requests", teamId] });
@@ -100,47 +102,46 @@ export function TeamGuestsSection({
     onError: (error) =>
       push(
         "error",
-        "Could not decide the request",
+        t("teamGuests.errors.decide"),
         error instanceof Error ? error.message : undefined,
       ),
   });
 
   return (
-    <section aria-label="Team guests">
+    <section aria-label={t("teamGuests.title")}>
       {confirmElement}
       <div className="mb-1 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Team guests</h2>
+        <h2 className="text-sm font-semibold">{t("teamGuests.title")}</h2>
         {canManage ? (
           <Button size="sm" variant="outline" onClick={() => setInviteOpen(true)} data-testid="invite-guest">
-            <ShieldCheck /> Add guest
+            <ShieldCheck /> {t("teamGuests.addGuest")}
           </Button>
         ) : null}
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
-        Non-members with explicitly granted permissions. Default deny — every capability is a
-        separate grant, revoked instantly.
+        {t("teamGuests.subtitle")}
       </p>
       {guests.isLoading ? (
         <Skeleton className="h-16 w-full" />
       ) : (guests.data?.items.length ?? 0) === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="team-guests-empty">
-          No guests yet.
+          {t("teamGuests.empty")}
         </p>
       ) : (
         <ul className="flex flex-col gap-2" data-testid="team-guest-list">
           {guests.data!.items.map((guest) => (
-            <li key={guest.guest_id} className="rounded-lg border p-3">
+            <li key={guest.guest_id} className="rounded-sg border p-3">
               <div className="flex items-center gap-3">
                 <Avatar name={guest.user.display_name} size="md" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">
                     {guest.user.display_name}
-                    <span className="ml-1.5 truncate text-2xs text-muted-foreground">
+                    <span className="ms-1.5 truncate text-2xs text-muted-foreground">
                       {guest.user.email}
                     </span>
                   </p>
                   <p className="text-2xs text-muted-foreground">
-                    Guest · granted {timeAgo(guest.created_at)}
+                    {t("teamGuests.grantedAgo", { time: timeAgo(guest.created_at) })}
                   </p>
                 </div>
                 {canManage ? (
@@ -150,15 +151,15 @@ export function TeamGuestsSection({
                     disabled={revoke.isPending}
                     onClick={() =>
                       confirm({
-                        title: "Revoke guest access?",
-                        description: `${guest.user.display_name} loses every granted permission immediately.`,
-                        confirmLabel: "Revoke access",
+                        title: t("guests.revokeConfirm.title"),
+                        description: t("teamGuests.revokeDescription", { name: guest.user.display_name }),
+                        confirmLabel: t("guests.revokeConfirm.confirm"),
                         action: () => revoke.mutate(guest.guest_id),
                       })
                     }
                     data-testid={`revoke-team-guest-${guest.guest_id}`}
                   >
-                    <Trash2 /> Revoke
+                    <Trash2 /> {t("actions.revoke")}
                   </Button>
                 ) : null}
               </div>
@@ -170,7 +171,7 @@ export function TeamGuestsSection({
                   data-testid={`guest-badges-${guest.guest_id}`}
                 >
                 {guest.permissions.length === 0 ? (
-                  <span className="text-2xs text-muted-foreground">No permissions granted.</span>
+                  <span className="text-2xs text-muted-foreground">{t("teamGuests.noPermissions")}</span>
                 ) : (
                   <>
                     {(["team", "projects", "tasks", "admin"] as PermDomain[]).map((domain) => {
@@ -183,7 +184,7 @@ export function TeamGuestsSection({
                       return (
                         <div key={domain} className="flex flex-wrap items-center gap-1.5">
                           <span className="w-20 shrink-0 text-2xs uppercase tracking-wide text-muted-foreground">
-                            {DOMAIN_LABELS[domain]}
+                            {t(DOMAIN_LABELS[domain])}
                           </span>
                           {rows.map((p) => (
                             <PermissionBadge
@@ -215,7 +216,7 @@ export function TeamGuestsSection({
                     onClick={() => setDrawerGuest(guest)}
                     data-testid={`edit-permissions-${guest.guest_id}`}
                   >
-                    <ShieldCheck /> Edit permissions
+                    <ShieldCheck /> {t("teamGuests.editPermissions")}
                   </Button>
                 ) : null}
               </div>
@@ -253,6 +254,7 @@ function InviteGuestDialog({
   teamId: string;
   onOpenChange: (v: boolean) => void;
 }) {
+  const { t } = useTranslation("settings");
   const { push } = useToast();
   const qc = useQueryClient();
   const [query, setQuery] = useState("");
@@ -273,13 +275,13 @@ function InviteGuestDialog({
   const invite = useMutation({
     mutationFn: (email: string) => api.inviteTeamGuest2(teamId, email),
     onSuccess: (_guest, email) => {
-      push("success", "Guest added", email);
+      push("success", t("teamGuests.addedToast"), email);
       void qc.invalidateQueries({ queryKey: ["team-guests2", teamId] });
       void qc.invalidateQueries({ queryKey: ["eligible-members", teamId] });
       onOpenChange(false);
     },
     onError: (err) =>
-      setError(err instanceof ApiError ? err.message : "Could not add the guest."),
+      setError(err instanceof ApiError ? err.message : t("teamGuests.errors.add")),
   });
 
   return (
@@ -287,32 +289,33 @@ function InviteGuestDialog({
       <div
         role="dialog"
         aria-modal
-        aria-label="Add guest"
-        className="w-full max-w-md rounded-lg border bg-popover p-4 shadow-lg"
+        aria-label={t("teamGuests.addGuest")}
+        className="w-full max-w-md rounded-sg border bg-popover p-4 shadow-lg"
       >
-        <h2 className="text-sm font-semibold">Add guest</h2>
+        <h2 className="text-sm font-semibold">{t("teamGuests.addGuest")}</h2>
         <p className="mb-3 text-xs text-muted-foreground">
-          Pick an existing Tasker account. Guests get only what you explicitly grant.
+          {t("teamGuests.addDescription")}
         </p>
         <div className="relative mb-2">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden />
+          <Search className="absolute start-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden />
           <Input
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
               setDebounced(e.target.value.trim());
             }}
-            placeholder="Search by name, email or username…"
-            aria-label="Find a user to invite as guest"
-            className="pl-8"
+            placeholder={t("addMember.searchPlaceholder")}
+            aria-label={t("teamGuests.findUserAria")}
+            className="ps-8"
             autoFocus
+            dir="auto"
             data-testid="guest-search-input"
           />
         </div>
         <ul
           className="max-h-56 overflow-y-auto rounded-md border p-1 scrollbar-thin"
           role="listbox"
-          aria-label="Eligible users"
+          aria-label={t("addMember.eligibleAria")}
           data-testid="guest-eligible-list"
         >
           {eligible.isLoading ? (
@@ -322,7 +325,7 @@ function InviteGuestDialog({
             </li>
           ) : (eligible.data?.items.length ?? 0) === 0 ? (
             <li className="p-3 text-center text-xs text-muted-foreground" data-testid="guest-eligible-empty">
-              No existing Tasker user matches this search.
+              {t("addMember.noMatch")}
             </li>
           ) : (
             eligible.data!.items.map((u: EligibleMember) => (
@@ -332,7 +335,7 @@ function InviteGuestDialog({
                   role="option"
                   aria-selected={false}
                   onClick={() => invite.mutate(u.email)}
-                  className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
+                  className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-start text-sm hover:bg-accent"
                 >
                   <span className="min-w-0 flex-1 truncate">
                     <span className="font-medium">{u.display_name}</span>{" "}
@@ -349,7 +352,7 @@ function InviteGuestDialog({
         {error ? <p className="mt-2 text-2xs text-destructive" role="alert">{error}</p> : null}
         <div className="mt-3 flex justify-end">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("actions.cancel")}
           </Button>
         </div>
       </div>
@@ -370,19 +373,20 @@ function InvitationQueue({
   onDecide: (requestId: string, decision: "approve" | "reject") => void;
   pending: boolean;
 }) {
+  const { t } = useTranslation("settings");
   const pendingItems = requests.filter((r) => r.status === "pending");
   const decided = requests.filter((r) => r.status !== "pending");
   if (requests.length === 0) return null;
   return (
     <div
-      className="mt-4 rounded-lg border p-3"
-      aria-label="Guest invitation requests"
+      className="mt-4 rounded-sg border p-3"
+      aria-label={t("teamGuests.queue.aria")}
       data-testid="invite-requests-list"
     >
-      <h3 className="mb-1.5 text-xs font-semibold">Invitation requests</h3>
+      <h3 className="mb-1.5 text-xs font-semibold">{t("teamGuests.queue.title")}</h3>
       <p className="mb-2 text-2xs text-muted-foreground">
-        Guests with the <code>invite_guest</code> grant can ask you to invite someone. Nothing
-        changes until you decide.
+        {t("teamGuests.queue.descriptionBefore")} <code>invite_guest</code>{" "}
+        {t("teamGuests.queue.descriptionAfter")}
       </p>
       {pendingItems.length === 0 && decided.length === 0 ? null : (
         <ul className="flex flex-col gap-1.5">
@@ -395,7 +399,10 @@ function InvitationQueue({
               <div className="min-w-0">
                 <p className="truncate text-xs font-medium">{r.invitee_email}</p>
                 <p className="text-2xs text-muted-foreground">
-                  Requested by {r.requested_by?.display_name ?? "unknown"} · {timeAgo(r.created_at)}
+                  {t("teamGuests.queue.requestedBy", {
+                    name: r.requested_by?.display_name ?? t("teamGuests.queue.unknownUser"),
+                    time: timeAgo(r.created_at),
+                  })}
                 </p>
               </div>
               <div className="flex shrink-0 gap-1.5">
@@ -405,7 +412,7 @@ function InvitationQueue({
                   onClick={() => onDecide(r.id, "approve")}
                   data-testid={`approve-invite-request-${r.id}`}
                 >
-                  <Check /> Approve
+                  <Check /> {t("teamGuests.queue.approve")}
                 </Button>
                 <Button
                   size="sm"
@@ -414,7 +421,7 @@ function InvitationQueue({
                   onClick={() => onDecide(r.id, "reject")}
                   data-testid={`reject-invite-request-${r.id}`}
                 >
-                  <X /> Reject
+                  <X /> {t("teamGuests.queue.reject")}
                 </Button>
               </div>
             </li>
@@ -434,7 +441,7 @@ function InvitationQueue({
                     : "shrink-0 text-2xs font-medium text-muted-foreground"
                 }
               >
-                {r.status === "approved" ? "Approved" : "Rejected"}
+                {r.status === "approved" ? t("teamGuests.queue.approved") : t("teamGuests.queue.rejected")}
               </span>
             </li>
           ))}

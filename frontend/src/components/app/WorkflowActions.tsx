@@ -102,7 +102,7 @@ export function WorkflowActions({ task }: { task: Task }) {
               disabled={reject.isPending}
               data-testid="reject-task"
             >
-              <Undo2 /> Reject
+              <Undo2 className="rtl:rotate-180" /> Reject
             </Button>
           </>
         ) : (
@@ -144,7 +144,7 @@ export function WorkflowActions({ task }: { task: Task }) {
         disabled={startProgress.isPending}
         data-testid="start-task"
       >
-        <Play /> {startProgress.isPending ? "…" : label}
+        <Play className="rtl:rotate-180" /> {startProgress.isPending ? "…" : label}
       </Button>
     );
   }
@@ -153,7 +153,7 @@ export function WorkflowActions({ task }: { task: Task }) {
   if (task.status === "in_progress" && isAssignee) {
     return (
       <Button size="sm" onClick={() => resolve.mutate()} disabled={resolve.isPending} data-testid="resolve-task">
-        <SendHorizonal /> {resolve.isPending ? "Resolving…" : "Mark resolved"}
+        <SendHorizonal className="rtl:rotate-180" /> {resolve.isPending ? "Resolving…" : "Mark resolved"}
       </Button>
     );
   }
@@ -162,7 +162,7 @@ export function WorkflowActions({ task }: { task: Task }) {
   if (task.status === "resolved" && isReporter && !isAssignee) {
     return (
       <Button size="sm" onClick={() => submit.mutate()} disabled={submit.isPending} data-testid="submit-task">
-        <SendHorizonal /> {submit.isPending ? "Submitting…" : "Submit for review"}
+        <SendHorizonal className="rtl:rotate-180" /> {submit.isPending ? "Submitting…" : "Submit for review"}
       </Button>
     );
   }

@@ -29,7 +29,7 @@ use serde_json::{Value, json};
 
 use crate::integrations::Provider;
 use crate::integrations::webhook::{
-    NormalizedOutcome, ProviderAdapter, RawWebhook, VerifiedDelivery, VerificationError,
+    NormalizedOutcome, ProviderAdapter, RawWebhook, VerificationError, VerifiedDelivery,
 };
 use crate::rules::events::IntegrationTriggerType;
 use crate::util;
@@ -63,8 +63,8 @@ fn is_zero_sha(sha: &str) -> bool {
 /// the processing time).
 fn parse_timestamp(raw: Option<&str>) -> Option<i64> {
     let raw = raw?;
-    let dt = time::OffsetDateTime::parse(raw, &time::format_description::well_known::Rfc3339)
-        .ok()?;
+    let dt =
+        time::OffsetDateTime::parse(raw, &time::format_description::well_known::Rfc3339).ok()?;
     Some(dt.unix_timestamp() * 1_000 + i64::from(dt.millisecond()))
 }
 
@@ -81,8 +81,8 @@ impl ProviderAdapter for GitLabAdapter {
         // Token-comparison verification (GitLab's model): the presented token
         // must equal the credential. Constant-time over SHA-256 digests —
         // never ordinary string equality.
-        let presented = header_str(raw.headers, TOKEN_HEADER)
-            .ok_or(VerificationError::MissingSignature)?;
+        let presented =
+            header_str(raw.headers, TOKEN_HEADER).ok_or(VerificationError::MissingSignature)?;
         let presented_hash = crate::security::token::hash(&presented);
         let stored_hash = crate::security::token::hash(secret);
         if !crate::security::token::hashes_equal(&presented_hash, &stored_hash) {
@@ -152,8 +152,14 @@ fn normalize_push(parsed: &Value) -> NormalizedOutcome {
             reason: "push to a non-branch ref",
         };
     };
-    let before = parsed.pointer("/before").and_then(Value::as_str).unwrap_or("");
-    let after = parsed.pointer("/after").and_then(Value::as_str).unwrap_or("");
+    let before = parsed
+        .pointer("/before")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let after = parsed
+        .pointer("/after")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let event_type = if is_zero_sha(after) {
         IntegrationTriggerType::GitBranchDeleted
     } else if is_zero_sha(before) {
@@ -201,7 +207,10 @@ fn normalize_merge_request(parsed: &Value) -> NormalizedOutcome {
         }
     };
     let mut state = base_state(parsed, event_type.as_str(), "/user/username");
-    if let Some(iid) = parsed.pointer("/object_attributes/iid").and_then(Value::as_i64) {
+    if let Some(iid) = parsed
+        .pointer("/object_attributes/iid")
+        .and_then(Value::as_i64)
+    {
         state.insert("pr_number".into(), json!(iid));
     }
     if let Some(title) = parsed
@@ -216,7 +225,10 @@ fn normalize_merge_request(parsed: &Value) -> NormalizedOutcome {
     {
         state.insert("pr_state".into(), json!(bounded(state_name)));
     }
-    state.insert("pr_merged".into(), json!(event_type == IntegrationTriggerType::GitPullRequestMerged));
+    state.insert(
+        "pr_merged".into(),
+        json!(event_type == IntegrationTriggerType::GitPullRequestMerged),
+    );
     if let Some(author_id) = parsed
         .pointer("/object_attributes/author_id")
         .and_then(Value::as_i64)
@@ -360,8 +372,9 @@ mod tests {
             "project": {"path_with_namespace": "group/tasker"},
         })
         .to_string();
-        let NormalizedOutcome::Event { event_type, state, .. } =
-            GitLabAdapter.normalize("Push Event", &push)
+        let NormalizedOutcome::Event {
+            event_type, state, ..
+        } = GitLabAdapter.normalize("Push Event", &push)
         else {
             panic!("expected an event");
         };
@@ -382,8 +395,9 @@ mod tests {
             "project": {"path_with_namespace": "g/r"},
         })
         .to_string();
-        let NormalizedOutcome::Event { event_type, state, .. } =
-            GitLabAdapter.normalize("Push Event", &create)
+        let NormalizedOutcome::Event {
+            event_type, state, ..
+        } = GitLabAdapter.normalize("Push Event", &create)
         else {
             panic!("expected an event");
         };
@@ -434,8 +448,9 @@ mod tests {
                 "updated_at": "2026-01-02T03:04:05Z",
             },
         });
-        let NormalizedOutcome::Event { event_type, state, .. } =
-            GitLabAdapter.normalize("Merge Request Event", &base.to_string())
+        let NormalizedOutcome::Event {
+            event_type, state, ..
+        } = GitLabAdapter.normalize("Merge Request Event", &base.to_string())
         else {
             panic!("expected an event");
         };
@@ -480,8 +495,9 @@ mod tests {
             },
         })
         .to_string();
-        let NormalizedOutcome::Event { event_type, state, .. } =
-            GitLabAdapter.normalize("Release Event", &publish)
+        let NormalizedOutcome::Event {
+            event_type, state, ..
+        } = GitLabAdapter.normalize("Release Event", &publish)
         else {
             panic!("expected an event");
         };
@@ -525,7 +541,8 @@ mod tests {
             "total_commits_count": 1,
         })
         .to_string();
-        let NormalizedOutcome::Event { state, .. } = GitLabAdapter.normalize("Push Event", &payload)
+        let NormalizedOutcome::Event { state, .. } =
+            GitLabAdapter.normalize("Push Event", &payload)
         else {
             panic!("expected an event");
         };

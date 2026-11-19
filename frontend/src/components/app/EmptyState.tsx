@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -28,7 +29,7 @@ export function EmptyState({
 }
 
 export function ErrorState({
-  title = "Something went wrong",
+  title,
   detail,
   onRetry,
 }: {
@@ -36,19 +37,21 @@ export function ErrorState({
   detail?: string;
   onRetry?: () => void;
 }) {
+  const { t } = useTranslation("common");
+  const heading = title ?? t("error.generic");
   return (
     <div
-      className="flex flex-col items-center justify-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-10 text-center"
+      className="flex flex-col items-center justify-center gap-3 rounded-sg border border-destructive/30 bg-destructive/5 p-10 text-center"
       role="alert"
       data-testid="error-state"
     >
       <div>
-        <p className="text-sm font-medium text-destructive">{title}</p>
+        <p className="text-sm font-medium text-destructive">{heading}</p>
         {detail ? <p className="mt-1 max-w-sm text-xs text-muted-foreground">{detail}</p> : null}
       </div>
       {onRetry ? (
         <Button variant="outline" size="sm" onClick={onRetry}>
-          Try again
+          {t("error.retry")}
         </Button>
       ) : null}
     </div>

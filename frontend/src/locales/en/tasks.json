@@ -1,0 +1,664 @@
+{
+  "status": {
+    "backlog": "Backlog",
+    "todo": "Todo",
+    "in_progress": "In Progress",
+    "resolved": "Resolved",
+    "in_review": "In Review",
+    "closed": "Closed",
+    "currentStatus": "This is the current status",
+    "moveTo": "Move to",
+    "closedTerminal": "Closed is a terminal state",
+    "serverValidates": "The server validates every transition against the workflow and your role.",
+    "pickUp": "Pick up",
+    "startWork": "Start work",
+    "markResolved": "Mark resolved",
+    "submitForReview": "Submit for review",
+    "acceptClose": "Accept & Close",
+    "reject": "Reject",
+    "overlapWarning": "This task has overlapping assignee and reporter; the workflow needs distinct users.",
+    "aria": {
+      "menu": "Status: {{status}}. Open transition menu"
+    },
+    "blocker": {
+      "onlyReporterAccept": "Only the reporter can accept this task",
+      "onlyReporterSubmit": "Only the reporter can submit this task for review",
+      "onlyReporterReject": "Only the reporter can reject this task",
+      "onlyAssignee": "Only the assignee can perform this transition"
+    },
+    "toast": {
+      "notAllowed": "Action not allowed",
+      "stateChanged": "The task state may have changed; refresh and retry."
+    },
+    "accept": {
+      "title": "Accept and close this task?",
+      "descNamed": "This will close the task — {{name}} will be notified.",
+      "descUnnamed": "This will close the task; the assignee will be notified.",
+      "descClosed": "Closed tasks cannot reopen, but they stay visible in the project history.",
+      "cancel": "Cancel",
+      "closing": "Closing…"
+    },
+    "blockers": {
+      "title": "Open dependencies block this close",
+      "desc": "This task is blocked by open dependencies.",
+      "reasonPrompt": "Provide a reason to close it anyway — the override is recorded in the audit trail.",
+      "overrideReason": "Override reason",
+      "overridePlaceholder": "Why is it safe to close this task before its dependencies?",
+      "overrideRequired": "An override reason is required and is recorded in the audit trail.",
+      "cancel": "Cancel",
+      "closing": "Closing…",
+      "closeWithOverride": "Close with override"
+    },
+    "reject": {
+      "title": "Reject this work?",
+      "desc": "The task returns to In Progress and the assignee is notified with your reason.",
+      "reasonLabel": "Reason",
+      "reasonPlaceholder": "What needs to change before this can be accepted?",
+      "reasonRequired": "A rejection reason is required.",
+      "cancel": "Cancel",
+      "rejecting": "Rejecting…",
+      "confirm": "Reject & send back"
+    }
+  },
+  "priority": {
+    "none": "None",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "urgent": "Urgent",
+    "critical": "Critical"
+  },
+  "resolution": {
+    "accepted": "Accepted",
+    "rejected": "Rejected"
+  },
+  "dialog": {
+    "title": {
+      "edit": "Edit task",
+      "newSubtask": "New subtask",
+      "new": "New task"
+    },
+    "desc": {
+      "edit": "Changes are recorded in the task history.",
+      "new": "Fill in the task details."
+    },
+    "template": {
+      "label": "From template (optional)",
+      "placeholder": "Start blank or pick a template",
+      "startBlank": "Start blank"
+    },
+    "fields": {
+      "title": "Title",
+      "titlePlaceholder": "Short, actionable summary",
+      "description": "Description",
+      "descriptionPlaceholder": "Context, links, acceptance criteria…",
+      "status": "Status",
+      "priority": "Priority",
+      "assignee": "Assignee",
+      "unassigned": "Unassigned",
+      "reporter": "Reporter",
+      "reporterYou": "{{name}} (you)",
+      "reporterMe": "Me (creator)",
+      "dueDate": "Due date",
+      "deadline": "Deadline",
+      "deadlinePlaceholder": "Set deadline",
+      "deadlineHint": "Hard cutoff; must be on or after the due date.",
+      "labels": "Labels"
+    },
+    "errors": {
+      "titleRequired": "Title is required",
+      "deadlineAfterDue": "The deadline must be on or after the due date"
+    },
+    "cancel": "Cancel",
+    "saving": "Saving…",
+    "saveChanges": "Save changes",
+    "createTask": "Create task",
+    "toast": {
+      "updated": "Task updated",
+      "subtaskCreated": "Subtask created",
+      "created": "Task created",
+      "saveFailed": "Could not save task"
+    }
+  },
+  "detail": {
+    "empty": "Select a task to see its details.",
+    "taskId": "Task · {{id}}",
+    "locked": "Locked",
+    "aria": {
+      "openFullPage": "Open task as full page",
+      "openFullPageTitle": "Open full page (⌘⇧O)",
+      "taskActions": "Task actions"
+    },
+    "menu": {
+      "openFullPage": "Open full page",
+      "editFields": "Edit fields…",
+      "copyLink": "Copy link",
+      "deleteTask": "Delete task",
+      "duplicate": "Duplicate task"
+    },
+    "toast": {
+      "deleted": "Task deleted",
+      "deleteFailed": "Could not delete task",
+      "linkCopied": "Link copied",
+      "copyLinkFailed": "Could not copy the link",
+      "updateFailed": "Could not update task",
+      "commentAddFailed": "Could not add comment",
+      "replyPosted": "Reply posted",
+      "replyFailed": "Could not reply",
+      "commentUpdateFailed": "Could not update comment",
+      "commentDeleteFailed": "Could not delete comment",
+      "fileAttached": "File attached",
+      "uploadFailed": "Could not upload file",
+      "attachmentDeleteFailed": "Could not delete attachment",
+      "checklistAddFailed": "Could not add checklist item",
+      "checklistUpdateFailed": "Could not update checklist item",
+      "checklistDeleteFailed": "Could not delete checklist item"
+    },
+    "delete": {
+      "title": "Delete this task?",
+      "desc": "\"{{title}}\" and its subtasks are permanently removed."
+    },
+    "fromTemplate": "From template: {{name}}",
+    "templateFallback": "template",
+    "acceptedBy": "Accepted by {{name}}",
+    "rejectedWithNote": "Rejected — \"{{note}}\"",
+    "subtasks": {
+      "aria": "Subtasks",
+      "title": "Subtasks ({{count}})"
+    },
+    "description": {
+      "editAria": "Edit description",
+      "add": "Add a description…"
+    },
+    "comments": {
+      "aria": "Comments",
+      "title": "Comments ({{count}})",
+      "locked": "This task is closed; commenting is disabled."
+    },
+    "checklist": {
+      "aria": "Checklist",
+      "title": "Check",
+      "progressAria": "Task progress",
+      "placeholder": "Add checklist item…",
+      "newItemAria": "New checklist item",
+      "addAria": "Add checklist item",
+      "toggleAria": "Toggle {{title}}",
+      "deleteAria": "Delete {{title}}"
+    },
+    "attachments": {
+      "aria": "Attachments",
+      "title": "Attachments ({{count}})",
+      "uploadAria": "Upload attachment",
+      "emptyReadOnly": "No files were attached.",
+      "empty": "Drop in files via the + button above.",
+      "deleteAria": "Delete {{name}}"
+    },
+    "deleteReplies": {
+      "title_one": "Delete this comment and its {{count}} reply?",
+      "title_other": "Delete this comment and its {{count}} replies?",
+      "desc": "Deleting the parent removes its replies too. This cannot be undone.",
+      "confirm": "Delete all"
+    },
+    "chips": {
+      "labelsUpdated": "Labels updated",
+      "noReporter": "No reporter",
+      "reporterUpdated": "Reporter updated",
+      "unassigned": "Unassigned",
+      "assign": "Assign",
+      "assigneeCleared": "Assignee cleared",
+      "assigneeUpdated": "Assignee updated",
+      "priorityUpdated": "Priority updated",
+      "dueUpdated": "Due date updated",
+      "dueCleared": "Due date cleared",
+      "editDueAria": "Edit due date",
+      "cancelDueAria": "Cancel due date edit",
+      "dueTitle": "Due {{date}}",
+      "setDue": "Set a due date",
+      "dueDate": "Due date",
+      "deadlineUpdated": "Deadline updated",
+      "deadlineCleared": "Deadline cleared",
+      "editDeadlineAria": "Edit deadline",
+      "cancelDeadlineAria": "Cancel deadline edit",
+      "deadlineTitle": "Deadline {{date}}",
+      "setDeadline": "Set a deadline",
+      "deadline": "Deadline",
+      "noLabels": "No labels in this team yet",
+      "label": "Label"
+    },
+    "activity": {
+      "aria": "Activity history",
+      "title": "Activity",
+      "task_created": "created this task",
+      "task_updated": "updated this task",
+      "task_status_changed": "changed status",
+      "task_priority_changed": "changed priority",
+      "task_assignee_changed": "changed assignee",
+      "task_due_date_changed": "changed due date",
+      "comment_added": "commented",
+      "comment_edited": "edited a comment",
+      "comment_deleted": "deleted a comment",
+      "someone": "Someone",
+      "none": "none",
+      "empty": "No activity yet.",
+      "showAll": "Show all {{count}} events"
+    },
+    "page": {
+      "unavailableTitle": "This task is no longer available",
+      "unavailableDesc": "It may have been deleted, or you no longer have access to its team.",
+      "projectFallback": "Project",
+      "titleUpdated": "Title updated",
+      "renameFailed": "Could not rename task",
+      "copySuffix": "(copy)",
+      "duplicated": "Task duplicated",
+      "duplicateFailed": "Could not duplicate task",
+      "backAria": "Back to the project",
+      "breadcrumbAria": "Breadcrumb",
+      "team": "Team",
+      "titleAria": "Task title",
+      "saveTitleAria": "Save title",
+      "renameAria": "Rename task",
+      "metadataAria": "Task metadata",
+      "status": "Status",
+      "created": "Created",
+      "updated": "Updated"
+    }
+  },
+  "workflow": {
+    "theReporter": "the reporter",
+    "awaitingReview": "Awaiting review by {{name}}.",
+    "pickUp": "Pick up",
+    "startWork": "Start work",
+    "resolving": "Resolving…",
+    "markResolved": "Mark resolved",
+    "submitting": "Submitting…",
+    "submitForReview": "Submit for review",
+    "acceptClose": "Accept & Close",
+    "reject": "Reject",
+    "rejectTitle": "Reject this work?",
+    "rejectDesc": "The task returns to In Progress and the assignee is notified with your reason.",
+    "reasonLabel": "Reason",
+    "reasonPlaceholder": "What needs to change before this can be accepted?",
+    "reasonRequired": "A rejection reason is required.",
+    "cancel": "Cancel",
+    "rejecting": "Rejecting…",
+    "rejectTask": "Reject task",
+    "toast": {
+      "notAllowed": "Action not allowed",
+      "stateChanged": "The task state may have changed; refresh and retry."
+    }
+  },
+  "board": {
+    "card": {
+      "roleDesc": "Draggable task",
+      "ariaAssigned": "{{title}} {{priority}} priority",
+      "ariaUnassigned": "{{title}} {{priority}} priority unassigned",
+      "deadlineTitle": "Deadline {{date}}",
+      "unassigned": "Unassigned",
+      "subtasksTitle": "{{closed}} of {{total}} subtasks closed"
+    },
+    "column": {
+      "aria": "{{status}} column",
+      "addAria": "Add task to {{status}}"
+    },
+    "lane": {
+      "unassigned": "Unassigned",
+      "noLabel": "No label"
+    },
+    "showEmptyLanes": "Show empty lanes",
+    "noTasksInMode": "No tasks in this swimlane mode.",
+    "toast": {
+      "moveFailed": "Could not move task",
+      "restored": "The board was restored to its previous state."
+    }
+  },
+  "table": {
+    "col": {
+      "selected": "Selected",
+      "task": "Task",
+      "status": "Status",
+      "priority": "Priority",
+      "assignee": "Assignee",
+      "due": "Due"
+    },
+    "due": {
+      "overdueDays": "{{days}}d overdue",
+      "today": "Due today",
+      "tomorrow": "Tomorrow",
+      "inDays": "in {{days}}d",
+      "title": "Due {{date}}"
+    },
+    "deadlineTitle": "Deadline {{date}}",
+    "selectedAria": "Selected task",
+    "subtasksTitle": "{{closed}} of {{total}} subtasks closed",
+    "showing": "Showing {{count}} of {{total}} tasks"
+  },
+  "badges": {
+    "priorityTitle": "Priority: {{priority}}"
+  },
+  "deps": {
+    "aria": "Dependencies",
+    "title": "Dependencies",
+    "openBlockers_one": "{{count}} open blocker",
+    "openBlockers_other": "{{count}} open blockers",
+    "graph": "Graph",
+    "add": "Add",
+    "link": "Link",
+    "none": "No dependencies.",
+    "dependsOn": "Depends on ({{count}})",
+    "blocking": "Other tasks waiting on this ({{count}})",
+    "atRisk": "At Risk",
+    "mustFinishFirst": "must finish first",
+    "waitsOnThis": "waits on this",
+    "removeAria": "Remove dependency",
+    "typeAria": "Dependency type",
+    "autoSchedule": "Auto-schedule: pull this task's due date forward when the dependency's moves later",
+    "type": {
+      "blocks": "Blocks",
+      "blocksDesc": "Must finish before this task (prevents cycles, feeds scheduling).",
+      "relates_to": "Relates to",
+      "relates_toDesc": "Informational link; no scheduling effect.",
+      "duplicates": "Duplicates",
+      "duplicatesDesc": "Tracks the same work as another task.",
+      "causes": "Causes",
+      "causesDesc": "This task's outcome drives the other one."
+    },
+    "card": {
+      "statusClosed": "closed",
+      "statusNotClosed": "not closed"
+    },
+    "picker": {
+      "searchAria": "Search for a task",
+      "listAria": "Task candidates",
+      "noMatch": "No matching tasks.",
+      "placeholder": "Search for a task that this one relates to…"
+    },
+    "toast": {
+      "added": "Dependency added",
+      "addFailed": "Could not add dependency",
+      "checkSelection": "Check the task selection.",
+      "removeFailed": "Could not remove dependency"
+    },
+    "links": {
+      "workload": "Workload",
+      "guests": "Guests"
+    }
+  },
+  "graph": {
+    "aria": "Dependency graph for {{title}}",
+    "title": "Dependency graph",
+    "closeAria": "Close graph",
+    "emptyBefore": "No",
+    "emptyAfter": "dependencies to draw yet.",
+    "blocksThisTask": "Blocks this task",
+    "thisTaskBlocks": "This task blocks",
+    "arrowsBefore": "Arrows flow from dependency to dependent — a predecessor must finish before the arrow leaves it. Only",
+    "arrowsAfter": "edges participate."
+  },
+  "timeline": {
+    "unavailableTitle": "Timeline unavailable",
+    "unavailableDesc": "Select a valid project.",
+    "emptyTitle": "Nothing on the timeline",
+    "emptyDesc": "Tasks appear here once the project has work.",
+    "projectFallback": "Project",
+    "dragHint": "{{project}} — drag a bar to reschedule.",
+    "zoomAria": "Timeline zoom",
+    "zoom": {
+      "day": "day",
+      "week": "week",
+      "month": "month"
+    },
+    "groupAria": "Group timeline by",
+    "group": {
+      "none": "No grouping",
+      "assignee": "Group by assignee",
+      "priority": "Group by priority"
+    },
+    "unassigned": "Unassigned",
+    "allTasks": "All tasks",
+    "today": "Today",
+    "noDueDate": "no due date",
+    "barAria": "{{title}}, {{status}}, due {{due}}",
+    "barTitle": "{{title}} — due {{due}}",
+    "deadlineTitle": "Deadline {{date}}",
+    "reschedule": {
+      "title": "Reschedule this task?",
+      "desc_one": "\"{{title}}\" moves {{direction}} by {{count}} day.",
+      "desc_other": "\"{{title}}\" moves {{direction}} by {{count}} days.",
+      "later": "later",
+      "earlier": "earlier",
+      "confirm": "Reschedule",
+      "cancel": "Cancel"
+    },
+    "toast": {
+      "rescheduled": "Task rescheduled",
+      "dueDetail": "Due {{date}}",
+      "rescheduleFailed": "Could not reschedule"
+    }
+  },
+  "comments": {
+    "repliesTo": "Replies to {{name}}",
+    "showMore_one": "Show {{count}} more reply",
+    "showMore_other": "Show {{count}} more replies",
+    "reply": "Reply",
+    "cancel": "Cancel",
+    "edited": "(edited)",
+    "replyToAria": "Reply to {{name}}",
+    "editAria": "Edit comment",
+    "deleteAria": "Delete comment",
+    "save": "Save"
+  },
+  "mentions": {
+    "composerPlaceholder": "Leave a comment… use @ to mention a teammate",
+    "composerAria": "Comment",
+    "listAria": "Mention a team member",
+    "sending": "Sending…",
+    "submit": "Comment"
+  },
+  "editor": {
+    "bold": "Bold (Ctrl+B)",
+    "italic": "Italic (Ctrl+I)",
+    "strike": "Strikethrough (Ctrl+Shift+X)",
+    "inlineCode": "Inline code",
+    "heading": "Heading",
+    "bulletList": "Bullet list",
+    "numberedList": "Numbered list",
+    "taskList": "Task list",
+    "blockquote": "Blockquote",
+    "link": "Link",
+    "slash": {
+      "h1": "Heading 1",
+      "h2": "Heading 2",
+      "h3": "Heading 3",
+      "bullet": "Bullet list",
+      "numbered": "Numbered list",
+      "task": "Task list",
+      "quote": "Blockquote",
+      "code": "Inline code",
+      "codeblock": "Code block"
+    },
+    "formattingAria": "Formatting",
+    "slashAria": "Insert markdown block",
+    "hint": "Markdown supported · / for blocks · Ctrl+Enter to save · Esc to cancel"
+  },
+  "templates": {
+    "aria": "Task templates",
+    "title": "Task templates",
+    "desc": "Reusable defaults for new tasks. Editing a template never changes tasks created from it.",
+    "newTemplate": "New template",
+    "empty": "No templates yet.",
+    "withDescription": " · with description",
+    "deleteAria": "Delete {{name}}",
+    "edit": "Edit",
+    "confirm": {
+      "title": "Delete this template?",
+      "desc": "\"{{name}}\" is permanently removed.",
+      "confirmLabel": "Delete template"
+    },
+    "editor": {
+      "editTitle": "Edit template",
+      "desc": "Defaults applied when a member starts a task from this template. All task validation still applies at creation time."
+    },
+    "form": {
+      "name": "Template name",
+      "namePlaceholder": "e.g. Bug report",
+      "defaultTitle": "Default task title",
+      "titlePlaceholder": "[Bug] ",
+      "defaultDescription": "Default description",
+      "descriptionPlaceholder": "Pre-filled description (editable per task)",
+      "defaultPriority": "Default priority",
+      "defaultLabels": "Default labels"
+    },
+    "errors": {
+      "nameRequired": "Template name is required.",
+      "titleRequired": "Default title is required."
+    },
+    "saveError": "Could not save the template.",
+    "cancel": "Cancel",
+    "saving": "Saving…",
+    "saveChanges": "Save changes",
+    "create": "Create template",
+    "toast": {
+      "updated": "Template updated",
+      "created": "Template created",
+      "deleted": "Template deleted",
+      "deleteFailed": "Could not delete template"
+    },
+    "use": "Use",
+    "useDialog": {
+      "title": "New task from “{{name}}”",
+      "desc": "Pre-filled from the template — edit freely before creating.",
+      "titleLabel": "Title",
+      "descriptionLabel": "Description",
+      "priorityLabel": "Priority",
+      "labelsAttached_one": "{{count}} label will be attached.",
+      "labelsAttached_other": "{{count}} labels will be attached.",
+      "creating": "Creating…",
+      "create": "Create task"
+    }
+  },
+  "sidebar": {
+    "showAria": "Show detail sidebar",
+    "hideAria": "Hide detail sidebar (⌘.)",
+    "resizeAria": "Resize sidebar",
+    "regionAria": "Task detail"
+  },
+  "contribution": {
+    "searchProjects": "Search projects…",
+    "searchTasks": "Search tasks…",
+    "closeAria": "Close picker",
+    "loadProjectsFailed": "Could not load projects.",
+    "loadTasksFailed": "Could not load tasks.",
+    "retry": "Retry",
+    "noMatchProjects": "No projects match — try a different search.",
+    "noMatchTasks": "No tasks match — try a different search."
+  },
+  "dashboard": {
+    "noTeamTitle": "No team selected",
+    "noTeamDesc": "Pick a team to see its dashboard.",
+    "forbiddenTitle": "Manager access required",
+    "forbiddenDesc": "The dashboard is available to managers and admins of this team.",
+    "errorTitle": "Dashboard unavailable",
+    "errorDesc": "Try again in a moment.",
+    "title": "Team dashboard",
+    "windowAria": "Dashboard window",
+    "window": {
+      "7d": "Last 7 days",
+      "30d": "Last 30 days",
+      "90d": "Last 90 days"
+    },
+    "deltaNew": "new",
+    "noPrevData": "no previous-window data",
+    "throughputDelta": "{{pct}} vs previous {{days}} days",
+    "kpi": {
+      "throughput": "Throughput",
+      "cycle": "Cycle time",
+      "lead": "Lead time",
+      "wip": "WIP",
+      "overdue": "Overdue",
+      "deadlineRisk": "Deadline risk",
+      "reviewLoad": "Review load",
+      "capacity": "Capacity"
+    },
+    "sub": {
+      "cycle": "start → close, closed tasks",
+      "lead": "creation → close",
+      "wip": "in progress or in review",
+      "overdue": "open tasks past due",
+      "deadlineRisk": "deadline within 7 days",
+      "reviewLoad": "awaiting review",
+      "capacity": "assigned open / capacity"
+    },
+    "throughputChartAria": "Throughput chart",
+    "throughputHeading": "Throughput — current vs previous",
+    "throughputEmptyAria": "No tasks were closed in this period or the previous one",
+    "noDataPeriod": "No data for this period",
+    "throughputBarsAria": "Bar chart: {{current}} closed in this window versus {{previous}} in the previous one",
+    "current": "current",
+    "previous": "previous",
+    "priorityMixAria": "Priority mix",
+    "priorityMixHeading": "Open tasks by priority",
+    "noOpenTasks": "No open tasks.",
+    "reviewAria": "Review load per reporter",
+    "reviewHeading": "Tasks awaiting review, by reporter",
+    "nothingInReview": "Nothing in review.",
+    "col": {
+      "reporter": "Reporter",
+      "inReview": "In review"
+    }
+  },
+  "workload": {
+    "noTeamTitle": "No team selected",
+    "noTeamDesc": "Select a team to see its workload.",
+    "teamFallback": "Team",
+    "title": "{{team}} workload",
+    "desc": "Distribution of open tasks per member. Task counts are not effort, productivity, or capacity.",
+    "filterProjectAria": "Filter by project",
+    "allProjects": "All projects",
+    "dueAfterAria": "Due on or after",
+    "dueBeforeAria": "Due on or before",
+    "errorTitle": "Could not load workload",
+    "errorDesc": "You may not be a member of this team.",
+    "emptyTitle": "Nothing assigned",
+    "emptyDesc": "No open tasks match the current filters.",
+    "col": {
+      "member": "Member",
+      "overdue": "Overdue",
+      "total": "Total"
+    },
+    "countTitle": "{{count}} {{status}} for {{name}}",
+    "unassigned": "Unassigned"
+  },
+  "capacity": {
+    "unavailableTitle": "Capacity unavailable",
+    "unavailableDesc": "Select a valid team, or ask an administrator for access — capacity is a Manager-level view.",
+    "title": "Capacity",
+    "desc": "How much work each member can take on in the coming window, against their personal limit.",
+    "windowAria": "Capacity window",
+    "thisWeek": "This week",
+    "thisMonth": "This month",
+    "sortAria": "Sort members",
+    "sort": {
+      "utilization": "Sort by utilization",
+      "overdue": "Sort by overdue",
+      "name": "Sort by name"
+    },
+    "summary": {
+      "openTasks": "Open tasks",
+      "totalCapacity": "Total capacity",
+      "utilization": "Utilization"
+    },
+    "noMembersTitle": "No members to measure",
+    "noMembersDesc": "Add members to the team to see capacity.",
+    "noOpenTasksTitle": "No open tasks",
+    "noOpenTasksDesc": "No open tasks this window — everyone has room to take on work.",
+    "col": {
+      "member": "Member",
+      "open": "Open",
+      "overdue": "Overdue",
+      "dueThisWeek": "Due this week",
+      "dueThisMonth": "Due this month",
+      "capacity": "Capacity",
+      "utilization": "Utilization"
+    }
+  }
+}

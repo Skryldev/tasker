@@ -212,6 +212,68 @@ pub async fn record_batch(conn: &mut Conn<'_>, batch: &[NewNotification]) -> Res
     Ok(())
 }
 
+/// A taskless notification (Phase 8B, Task 5): automation on an integration
+/// event has no task context, so `task_id` stays NULL and the summary is the
+/// only user-facing content.
+#[derive(Debug, Clone)]
+pub struct TasklessNotification {
+    pub event: &'static str,
+    pub recipient_id: String,
+    pub actor_id: String,
+    pub summary: String,
+}
+
+/// Insert a batch of taskless notifications inside the caller's transaction.
+/// Same suppression and preference rules as [`record_batch`] (duplicates
+/// collapsed, self-notifications suppressed, gated events respect the
+/// recipient's preferences); the notification row carries `task_id NULL`.
+pub async fn record_taskless_batch(
+    conn: &mut Conn<'_>,
+    batch: &[TasklessNotification],
+) -> Result<(), AppError> {
+    let mut seen: std::collections::HashSet<(&str, &str)> = std::collections::HashSet::new();
+    let mut gated: Vec<String> = batch
+        .iter()
+        .filter(|e| GATEABLE_EVENTS.contains(&e.event))
+        .map(|e| e.recipient_id.clone())
+        .collect();
+    gated.sort();
+    gated.dedup();
+    let prefs = prefs_for(conn, &gated).await?;
+    for entry in batch {
+        if entry.recipient_id == entry.actor_id {
+            continue;
+        }
+        if !seen.insert((entry.event, entry.recipient_id.as_str())) {
+            continue;
+        }
+        if GATEABLE_EVENTS.contains(&entry.event) {
+            let allowed = match prefs.get(&entry.recipient_id) {
+                Some(p) => p.allows(entry.event),
+                None => true,
+            };
+            if !allowed {
+                continue;
+            }
+        }
+        let mut args = Args::new();
+        args.s(util::new_id())
+            .s(&entry.recipient_id)
+            .s(entry.event)
+            .opt_i(None::<i64>) // taskless: task_id NULL
+            .s(&entry.actor_id)
+            .s(util::truncate(&entry.summary, 300))
+            .i(util::now_ms());
+        conn.execute(
+            "INSERT INTO notifications (id, recipient_id, event, task_id, actor_id, summary, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            args,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Notification {
     pub id: String,
@@ -416,7 +478,10 @@ async fn toggle_pin(
     let target = body.and_then(|Json(b)| b.pinned).unwrap_or(!current);
     if target != current {
         let mut args = Args::new();
-        args.b(target).i(util::now_ms()).s(&notification_id).s(&user.id);
+        args.b(target)
+            .i(util::now_ms())
+            .s(&notification_id)
+            .s(&user.id);
         conn.execute(
             "UPDATE notifications SET pinned = ?, pinned_at = ? \
              WHERE id = ? AND recipient_id = ?",
@@ -484,8 +549,5 @@ pub fn routes() -> Router<AppState> {
         .route("/notifications/counts", get(tab_counts))
         .route("/notifications/read-all", post(mark_all_read))
         .route("/notifications/{notification_id}/read", post(mark_read))
-        .route(
-            "/notifications/{notification_id}/pin",
-            post(toggle_pin),
-        )
+        .route("/notifications/{notification_id}/pin", post(toggle_pin))
 }

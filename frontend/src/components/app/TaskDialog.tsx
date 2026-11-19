@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Task } from "@/api/client";
 import { useAuth } from "@/lib/auth";
@@ -21,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { PRIORITIES, PRIORITY_LABELS, TASK_STATUSES, STATUS_LABELS, type Priority, type TaskStatus } from "@/lib/utils";
+import { PRIORITIES, TASK_STATUSES, priorityKey, statusKey, type Priority, type TaskStatus } from "@/lib/utils";
 import { PRIORITY_META } from "@/lib/priority-meta";
 import { cn } from "@/lib/utils";
 import { useLabels, useMembers, useTemplates } from "@/api/hooks";
@@ -52,6 +53,7 @@ interface FormState {
 
 export function TaskDialog(props: TaskDialogProps) {
   const { open, onOpenChange, teamId, projectId, task, parentTaskId } = props;
+  const { t } = useTranslation("tasks");
   const { push } = useToast();
   const qc = useQueryClient();
   const { user } = useAuth();
@@ -186,7 +188,14 @@ export function TaskDialog(props: TaskDialogProps) {
       return api.createTask(projectId, body);
     },
     onSuccess: () => {
-      push("success", task ? "Task updated" : parentTaskId ? "Subtask created" : "Task created");
+      push(
+        "success",
+        task
+          ? t("dialog.toast.updated")
+          : parentTaskId
+            ? t("dialog.toast.subtaskCreated")
+            : t("dialog.toast.created"),
+      );
       void qc.invalidateQueries({ queryKey: ["task"] });
       void qc.invalidateQueries({ queryKey: ["board"] });
       void qc.invalidateQueries({ queryKey: ["tasks"] });
@@ -200,7 +209,7 @@ export function TaskDialog(props: TaskDialogProps) {
         for (const e of error.problem.errors) errors[e.field] = e.message;
         setFieldErrors(errors);
       } else {
-        push("error", "Could not save task", error.message);
+        push("error", t("dialog.toast.saveFailed"), error.message);
       }
     },
   });
@@ -208,14 +217,14 @@ export function TaskDialog(props: TaskDialogProps) {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.title.trim()) {
-      setFieldErrors({ title: "Title is required" });
+      setFieldErrors({ title: t("dialog.errors.titleRequired") });
       return;
     }
     // Phase 12 rule, enforced inline: deadline must be on or after the due
     // date when both are set (the server enforces the same rule).
     if (form.due_date && form.deadline && form.deadline < form.due_date) {
       setFieldErrors({
-        deadline: "The deadline must be on or after the due date",
+        deadline: t("dialog.errors.deadlineAfterDue"),
       });
       return;
     }
@@ -227,30 +236,30 @@ export function TaskDialog(props: TaskDialogProps) {
       <DialogContent wide>
         <DialogHeader>
           <DialogTitle>
-            {task ? "Edit task" : parentTaskId ? "New subtask" : "New task"}
+            {task ? t("dialog.title.edit") : parentTaskId ? t("dialog.title.newSubtask") : t("dialog.title.new")}
           </DialogTitle>
           <DialogDescription>
-            {task ? "Changes are recorded in the task history." : "Fill in the task details."}
+            {task ? t("dialog.desc.edit") : t("dialog.desc.new")}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
           {!task && !parentTaskId ? (
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-template">From template (optional)</Label>
+              <Label htmlFor="task-template">{t("dialog.template.label")}</Label>
               <Select
                 value={templateId}
                 onValueChange={(v) => void applyTemplate(v)}
               >
                 <SelectTrigger id="task-template" data-testid="template-picker">
-                  <SelectValue placeholder="Start blank or pick a template" />
+                  <SelectValue placeholder={t("dialog.template.placeholder")} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__blank__" data-testid="template-none">
-                    Start blank
+                    {t("dialog.template.startBlank")}
                   </SelectItem>
-                  {(templates.data?.items ?? []).map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      {t.name}
+                  {(templates.data?.items ?? []).map((tpl) => (
+                    <SelectItem key={tpl.id} value={tpl.id}>
+                      {tpl.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -258,14 +267,15 @@ export function TaskDialog(props: TaskDialogProps) {
             </div>
           ) : null}
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="task-title">Title</Label>
+            <Label htmlFor="task-title">{t("dialog.fields.title")}</Label>
             <Input
               id="task-title"
               value={form.title}
               onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              placeholder="Short, actionable summary"
+              placeholder={t("dialog.fields.titlePlaceholder")}
               autoFocus
               aria-invalid={Boolean(fieldErrors.title)}
+              dir="auto"
               data-testid="task-title-input"
             />
             {fieldErrors.title ? (
@@ -273,19 +283,19 @@ export function TaskDialog(props: TaskDialogProps) {
             ) : null}
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="task-description">Description</Label>
+            <Label htmlFor="task-description">{t("dialog.fields.description")}</Label>
             <Textarea
               id="task-description"
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              placeholder="Context, links, acceptance criteria…"
+              placeholder={t("dialog.fields.descriptionPlaceholder")}
               rows={3}
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             {task ? null : (
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="task-status">Status</Label>
+                <Label htmlFor="task-status">{t("dialog.fields.status")}</Label>
                 <Select
                   value={form.status}
                   onValueChange={(v) => setForm((f) => ({ ...f, status: v as TaskStatus }))}
@@ -296,7 +306,7 @@ export function TaskDialog(props: TaskDialogProps) {
                   <SelectContent>
                     {selectableStatuses.map((s) => (
                       <SelectItem key={s} value={s}>
-                        {STATUS_LABELS[s]}
+                        {t(statusKey(s))}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -304,7 +314,7 @@ export function TaskDialog(props: TaskDialogProps) {
               </div>
             )}
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-priority">Priority</Label>
+              <Label htmlFor="task-priority">{t("dialog.fields.priority")}</Label>
               <Select
                 value={form.priority}
                 onValueChange={(v) => setForm((f) => ({ ...f, priority: v as Priority }))}
@@ -321,7 +331,7 @@ export function TaskDialog(props: TaskDialogProps) {
                           <meta.icon className={cn("h-4 w-4 shrink-0", meta.color)} aria-hidden />
                           <span className="flex flex-col">
                             <span className="text-sm font-semibold leading-tight">
-                              {PRIORITY_LABELS[p]}
+                              {t(priorityKey(p))}
                             </span>
                             <span
                               id={`priority-desc-${p}`}
@@ -339,7 +349,7 @@ export function TaskDialog(props: TaskDialogProps) {
               </Select>
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-assignee">Assignee</Label>
+              <Label htmlFor="task-assignee">{t("dialog.fields.assignee")}</Label>
               <Select
                 value={form.assignee_id}
                 onValueChange={(v) => setForm((f) => ({ ...f, assignee_id: v }))}
@@ -348,7 +358,7 @@ export function TaskDialog(props: TaskDialogProps) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Unassigned</SelectItem>
+                  <SelectItem value="none">{t("dialog.fields.unassigned")}</SelectItem>
                   {members.data?.items.map((m) => (
                     <SelectItem key={m.user.id} value={m.user.id}>
                       {m.user.display_name}
@@ -362,7 +372,7 @@ export function TaskDialog(props: TaskDialogProps) {
             </div>
             {canPickReporter ? (
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="task-reporter">Reporter</Label>
+                <Label htmlFor="task-reporter">{t("dialog.fields.reporter")}</Label>
                 <Select
                   value={form.reporter_id}
                   onValueChange={(v) => setForm((f) => ({ ...f, reporter_id: v }))}
@@ -372,7 +382,7 @@ export function TaskDialog(props: TaskDialogProps) {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="creator" data-testid="reporter-you">
-                      {user ? `${user.display_name} (you)` : "Me (creator)"}
+                      {user ? t("dialog.fields.reporterYou", { name: user.display_name }) : t("dialog.fields.reporterMe")}
                     </SelectItem>
                     {members.data?.items.map((m) => (
                       <SelectItem key={m.user.id} value={m.user.id}>
@@ -387,27 +397,27 @@ export function TaskDialog(props: TaskDialogProps) {
               </div>
             ) : null}
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-due">Due date</Label>
+              <Label htmlFor="task-due">{t("dialog.fields.dueDate")}</Label>
               <DateField
                 id="task-due"
                 value={form.due_date || null}
                 onChange={(v) => setForm((f) => ({ ...f, due_date: v }))}
-                ariaLabel="Due date"
+                ariaLabel={t("dialog.fields.dueDate")}
               />
               {fieldErrors.due_date ? (
                 <p className="text-2xs text-destructive" role="alert">{fieldErrors.due_date}</p>
               ) : null}
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-deadline">Deadline</Label>
+              <Label htmlFor="task-deadline">{t("dialog.fields.deadline")}</Label>
               <DateField
                 id="task-deadline"
                 value={form.deadline || null}
                 onChange={(v) => setForm((f) => ({ ...f, deadline: v }))}
-                ariaLabel="Deadline"
-                placeholder="Set deadline"
+                ariaLabel={t("dialog.fields.deadline")}
+                placeholder={t("dialog.fields.deadlinePlaceholder")}
               />
-              <p className="text-2xs text-muted-foreground">Hard cutoff; must be on or after the due date.</p>
+              <p className="text-2xs text-muted-foreground">{t("dialog.fields.deadlineHint")}</p>
               {fieldErrors.deadline ? (
                 <p className="text-2xs text-destructive" role="alert">{fieldErrors.deadline}</p>
               ) : null}
@@ -415,7 +425,7 @@ export function TaskDialog(props: TaskDialogProps) {
           </div>
           {labels.data && labels.data.items.length > 0 ? (
             <div className="flex flex-col gap-1.5">
-              <Label>Labels</Label>
+              <Label>{t("dialog.fields.labels")}</Label>
               <div className="flex flex-wrap gap-1.5" data-testid="label-picker">
                 {labels.data.items.map((label) => {
                   const active = selectedLabels.includes(label.id);
@@ -452,10 +462,10 @@ export function TaskDialog(props: TaskDialogProps) {
           ) : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("dialog.cancel")}
             </Button>
             <Button type="submit" disabled={mutation.isPending} data-testid="task-submit">
-              {mutation.isPending ? "Saving…" : task ? "Save changes" : "Create task"}
+              {mutation.isPending ? t("dialog.saving") : task ? t("dialog.saveChanges") : t("dialog.createTask")}
             </Button>
           </DialogFooter>
         </form>

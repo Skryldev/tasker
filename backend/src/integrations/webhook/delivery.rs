@@ -413,10 +413,11 @@ pub async fn domain_event_exists(
         .is_some())
 }
 
-/// Persist the normalized integration event with full provenance. **Must run
-/// inside the processing transaction** together with the fenced delivery
-/// completion: a crash before commit leaves nothing, after commit both the
-/// event and the `processed` delivery exist. Taskless by design
+/// Persist the normalized integration event with full provenance and return
+/// the domain event id. **Must run inside the processing transaction**
+/// together with rule evaluation and the fenced delivery completion: a crash
+/// before commit leaves nothing, after commit the event, any executions and
+/// intents, and the `processed` delivery all exist. Taskless by design
 /// (`task_id NULL`), external-actor-safe (`actor_id NULL` — external actors
 /// never become Tasker users), and traceable to its delivery.
 pub async fn insert_integration_domain_event(
@@ -425,7 +426,7 @@ pub async fn insert_integration_domain_event(
     event_type: crate::rules::events::IntegrationTriggerType,
     occurred_at: i64,
     state_json: &str,
-) -> Result<(), AppError> {
+) -> Result<String, AppError> {
     if state_json.chars().count() > NORMALIZED_STATE_MAX_CHARS {
         return Err(AppError::internal(
             "normalized state exceeds the documented snapshot bound",
@@ -434,8 +435,9 @@ pub async fn insert_integration_domain_event(
     // Placeholders in order (13): id, event_type, schema_version, team_id,
     // task_id, actor_id, previous_state, new_state, origin,
     // causing_execution_id, occurred_at, integration_id, source_delivery_id.
+    let event_id = util::new_id();
     let mut args = Args::new();
-    args.s(util::new_id())
+    args.s(&event_id)
         .s(event_type.as_str())
         .i(1i64)
         .s(&claimed.team_id)
@@ -456,7 +458,7 @@ pub async fn insert_integration_domain_event(
         args,
     )
     .await?;
-    Ok(())
+    Ok(event_id)
 }
 
 /// Replay a dead-lettered delivery back into the queue. **Must run inside

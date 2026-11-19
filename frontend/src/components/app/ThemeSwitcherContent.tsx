@@ -6,6 +6,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { useTranslation } from "react-i18next";
 import { THEMES, type ThemeId } from "@/lib/theme";
 
 /**
@@ -23,9 +24,10 @@ export function ThemeSwitcherContent({
   onPreview: (id: ThemeId | null) => void;
   onSelect: (id: ThemeId) => void;
 }) {
+  const { t } = useTranslation("common");
   return (
     <DropdownMenuContent align="end" className="w-52">
-      <DropdownMenuLabel>Theme — hover to preview</DropdownMenuLabel>
+      <DropdownMenuLabel>{t("theme.hoverPreview")}</DropdownMenuLabel>
       {/* WS1: themes grouped by appearance, light first. */}
       {(["light", "dark"] as const).map((group) => (
         <Fragment key={group}>

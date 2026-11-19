@@ -440,7 +440,7 @@ export function TaskDetailBody({
                 <span className={cn("truncate", sub.status === "closed" && "text-muted-foreground line-through")}>
                   {sub.title}
                 </span>
-                <PriorityBadgeInline priority={sub.priority} className="ml-auto" />
+                <PriorityBadgeInline priority={sub.priority} className="ms-auto" />
               </li>
             ))}
           </ul>
@@ -737,7 +737,7 @@ export function MetadataBand({
               </>
             ) : (
               <span className="text-muted-foreground">
-                <Plus className="mr-0.5 inline h-3 w-3" aria-hidden /> Assign
+                <Plus className="me-0.5 inline h-3 w-3" aria-hidden /> Assign
               </span>
             )}
             <ChevronDown className="h-3 w-3 text-muted-foreground" aria-hidden />
@@ -913,7 +913,7 @@ export function MetadataBand({
               </>
             ) : (
               <span className="text-muted-foreground">
-                <Plus className="mr-0.5 inline h-3 w-3" aria-hidden /> Label
+                <Plus className="me-0.5 inline h-3 w-3" aria-hidden /> Label
               </span>
             )}
           </button>
@@ -1043,7 +1043,7 @@ function DescriptionBlock({
         <button
           type="button"
           onClick={start}
-          className="w-full px-2 py-1.5 text-left text-sm leading-relaxed text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full px-2 py-1.5 text-start text-sm leading-relaxed text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label="Edit description"
         >
           {renderMarkdown(value, "desc")}
@@ -1052,7 +1052,7 @@ function DescriptionBlock({
         <button
           type="button"
           onClick={start}
-          className="w-full px-2 py-1.5 text-left text-sm text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full px-2 py-1.5 text-start text-sm text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           data-testid="description-empty"
         >
           Add a description…
@@ -1063,7 +1063,7 @@ function DescriptionBlock({
 }
 
 // ---------------------------------------------------------------------------
-// Activity: compact left-rule timeline, grouped by day, collapsed >10 events.
+// Activity: compact start-rule timeline, grouped by day, collapsed >10 events.
 // ---------------------------------------------------------------------------
 
 const ACTIVITY_COLLAPSE_AT = 10;
@@ -1121,10 +1121,10 @@ function ActivitySection({
               <p className="mb-1.5 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
                 {day}
               </p>
-              <ol className="flex flex-col gap-2.5 border-l pl-3">
+              <ol className="flex flex-col gap-2.5 border-s ps-3">
                 {events.map((event) => (
                   <li key={event.id} className="relative flex items-start gap-2.5 text-xs">
-                    <span className="absolute -left-[17px] top-2 h-1.5 w-1.5 rounded-full bg-border" aria-hidden />
+                    <span className="absolute -start-[17px] top-2 h-1.5 w-1.5 rounded-full bg-border" aria-hidden />
                     {event.actor ? (
                       <Avatar
                         name={event.actor.display_name}
@@ -1344,7 +1344,7 @@ function AttachmentsSection({
               type="button"
               variant="ghost"
               size="icon-sm"
-              className="ml-auto"
+              className="ms-auto"
               aria-label="Upload attachment"
               onClick={() => inputRef.current?.click()}
               data-testid="attachment-upload"

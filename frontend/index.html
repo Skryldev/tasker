@@ -35,6 +35,46 @@
           if (dark) {
             document.documentElement.classList.add("dark");
           }
+          // Locale (Phase 15, ADR-0024): URL segment is the source of truth;
+          // prefixless URLs fall back to the saved preference, then the
+          // browser languages. main.tsx performs the actual redirect after
+          // these attributes are applied, so the first paint is correct.
+          var locales = ["fa", "en", "fr"];
+          var dirs = { fa: "rtl", en: "ltr", fr: "ltr" };
+          var fonts = {
+            fa: ["/fonts/Vazirmatn-UI-Regular.woff2", "/fonts/Vazirmatn-UI-Medium.woff2"],
+            en: ["/fonts/Inter-Variable-latin.woff2"],
+            fr: ["/fonts/Inter-Variable-latin.woff2"],
+          };
+          var seg = location.pathname.split("/")[1];
+          var locale = locales.indexOf(seg) !== -1 ? seg : null;
+          if (!locale) {
+            var saved = localStorage.getItem("tasker:locale");
+            if (saved && locales.indexOf(saved) !== -1) {
+              locale = saved;
+            } else {
+              var langs = navigator.languages || [navigator.language || "en"];
+              for (var i = 0; i < langs.length && !locale; i++) {
+                var base = String(langs[i]).toLowerCase().split("-")[0];
+                if (locales.indexOf(base) !== -1) locale = base;
+              }
+            }
+          }
+          if (!locale) locale = "en";
+          document.documentElement.lang = locale;
+          document.documentElement.dir = dirs[locale];
+          document.documentElement.dataset.locale = locale;
+          // Preload only the active locale's primary fonts (font-display:
+          // swap keeps text visible while the swap completes).
+          for (var j = 0; j < fonts[locale].length; j++) {
+            var link = document.createElement("link");
+            link.rel = "preload";
+            link.as = "font";
+            link.type = "font/woff2";
+            link.crossOrigin = "anonymous";
+            link.href = fonts[locale][j];
+            document.head.appendChild(link);
+          }
         } catch (e) {
           /* noop */
         }

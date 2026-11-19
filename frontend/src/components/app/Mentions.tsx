@@ -75,6 +75,7 @@ export function CommentComposer({
   onSubmit,
   pending,
   testIdInput = "comment-input",
+  // dir="auto" lets Persian comments flow RTL while Latin fragments stay LTR.
   testIdSubmit = "comment-submit",
 }: {
   teamId: string;
@@ -143,6 +144,7 @@ export function CommentComposer({
   return (
     <div className="relative">
       <textarea
+        dir="auto"
         value={value}
         onChange={(e) => {
           onChange(e.target.value);
@@ -159,7 +161,7 @@ export function CommentComposer({
       />
       {matches.length > 0 ? (
         <ul
-          className="absolute bottom-full left-0 z-10 mb-1 w-64 overflow-hidden rounded-md border bg-popover shadow-md"
+          className="absolute bottom-full start-0 z-10 mb-1 w-64 overflow-hidden rounded-md border bg-popover shadow-md"
           role="listbox"
           aria-label="Mention a team member"
           data-testid="mention-list"
@@ -176,7 +178,7 @@ export function CommentComposer({
                   applyMention(m.user.email);
                 }}
                 className={cn(
-                  "flex w-full flex-col items-start px-2.5 py-1.5 text-left text-sm",
+                  "flex w-full flex-col items-start px-2.5 py-1.5 text-start text-sm",
                   i === highlight ? "bg-accent" : "",
                 )}
               >

@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { TriangleAlert } from "lucide-react";
 import {
   Dialog,
@@ -41,6 +42,9 @@ export function ConfirmDialog({
   /** Optional extra content rendered between the description and the actions. */
   children?: ReactNode;
 }) {
+  const { t } = useTranslation("common");
+  const cancel = cancelLabel ?? t("actions.cancel");
+  const confirm = confirmLabel ?? t("actions.confirm");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent role="alertdialog" className="max-w-sm">
@@ -56,7 +60,7 @@ export function ConfirmDialog({
         {children}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
-            {cancelLabel}
+            {cancel}
           </Button>
           <Button
             variant={destructive ? "destructive" : "default"}
@@ -64,7 +68,7 @@ export function ConfirmDialog({
             disabled={pending}
             autoFocus
           >
-            {pending ? "Working…" : confirmLabel}
+            {pending ? t("actions.working") : confirm}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -22,12 +22,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/app/EmptyState";
 import { useWorkspace } from "@/lib/workspace";
 import { timeAgo } from "@/lib/utils";
 
 export function ProjectsPage() {
+  const { t } = useTranslation("common");
   const { teamId } = useWorkspace();
   const [includeArchived, setIncludeArchived] = useState(false);
   const [createOpen, setCreateOpen] = useState(
@@ -39,8 +41,8 @@ export function ProjectsPage() {
     return (
       <EmptyState
         icon={<FolderKanban className="h-8 w-8" />}
-        title="No team selected"
-        description="Create or select a team to see its projects."
+        title={t("projects.noTeam")}
+        description={t("projects.noTeamDesc")}
       />
     );
   }
@@ -49,8 +51,8 @@ export function ProjectsPage() {
     <div className="mx-auto max-w-5xl p-6">
       <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold">Projects</h1>
-          <p className="text-xs text-muted-foreground">Work streams inside your team.</p>
+          <h1 className="text-lg font-semibold">{t("nav.projects")}</h1>
+          <p className="text-xs text-muted-foreground">{t("projects.subtitle")}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -59,10 +61,10 @@ export function ProjectsPage() {
             onClick={() => setIncludeArchived((v) => !v)}
             aria-pressed={includeArchived}
           >
-            <Archive /> Archived
+            <Archive /> {t("projects.archived")}
           </Button>
           <Button size="sm" onClick={() => setCreateOpen(true)} data-testid="create-project">
-            <Plus /> New project
+            <Plus /> {t("projects.new")}
           </Button>
         </div>
       </header>
@@ -76,11 +78,11 @@ export function ProjectsPage() {
       ) : (projects.data?.items.length ?? 0) === 0 ? (
         <EmptyState
           icon={<FolderKanban className="h-8 w-8" />}
-          title={includeArchived ? "No projects at all" : "No active projects"}
-          description="Create the first project to start tracking work."
+          title={includeArchived ? t("projects.noneAtAll") : t("projects.noneActive")}
+          description={t("projects.createFirst")}
           action={
             <Button onClick={() => setCreateOpen(true)}>
-              <Plus /> New project
+              <Plus /> {t("projects.new")}
             </Button>
           }
         />
@@ -98,24 +100,25 @@ export function ProjectsPage() {
 }
 
 function ProjectCard({ project }: { project: Project }) {
+  const { t } = useTranslation("common");
   const { push } = useToast();
   const qc = useQueryClient();
   const archived = project.status === "archived";
   const setArchived = useMutation({
     mutationFn: () => api.setProjectArchived(project.id, !archived),
     onSuccess: () => {
-      push("success", archived ? "Project restored" : "Project archived");
+      push("success", archived ? t("projects.restored") : t("projects.archivedToast"));
       void qc.invalidateQueries({ queryKey: ["projects"] });
     },
     onError: (error) =>
-      push("error", "Could not change project", error instanceof Error ? error.message : undefined),
+      push("error", t("projects.changeFailed"), error instanceof Error ? error.message : undefined),
   });
 
   return (
     <li className="group relative">
       <Link
         to={`/projects/${project.id}`}
-        className={`flex h-full flex-col gap-2 rounded-lg border bg-card p-4 shadow-sm transition-all hover:border-primary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+        className={`flex h-full flex-col gap-2 rounded-sg border bg-card p-4 shadow-sm transition-all hover:border-primary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
           archived ? "opacity-60" : ""
         }`}
       >
@@ -124,17 +127,17 @@ function ProjectCard({ project }: { project: Project }) {
             <FolderKanban className="h-4 w-4" />
           </span>
           <h2 className="truncate text-sm font-semibold">{project.name}</h2>
-          {archived ? <Badge variant="muted" className="ml-auto">Archived</Badge> : null}
+          {archived ? <Badge variant="muted" className="ms-auto">{t("projects.archived")}</Badge> : null}
         </div>
         <p className="line-clamp-2 min-h-[2rem] text-xs text-muted-foreground">
-          {project.description || "No description"}
+          {project.description || t("projects.noDescription")}
         </p>
         <div className="mt-auto flex items-center justify-between text-2xs text-muted-foreground">
-          <span>{project.open_task_count ?? 0} open tasks</span>
-          <span>Updated {timeAgo(project.updated_at)}</span>
+          <span>{t("projects.openTasks", { count: project.open_task_count ?? 0 })}</span>
+          <span>{t("projects.updated", { when: timeAgo(project.updated_at) })}</span>
         </div>
       </Link>
-      <div className="absolute right-2 top-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+      <div className="absolute end-2 top-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
         <ProjectCardMenu
           project={project}
           archived={archived}
@@ -155,6 +158,7 @@ function ProjectCardMenu({
   archived: boolean;
   onToggleArchive: () => void;
 }) {
+  const { t } = useTranslation("common");
   const { push } = useToast();
   const qc = useQueryClient();
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -163,18 +167,18 @@ function ProjectCardMenu({
     mutationFn: () => api.deleteProject(project.id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["projects"] });
-      push("success", "Project deleted", "Undo is available for a few seconds.", {
+      push("success", t("projects.deleted"), t("projects.undoAvailable"), {
         action: {
-          label: "Undo",
+          label: t("projects.undo"),
           onClick: () => {
             api
               .restoreProject(project.id)
               .then(() => {
                 void qc.invalidateQueries({ queryKey: ["projects"] });
-                push("success", "Project restored");
+                push("success", t("projects.restored"));
               })
               .catch((error) =>
-                push("error", "Could not restore", error instanceof Error ? error.message : undefined),
+                push("error", t("projects.restoreFailed"), error instanceof Error ? error.message : undefined),
               );
           },
         },
@@ -182,7 +186,7 @@ function ProjectCardMenu({
       });
     },
     onError: (error) =>
-      push("error", "Could not delete project", error instanceof Error ? error.message : undefined),
+      push("error", t("projects.deleteFailed"), error instanceof Error ? error.message : undefined),
   });
 
   return (
@@ -192,7 +196,7 @@ function ProjectCardMenu({
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={`Actions for ${project.name}`}
+            aria-label={t("projects.actionsAria", { name: project.name })}
             data-testid={`project-menu-${project.id}`}
           >
             <MoreHorizontal />
@@ -201,19 +205,19 @@ function ProjectCardMenu({
         <DropdownMenuContent align="end" className="w-44">
           <DropdownMenuItem onSelect={onToggleArchive}>
             {archived ? <ArchiveRestore /> : <Archive />}
-            {archived ? "Restore project" : "Archive project"}
+            {archived ? t("projects.restore") : t("projects.archive")}
           </DropdownMenuItem>
           <DropdownMenuItem destructive onSelect={() => setDeleteOpen(true)} data-testid="delete-project">
-            <Trash2 /> Delete project
+            <Trash2 /> {t("projects.delete")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <ConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        title="Delete this project?"
-        description={`"${project.name}" and its tasks will be hidden from everyone. You can restore it within 30 days from the team's trash, or undo right now.`}
-        confirmLabel="Delete project"
+        title={t("projects.deleteConfirmTitle")}
+        description={t("projects.deleteConfirmDesc", { name: project.name })}
+        confirmLabel={t("projects.delete")}
         pending={remove.isPending}
         onConfirm={() => {
           setDeleteOpen(false);
@@ -233,6 +237,7 @@ function CreateProjectDialog({
   onOpenChange: (v: boolean) => void;
   teamId: string;
 }) {
+  const { t } = useTranslation("common");
   const { push } = useToast();
   const qc = useQueryClient();
   const [name, setName] = useState("");
@@ -242,29 +247,29 @@ function CreateProjectDialog({
   const create = useMutation({
     mutationFn: () => api.createProject(teamId, { name, description: description || undefined }),
     onSuccess: () => {
-      push("success", "Project created");
+      push("success", t("projects.created"));
       void qc.invalidateQueries({ queryKey: ["projects", teamId] });
       setName("");
       setDescription("");
       onOpenChange(false);
     },
     onError: (err) =>
-      setError(err instanceof ApiError ? err.message : "Could not create the project."),
+      setError(err instanceof ApiError ? err.message : t("projects.createFailed")),
   });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New project</DialogTitle>
-          <DialogDescription>Group related tasks into a project.</DialogDescription>
+          <DialogTitle>{t("projects.new")}</DialogTitle>
+          <DialogDescription>{t("projects.newDesc")}</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-3"
           onSubmit={(e) => {
             e.preventDefault();
             if (!name.trim()) {
-              setError("Project name is required.");
+              setError(t("projects.nameRequired"));
               return;
             }
             setError(null);
@@ -273,33 +278,33 @@ function CreateProjectDialog({
           noValidate
         >
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="project-name">Name</Label>
+            <Label htmlFor="project-name">{t("projects.nameLabel")}</Label>
             <Input
               id="project-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Website relaunch"
+              placeholder={t("projects.namePlaceholder")}
               autoFocus
               data-testid="project-name-input"
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="project-description">Description</Label>
+            <Label htmlFor="project-description">{t("projects.descriptionLabel")}</Label>
             <Textarea
               id="project-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="What is this project about?"
+              placeholder={t("projects.descriptionPlaceholder")}
               rows={3}
             />
           </div>
           {error ? <p className="text-2xs text-destructive" role="alert">{error}</p> : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("actions.cancel")}
             </Button>
             <Button type="submit" disabled={create.isPending} data-testid="project-submit">
-              {create.isPending ? "Creating…" : "Create project"}
+              {create.isPending ? t("projects.creating") : t("projects.create")}
             </Button>
           </DialogFooter>
         </form>

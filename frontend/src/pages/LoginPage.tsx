@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { ClipboardList, ShieldCheck } from "lucide-react";
 import { api, ApiError } from "@/api/client";
 import { useAuth } from "@/lib/auth";
@@ -11,22 +12,30 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 
-const loginSchema = z.object({
-  email: z.string().min(1, "Email is required").email("Enter a valid email address"),
-  password: z.string().min(1, "Password is required"),
-});
-type LoginValues = z.infer<typeof loginSchema>;
+// Validation messages live in the common namespace and are resolved through
+// t() at render time (zod messages are stored keys, not literals).
+const loginSchema = (t: (k: string) => string) =>
+  z.object({
+    email: z
+      .string()
+      .min(1, t("login.validation.emailRequired"))
+      .email(t("login.validation.emailInvalid")),
+    password: z.string().min(1, t("login.validation.passwordRequired")),
+  });
+type LoginValues = { email: string; password: string };
 
-const mfaSchema = z.object({
-  code: z
-    .string()
-    .min(6, "Enter the six-digit code")
-    .max(9, "Enter the six-digit code or a recovery code"),
-});
-type MfaValues = z.infer<typeof mfaSchema>;
+const mfaSchema = (t: (k: string) => string) =>
+  z.object({
+    code: z
+      .string()
+      .min(6, t("login.validation.codeShort"))
+      .max(9, t("login.validation.codeLong")),
+  });
+type MfaValues = { code: string };
 
 function LoginForm() {
   const navigate = useNavigate();
+  const { t } = useTranslation("common");
   const qc = useQueryClient();
   const { push } = useToast();
   const [formError, setFormError] = useState<string | null>(null);
@@ -42,7 +51,7 @@ function LoginForm() {
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<LoginValues>({
-    resolver: zodResolver(loginSchema),
+    resolver: zodResolver(loginSchema((k) => t(k))),
     defaultValues: { email: "", password: "" },
   });
   const {
@@ -50,7 +59,7 @@ function LoginForm() {
     handleSubmit: handleMfaSubmit,
     formState: { errors: mfaErrors, isSubmitting: mfaSubmitting },
   } = useForm<MfaValues>({
-    resolver: zodResolver(mfaSchema),
+    resolver: zodResolver(mfaSchema((k) => t(k))),
     defaultValues: { code: "" },
   });
 
@@ -74,14 +83,14 @@ function LoginForm() {
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 401) {
-          setFormError("Incorrect email or password.");
+          setFormError(t("login.error.badCredentials"));
         } else if (error.status === 429) {
-          setFormError("Too many attempts. Please wait a minute and try again.");
+          setFormError(t("login.error.rateLimited"));
         } else {
           setFormError(error.message);
         }
       } else {
-        push("error", "Sign-in failed", error instanceof Error ? error.message : undefined);
+        push("error", t("login.error.failed"), error instanceof Error ? error.message : undefined);
       }
     }
   };
@@ -105,16 +114,14 @@ function LoginForm() {
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 401) {
-          setFormError(
-            "That code was not accepted. Enter the current code from your authenticator, or a recovery code.",
-          );
+          setFormError(t("login.error.badCode"));
         } else if (error.status === 429) {
-          setFormError("Too many verification attempts. Please wait a minute and try again.");
+          setFormError(t("login.error.codeRateLimited"));
         } else {
           setFormError(error.message);
         }
       } else {
-        push("error", "Verification failed", error instanceof Error ? error.message : undefined);
+        push("error", t("login.error.verifyFailed"), error instanceof Error ? error.message : undefined);
       }
     }
   };
@@ -146,9 +153,11 @@ function LoginForm() {
             <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
               <ShieldCheck className="h-5 w-5" />
             </span>
-            <h1 className="text-lg font-semibold">Two-factor verification</h1>
+            <h1 className="text-lg font-semibold">{t("login.mfa.title")}</h1>
             <p className="text-xs text-muted-foreground">
-              Enter a code from your authenticator app{pendingEmail ? ` for ${pendingEmail}` : ""}.
+              {pendingEmail
+                ? t("login.mfa.subtitle", { email: pendingEmail })
+                : t("login.mfa.subtitlePlain")}
             </p>
           </div>
           <form
@@ -159,10 +168,11 @@ function LoginForm() {
           >
             {errorBanner}
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="mfa-login-code">Authentication code</Label>
+              <Label htmlFor="mfa-login-code">{t("login.mfa.codeLabel")}</Label>
               <Input
                 id="mfa-login-code"
                 inputMode="numeric"
+                dir="ltr"
                 autoComplete="one-time-code"
                 placeholder="000000 or XXXX-XXXX"
                 aria-invalid={Boolean(mfaErrors.code)}
@@ -178,7 +188,7 @@ function LoginForm() {
               ) : null}
             </div>
             <Button type="submit" disabled={mfaSubmitting} data-testid="mfa-verify-submit">
-              {mfaSubmitting ? "Verifying…" : "Verify"}
+              {mfaSubmitting ? t("login.mfa.verifying") : t("login.mfa.verify")}
             </Button>
             <button
               type="button"
@@ -186,7 +196,7 @@ function LoginForm() {
               onClick={exitMfa}
               data-testid="mfa-back"
             >
-              Use a different account
+              {t("login.mfa.useOtherAccount")}
             </button>
           </form>
         </div>
@@ -201,8 +211,8 @@ function LoginForm() {
           <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
             <ClipboardList className="h-5 w-5" />
           </span>
-          <h1 className="text-lg font-semibold">Sign in to Tasker</h1>
-          <p className="text-xs text-muted-foreground">Self-hosted team work management</p>
+          <h1 className="text-lg font-semibold">{t("login.title")}</h1>
+          <p className="text-xs text-muted-foreground">{t("login.subtitle")}</p>
         </div>
         <form
           onSubmit={handleSubmit(onLogin)}
@@ -212,10 +222,11 @@ function LoginForm() {
         >
           {errorBanner}
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="email">Email</Label>
+            <Label htmlFor="email">{t("login.email")}</Label>
             <Input
               id="email"
               type="email"
+              dir="ltr"
               autoComplete="email"
               placeholder="you@company.com"
               aria-invalid={Boolean(errors.email)}
@@ -226,7 +237,7 @@ function LoginForm() {
             ) : null}
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="password">Password</Label>
+            <Label htmlFor="password">{t("login.password")}</Label>
             <Input
               id="password"
               type="password"
@@ -240,11 +251,11 @@ function LoginForm() {
             ) : null}
           </div>
           <Button type="submit" disabled={isSubmitting} data-testid="login-submit">
-            {isSubmitting ? "Signing in…" : "Sign in"}
+            {isSubmitting ? t("login.signingIn") : t("login.signIn")}
           </Button>
         </form>
         <p className="mt-4 text-center text-2xs text-muted-foreground">
-          No account? Your administrator can add you from Team Settings.
+          {t("login.noAccount")}
         </p>
       </div>
     </div>

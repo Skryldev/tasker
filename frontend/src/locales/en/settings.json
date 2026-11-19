@@ -1,0 +1,521 @@
+{
+  "actions": {
+    "cancel": "Cancel",
+    "saving": "Saving…",
+    "retry": "Retry",
+    "remove": "Remove",
+    "upload": "Upload…",
+    "revoke": "Revoke",
+    "currentPassword": "Your current password"
+  },
+  "page": {
+    "title": "Settings",
+    "subtitle": "Instance-wide — independent of the selected team.",
+    "navAria": "Settings sections",
+    "ownerOnly": "Owner only"
+  },
+  "sections": {
+    "account": "Account",
+    "security": "Security",
+    "users": "Users"
+  },
+  "profile": {
+    "title": "Profile",
+    "subtitle": "Your work identity, notifications, and account security.",
+    "workIdentity": "Work identity",
+    "displayName": "Display name",
+    "username": "Username",
+    "usernameHint": "Unique across the instance; used for @mentions.",
+    "bio": "Bio",
+    "bioHint": "{{length}}/200 — shown when teammates hover your avatar.",
+    "timezone": "Timezone",
+    "timezoneHint": "Applies to absolute timestamps. Due dates stay on the product's Persian calendar regardless of timezone.",
+    "capacity": "Capacity limit",
+    "capacityHint": "How many tasks you can comfortably carry (1–100). Shown as your utilization target in the team Capacity view.",
+    "save": "Save profile",
+    "saved": "Profile saved",
+    "avatar": {
+      "label": "Avatar — square JPG, PNG or WebP, up to 2 MB. It is center-cropped automatically.",
+      "updated": "Avatar updated",
+      "removed": "Avatar removed"
+    },
+    "errors": {
+      "save": "Could not save the profile.",
+      "usernameFormat": "Username must be 3-32 characters of a-z, 0-9 or _.",
+      "bioTooLong": "Bio must be at most 200 characters."
+    }
+  },
+  "avatar": {
+    "errors": {
+      "upload": "Could not upload the avatar.",
+      "read": "Could not read that file."
+    }
+  },
+  "password": {
+    "change": "Change password",
+    "changeHint": "Changing your password signs out all other sessions.",
+    "current": "Current password",
+    "new": "New password",
+    "rules": "At least 12 characters with upper, lower, digit and special.",
+    "changedTitle": "Password changed",
+    "changedBody": "Other sessions were signed out.",
+    "errors": {
+      "change": "Could not change the password."
+    }
+  },
+  "prefs": {
+    "title": "Notification preferences",
+    "subtitle": "In-app notifications only. All events are on by default.",
+    "saved": "Saved",
+    "task_assigned": {
+      "label": "Task assigned",
+      "hint": "Someone assigns a task to you"
+    },
+    "comment_mention": {
+      "label": "Comment mention",
+      "hint": "Someone @mentions you in a comment"
+    },
+    "task_submitted": {
+      "label": "Task submitted",
+      "hint": "An assignee submits work for review"
+    },
+    "task_accepted": {
+      "label": "Task accepted",
+      "hint": "Your submission is accepted"
+    },
+    "task_rejected": {
+      "label": "Task rejected",
+      "hint": "Your submission is rejected"
+    },
+    "task_status_changed": {
+      "label": "Status changed",
+      "hint": "A task you reported changes status"
+    },
+    "errors": {
+      "save": "Could not save the preference"
+    }
+  },
+  "summary": {
+    "title": "My work",
+    "aria": "My work summary",
+    "subtitle": "Counts are computed by the server; each number opens the matching list.",
+    "overdue": "Overdue",
+    "unreadMentions": "Unread mentions (7d)",
+    "errors": {
+      "load": "Could not load your work summary."
+    }
+  },
+  "sessions": {
+    "title": "Active sessions",
+    "subtitle": "Devices signed in to your account. Revoking a session signs that device out.",
+    "loading": "Loading sessions…",
+    "empty": "No active sessions.",
+    "thisDevice": "This device",
+    "lastSeen": "Last seen {{time}}",
+    "revoked": "Session revoked",
+    "unknownDevice": "Unknown device",
+    "onJoiner": " on ",
+    "errors": {
+      "revoke": "Could not revoke the session"
+    }
+  },
+  "mfa": {
+    "title": "Two-factor authentication",
+    "subtitleEnabled": "Enabled. Signing in requires a code from your authenticator app.",
+    "subtitleDisabled": "Add a second factor with any TOTP app (Google Authenticator, Aegis, 1Password…).",
+    "newRecoveryCodes": "New recovery codes",
+    "disable2fa": "Disable 2FA",
+    "enable2fa": "Enable 2FA",
+    "preparing": "Preparing…",
+    "scanTitle": "1. Scan with your authenticator app",
+    "manualEntry": "Or enter the secret manually:",
+    "show": "show",
+    "hide": "hide",
+    "codeLabel": "2. Enter the six-digit code",
+    "verifying": "Verifying…",
+    "verifyEnable": "Verify & enable",
+    "recoveryWarning": "Store these recovery codes somewhere safe — they are shown only this once.",
+    "recoveryInfo": "Each code works once instead of an authenticator code. Without a code or a recovery code you cannot sign in.",
+    "ackLabel": "I stored these codes somewhere safe (a password manager or printed copy). They will not be shown again.",
+    "ackButton": "I have stored my recovery codes",
+    "disabledToast": "Two-factor authentication disabled",
+    "disableConfirm": {
+      "title": "Disable two-factor authentication?",
+      "description": "Your authenticator and all recovery codes stop working immediately."
+    },
+    "regenConfirm": {
+      "title": "Generate new recovery codes?",
+      "description": "Every previously issued recovery code stops working.",
+      "confirm": "Generate codes"
+    },
+    "errors": {
+      "start": "Could not start 2FA setup",
+      "invalidCode": "That code is not valid. Make sure your authenticator clock is correct and try the current code.",
+      "disable": "Could not disable 2FA.",
+      "regenerate": "Could not regenerate recovery codes.",
+      "enterCode": "Enter the six-digit code from your app."
+    }
+  },
+  "adminUsers": {
+    "title": "Users",
+    "subtitle": "Instance-wide accounts — created here by an Owner, assigned to teams separately.",
+    "createUser": "Create user",
+    "creating": "Creating…",
+    "searchPlaceholder": "Search by email, name or username…",
+    "searchAria": "Search users",
+    "noMatch": "No users match",
+    "noMatchHint": "Try a different search.",
+    "noTeams": "No teams",
+    "active": "Active",
+    "deactivated": "Deactivated",
+    "activateAria": "Activate {{name}}",
+    "deactivateAria": "Deactivate {{name}}",
+    "deleteAria": "Delete {{name}}",
+    "thisAccount": "this account",
+    "hardDelete": "Hard delete",
+    "deactivate": "Deactivate",
+    "typeEmail": "Type the account email to hard-delete",
+    "yourPassword": "Your password",
+    "deactivateHint": "Leave both fields empty to just deactivate the account.",
+    "columns": {
+      "user": "User",
+      "email": "Email",
+      "username": "Username",
+      "teams": "Teams",
+      "status": "Status",
+      "created": "Created"
+    },
+    "toasts": {
+      "activated": "Account activated",
+      "deactivated": "Account deactivated",
+      "deleted": "Account deleted",
+      "created": "Account created",
+      "deleteRefused": "Delete refused",
+      "updateFailed": "Could not update account"
+    },
+    "errors": {
+      "load": "Could not load users",
+      "loadHint": "You may not be an instance Owner.",
+      "delete": "Could not delete the account.",
+      "create": "Could not create the account.",
+      "required": "Email and display name are required."
+    },
+    "createDialog": {
+      "title": "Create instance user",
+      "description": "The account exists instance-wide — assign it to teams from each team's settings.",
+      "email": "Email",
+      "displayName": "Display name",
+      "usernameOptional": "Username (optional)",
+      "usernameHint": "3-32 chars: a-z 0-9 _",
+      "tempPassword": "Temporary password",
+      "generate": "Generate",
+      "tempPasswordHint": "≥ 12 characters with upper, lower, digit and special — enforced server-side."
+    },
+    "deleteConfirm": {
+      "title": "Delete {{name}}?",
+      "description": "Soft-deactivate happens automatically. A hard delete requires typing the account's email and your password — it is refused while the account still has teams, tasks or comments."
+    }
+  },
+  "addMember": {
+    "title": "Add member",
+    "description": "Pick an existing Tasker account. Accounts are created by an Owner on the Users page — team membership is a separate assignment.",
+    "findUser": "Find a user",
+    "searchPlaceholder": "Search by name, email or username…",
+    "eligibleAria": "Eligible users",
+    "noMatch": "No existing Tasker user matches this search.",
+    "askOwner": "Ask an Owner to create the account.",
+    "role": "Role",
+    "added": "Member added",
+    "errors": {
+      "add": "Could not add the member.",
+      "load": "Could not load users."
+    }
+  },
+  "team": {
+    "settingsTitle": "{{name}} settings",
+    "fallbackName": "Team",
+    "archived": "Archived",
+    "manageHint": "Manage members, roles, and labels.",
+    "unavailable": "Team unavailable",
+    "unavailableHint": "Select a valid team from the switcher.",
+    "details": "Team details",
+    "name": "Name",
+    "description": "Description",
+    "timezone": "Default timezone",
+    "save": "Save",
+    "updated": "Team updated",
+    "avatarLabel": "Team avatar — square JPG, PNG or WebP, up to 2 MB.",
+    "avatarUpdated": "Team avatar updated",
+    "avatarRemoved": "Team avatar removed",
+    "errors": {
+      "update": "Could not update team",
+      "avatarRemove": "Could not remove the avatar"
+    }
+  },
+  "members": {
+    "sectionAria": "Team members",
+    "title": "Members ({{total}})",
+    "add": "Add member",
+    "searchPlaceholder": "Search name, email or @username…",
+    "searchAria": "Search members",
+    "filterByRole": "Filter by role",
+    "role": "Role",
+    "allRoles": "All roles",
+    "empty": "No members match the current filters.",
+    "joinedAgo": "{{email}} · joined {{time}}",
+    "manageAria": "Manage {{name}}",
+    "makeRole": "Make {{role}}",
+    "removeFromTeam": "Remove from team",
+    "roleUpdated": "Role updated",
+    "removed": "Member removed",
+    "removeConfirm": {
+      "title": "Remove this member?",
+      "description": "{{name}} loses access to the team and its projects; their task assignments are cleared.",
+      "confirm": "Remove member"
+    },
+    "errors": {
+      "roleChange": "Could not change role",
+      "remove": "Could not remove member"
+    }
+  },
+  "guests": {
+    "title": "Guests",
+    "subtitle": "People with read-only viewer access to projects in this team.",
+    "empty": "No guests. Grant viewer access from a project's guest page.",
+    "viewerOf": "Viewer of",
+    "grantedAgo": "granted {{time}}",
+    "accessRevoked": "Guest access revoked",
+    "revokeConfirm": {
+      "title": "Revoke guest access?",
+      "confirm": "Revoke access",
+      "viewerDescription": "{{name}} loses viewer access to every project in this team."
+    },
+    "errors": {
+      "revoke": "Could not revoke access"
+    }
+  },
+  "teamGuests": {
+    "title": "Team guests",
+    "subtitle": "Non-members with explicitly granted permissions. Default deny — every capability is a separate grant, revoked instantly.",
+    "empty": "No guests yet.",
+    "addGuest": "Add guest",
+    "addDescription": "Pick an existing Tasker account. Guests get only what you explicitly grant.",
+    "findUserAria": "Find a user to invite as guest",
+    "grantedAgo": "Guest · granted {{time}}",
+    "noPermissions": "No permissions granted.",
+    "editPermissions": "Edit permissions",
+    "revokeDescription": "{{name}} loses every granted permission immediately.",
+    "permissionRemoved": "Permission removed",
+    "addedToast": "Guest added",
+    "queue": {
+      "aria": "Guest invitation requests",
+      "title": "Invitation requests",
+      "descriptionBefore": "Guests with the",
+      "descriptionAfter": "grant can ask you to invite someone. Nothing changes until you decide.",
+      "requestedBy": "Requested by {{name}} · {{time}}",
+      "unknownUser": "unknown",
+      "approve": "Approve",
+      "reject": "Reject",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "invitationApproved": "Invitation approved",
+      "invitationRejected": "Invitation rejected"
+    },
+    "errors": {
+      "add": "Could not add the guest.",
+      "removePermission": "Could not remove permission",
+      "decide": "Could not decide the request"
+    }
+  },
+  "dangerZone": {
+    "title": "Danger zone",
+    "archiveTeam": "Archive team",
+    "restoreTeam": "Restore team",
+    "archiveNote": "Marks the team as archived; reversible at any time.",
+    "archivedNote": "The team is currently archived.",
+    "archive": "Archive",
+    "restore": "Restore",
+    "archiveConfirmTitle": "Archive this team?",
+    "archiveConfirmDescription": "The team is marked as archived. You can restore it at any time.",
+    "restoreConfirmTitle": "Restore this team?",
+    "restoreConfirmDescription": "The team becomes fully active again.",
+    "archivedToast": "Team archived",
+    "restoredToast": "Team restored",
+    "deleteTeam": "Delete team",
+    "deleteNote": "Permanently deletes the team, all of its projects, tasks, and automation history. Owner only — type the team name and your password.",
+    "ownerOnlyTitle": "Only the team owner can delete the team",
+    "delete": "Delete",
+    "deleting": "Deleting…",
+    "deleteForever": "Delete team forever",
+    "deletedToast": "Team deleted",
+    "deletedBody": "{{name}} and all of its data were removed.",
+    "teamNameLabel": "Team name",
+    "deleteConfirm": {
+      "title": "Delete this team permanently?",
+      "before": "This is irreversible: every project, task, comment, and automation of",
+      "after": "will be deleted. Type the team name and your current password to confirm."
+    },
+    "errors": {
+      "archive": "Could not archive the team",
+      "restore": "Could not restore the team",
+      "delete": "Could not delete the team."
+    }
+  },
+  "labels": {
+    "title": "Labels",
+    "subtitle": "Categorize tasks. Members with the Manager role or above can create them.",
+    "empty": "No labels yet.",
+    "preview": "Preview",
+    "previewHint": "Type a name to preview",
+    "name": "Label name",
+    "namePlaceholder": "New label name",
+    "adding": "Adding…",
+    "add": "Add",
+    "color": "Color",
+    "colorAria": "Label color",
+    "colorSwatchAria": "Color {{color}}",
+    "iconOptional": "Icon (optional)",
+    "icon": "Icon",
+    "iconSearch": "Search icons…",
+    "iconAria": "Label icon",
+    "noIcon": "No icon",
+    "editAria": "Edit label {{name}}",
+    "editTitle": "Edit label",
+    "editDescription": "Update the name, color or icon. Changes apply everywhere the label is used.",
+    "editName": "Name",
+    "fallbackName": "Label",
+    "save": "Save",
+    "delete": "Delete label",
+    "created": "Label created",
+    "updated": "Label updated",
+    "deleted": "Label deleted",
+    "errors": {
+      "create": "Could not create label",
+      "update": "Could not update label",
+      "delete": "Could not delete label"
+    }
+  },
+  "trash": {
+    "title": "Deleted projects",
+    "subtitle": "Projects stay here for 30 days before they can only be purged permanently.",
+    "empty": "Nothing here — no deleted projects.",
+    "taskCount_one": "{{count}} task · deleted {{deleted}} · retention ends {{ends}}",
+    "taskCount_other": "{{count}} tasks · deleted {{deleted}} · retention ends {{ends}}",
+    "restore": "Restore",
+    "purge": "Purge",
+    "purging": "Purging…",
+    "deleteForever": "Delete forever",
+    "projectName": "Project name",
+    "purgeConfirm": {
+      "title": "Purge this project permanently?",
+      "before": "This is irreversible: every task, comment, and dependency of",
+      "after": "is deleted forever. Type the project name and your current password to confirm."
+    },
+    "restored": "Project restored",
+    "purged": "Project permanently deleted",
+    "errors": {
+      "restore": "Could not restore project",
+      "purge": "Could not purge the project."
+    }
+  },
+  "domain": {
+    "team": "Team",
+    "projects": "Projects",
+    "tasks": "Tasks",
+    "admin": "Administration"
+  },
+  "perm": {
+    "view_team": {
+      "label": "See the team",
+      "description": "Team name and description appear in the switcher."
+    },
+    "view_team_members": {
+      "label": "See the roster",
+      "description": "Member names, roles and emails are visible."
+    },
+    "view_team_activity": {
+      "label": "See team activity",
+      "description": "Team-level activity feeds are visible."
+    },
+    "view_project_list": {
+      "label": "Browse the project index",
+      "description": "The list of the team's projects is visible (names only)."
+    },
+    "view_project": {
+      "label": "Open the project",
+      "description": "Project details are visible."
+    },
+    "view_project_tasks": {
+      "label": "See the task list",
+      "description": "The project's task list is visible."
+    },
+    "view_project_board": {
+      "label": "See the board",
+      "description": "The kanban board is visible."
+    },
+    "view_project_timeline": {
+      "label": "See the timeline",
+      "description": "The schedule timeline is visible."
+    },
+    "view_task": {
+      "label": "Open tasks",
+      "description": "Task titles and details are visible."
+    },
+    "view_task_own": {
+      "label": "Open own tasks",
+      "description": "Only tasks assigned to this guest are visible."
+    },
+    "view_task_dates": {
+      "label": "See due dates",
+      "description": "Due dates and deadlines are visible."
+    },
+    "view_task_activity": {
+      "label": "See task activity",
+      "description": "Non-sensitive workflow events are visible."
+    },
+    "view_task_comments": {
+      "label": "Read the discussion",
+      "description": "Comments marked visible to guests are readable."
+    },
+    "comment_task": {
+      "label": "Comment on tasks",
+      "description": "The guest can post comments on tasks."
+    },
+    "view_task_attachments": {
+      "label": "See the file list",
+      "description": "Attachment names and metadata are visible."
+    },
+    "download_task_attachments": {
+      "label": "Download files",
+      "description": "Attachment contents can be downloaded."
+    },
+    "upload_task_attachments": {
+      "label": "Attach files",
+      "description": "The guest can upload attachments (implies commenting)."
+    },
+    "invite_guest": {
+      "label": "Request guest invitations",
+      "description": "The guest can ask you to invite someone; you approve or reject."
+    },
+    "view_audit_log": {
+      "label": "Read the audit log",
+      "description": "The team's audit trail is visible."
+    },
+    "summary_one": "{{count}} grant",
+    "summary_other": "{{count}} grants",
+    "footer_one": "{{count}} team-scoped grant; the rest are scoped per project. Saving applies every add and removal in one pass — a failed step rolls the batch back.",
+    "footer_other": "{{count}} team-scoped grants; the rest are scoped per project. Saving applies every add and removal in one pass — a failed step rolls the batch back.",
+    "drawerAria": "Permissions for {{name}}",
+    "closeDrawerAria": "Close permissions drawer",
+    "close": "Close",
+    "grantsAria": "{{grants}} grants active",
+    "sectionAria": "{{domain}} permissions",
+    "blockedByViewTask": "Covered by “Open tasks” — view_task already includes own tasks.",
+    "removeAria": "Remove permission {{label}}",
+    "save": "Save permissions",
+    "toasts": {
+      "updated": "Permissions updated",
+      "rollback": "Could not save permissions — changes rolled back"
+    }
+  }
+}

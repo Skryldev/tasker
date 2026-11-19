@@ -153,7 +153,7 @@ export function renderMarkdown(markdown: string, keyPrefix = "md"): ReactNode[] 
       blocks.push(
         <blockquote
           key={`${keyPrefix}-${key++}`}
-          className="my-2 border-l-2 border-border pl-3 text-muted-foreground"
+          className="my-2 border-s-2 border-border ps-3 text-muted-foreground"
         >
           {renderInline(quote.join(" "), `${keyPrefix}-${key}`)}
         </blockquote>,
@@ -182,14 +182,14 @@ export function renderMarkdown(markdown: string, keyPrefix = "md"): ReactNode[] 
       }
       const hasTasks = entries.some((e) => e.checked !== null);
       const ListTag = numbered && !hasTasks ? "ol" : "ul";
-      const listCls = numbered && !hasTasks ? "ml-5 list-decimal" : "ml-5 list-disc";
+      const listCls = numbered && !hasTasks ? "ms-5 list-decimal" : "ms-5 list-disc";
       blocks.push(
         <ListTag key={`${keyPrefix}-${key++}`} className={`my-1 ${listCls} space-y-0.5`}>
           {entries.map((entry, ei) =>
             entry.checked === null ? (
               <li key={ei}>{renderInline(entry.text, `${keyPrefix}-${key}-${ei}`)}</li>
             ) : (
-              <li key={ei} className="list-none -ml-5 flex items-start gap-1.5">
+              <li key={ei} className="list-none -ms-5 flex items-start gap-1.5">
                 <input
                   type="checkbox"
                   checked={entry.checked}

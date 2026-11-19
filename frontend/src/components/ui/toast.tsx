@@ -23,11 +23,14 @@ type ToastKind = keyof typeof DURATION;
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const { appearance } = useTheme();
+  // RTL: toasts surface bottom-left so they mirror the LTR corner.
+  const dir = document.documentElement.dir;
+  const position = dir === "rtl" ? ("bottom-left" as const) : ("bottom-right" as const);
   return (
     <>
       {children}
       <SonnerToaster
-        position="bottom-right"
+        position={position}
         theme={appearance}
         richColors
         closeButton

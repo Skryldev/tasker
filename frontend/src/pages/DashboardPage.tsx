@@ -52,7 +52,7 @@ function KpiCard({
 }) {
   return (
     <div
-      className="rounded-lg border bg-card p-3 shadow-sm"
+      className="rounded-sg border bg-card p-3 shadow-sm"
       data-testid={testId}
     >
       <div className="flex items-center gap-1.5 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -223,7 +223,7 @@ export default function DashboardPage({ teamId: teamIdProp }: { teamId?: string 
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         {/* Throughput: current vs previous window, hand-rolled SVG. */}
-        <section className="rounded-lg border bg-card p-4" aria-label="Throughput chart" data-testid="dashboard-throughput">
+        <section className="rounded-sg border bg-card p-4" aria-label="Throughput chart" data-testid="dashboard-throughput">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Throughput — current vs previous
           </h2>
@@ -263,7 +263,7 @@ export default function DashboardPage({ teamId: teamIdProp }: { teamId?: string 
         </section>
 
         {/* Priority mix: horizontal bars. */}
-        <section className="rounded-lg border bg-card p-4" aria-label="Priority mix" data-testid="dashboard-priority-mix">
+        <section className="rounded-sg border bg-card p-4" aria-label="Priority mix" data-testid="dashboard-priority-mix">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Open tasks by priority
           </h2>
@@ -279,7 +279,7 @@ export default function DashboardPage({ teamId: teamIdProp }: { teamId?: string 
                     style={{ width: `${(n / mixMax) * 100}%` }}
                   />
                 </span>
-                <span className="w-6 text-right tabular-nums">{n}</span>
+                <span className="w-6 text-end tabular-nums">{n}</span>
               </div>
             ))}
             {mixEntries.every(([, n]) => n === 0) ? (
@@ -290,7 +290,7 @@ export default function DashboardPage({ teamId: teamIdProp }: { teamId?: string 
       </div>
 
       {/* Review load per reporter. */}
-      <section className="mt-4 rounded-lg border bg-card p-4" aria-label="Review load per reporter" data-testid="dashboard-review-table">
+      <section className="mt-4 rounded-sg border bg-card p-4" aria-label="Review load per reporter" data-testid="dashboard-review-table">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Tasks awaiting review, by reporter
         </h2>
@@ -299,15 +299,15 @@ export default function DashboardPage({ teamId: teamIdProp }: { teamId?: string 
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b text-left text-2xs uppercase tracking-wide text-muted-foreground">
-                <th className="py-1.5 pr-3 font-medium">Reporter</th>
+              <tr className="border-b text-start text-2xs uppercase tracking-wide text-muted-foreground">
+                <th className="py-1.5 pe-3 font-medium">Reporter</th>
                 <th className="py-1.5 font-medium">In review</th>
               </tr>
             </thead>
             <tbody>
               {data.review_by_reporter.map((r) => (
                 <tr key={r.reporter_id} className="border-b last:border-0">
-                  <td className="py-1.5 pr-3">{r.display_name}</td>
+                  <td className="py-1.5 pe-3">{r.display_name}</td>
                   <td className="py-1.5 tabular-nums">{r.count}</td>
                 </tr>
               ))}

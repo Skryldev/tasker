@@ -200,7 +200,7 @@ export function ContributionPicker({
                 onClick={() => void pick(item.id)}
                 onMouseEnter={() => setActiveIndex(i)}
                 className={cn(
-                  "flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm",
+                  "flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-start text-sm",
                   i === activeIndex && "bg-accent",
                 )}
               >

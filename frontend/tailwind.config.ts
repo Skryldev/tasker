@@ -13,6 +13,7 @@ export default {
       fontFamily: {
         sans: [
           "Inter",
+          "Vazirmatn UI",
           "ui-sans-serif",
           "system-ui",
           "-apple-system",

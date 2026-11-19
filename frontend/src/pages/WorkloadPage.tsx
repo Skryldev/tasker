@@ -124,10 +124,10 @@ export function WorkloadPage() {
           description="No open tasks match the current filters."
         />
       ) : (
-        <div className="overflow-hidden rounded-lg border" data-testid="workload-table">
+        <div className="overflow-hidden rounded-sg border" data-testid="workload-table">
           <table className="w-full border-collapse text-sm">
             <thead>
-              <tr className="border-b bg-muted/50 text-left">
+              <tr className="border-b bg-muted/50 text-start">
                 <th className="px-3 py-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Member
                 </th>

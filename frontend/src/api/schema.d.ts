@@ -5366,10 +5366,894 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/teams/{team_id}/integrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List team integrations (Owner/Admin) */
+        get: {
+            parameters: {
+                query?: {
+                    page?: components["parameters"]["Page"];
+                    page_size?: components["parameters"]["PageSize"];
+                };
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Paginated integrations. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["IntegrationPage"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /**
+         * Create an integration (Owner/Admin)
+         * @description Creates a team integration and provisions its webhook credential atomically. The plaintext webhook secret is returned in this response ONLY — it is never retrievable again. Names are unique per team.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["IntegrationCreate"];
+                };
+            };
+            responses: {
+                /** @description Integration created with a v1 credential. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["IntegrationWithSecret"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/integrations/{integration_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Integration details (Owner/Admin) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The integration with its credential state (no secrets). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Integration"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Archive an integration (Owner/Admin)
+         * @description Irreversible: stops intake and delivery processing, keeps history and credential audit state. Archived integrations are read-only.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The archived integration. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Integration"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Update integration metadata (Owner/Admin) */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["IntegrationUpdate"];
+                };
+            };
+            responses: {
+                /** @description The updated integration. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Integration"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        trace?: never;
+    };
+    "/teams/{team_id}/integrations/{integration_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable an integration (Owner/Admin) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The enabled integration. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Integration"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/integrations/{integration_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable an integration (Owner/Admin) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The disabled integration. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Integration"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/integrations/{integration_id}/secret/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate the webhook secret (Owner/Admin)
+         * @description Replaces the encrypted secret in place and increments the credential version under an optimistic-concurrency guard. The new plaintext secret is returned in this response ONLY.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SecretRotate"];
+                };
+            };
+            responses: {
+                /** @description The integration with the new credential version. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["IntegrationWithSecret"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/integrations/{integration_id}/secret/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke the webhook secret (Owner/Admin)
+         * @description Verification fails closed immediately; re-provisioning requires an observed revocation.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The integration with the revoked credential state. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Integration"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/integrations/{integration_id}/secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-provision a revoked webhook secret (Owner/Admin)
+         * @description Requires a revoked credential; reactivates with a new secret (returned once) and increments the version.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The integration with the new credential version. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["IntegrationWithSecret"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/integrations/{integration_id}/repositories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List registered repositories (Owner/Admin) */
+        get: {
+            parameters: {
+                query?: {
+                    page?: components["parameters"]["Page"];
+                    page_size?: components["parameters"]["PageSize"];
+                };
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Paginated repositories. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RepositoryPage"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /** Register an external repository (Owner/Admin) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RepositoryRegister"];
+                };
+            };
+            responses: {
+                /** @description Repository registered. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Repository"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/integrations/{integration_id}/repositories/{repository_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a registered repository (Owner/Admin) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                    repository_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Removed. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            status?: string;
+                        };
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/integrations/{integration_id}/repositories/{repository_id}/mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the repository's project mappings (Owner/Admin) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                    repository_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The repository's mappings with project names. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items?: components["schemas"]["Mapping"][];
+                        };
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        /**
+         * Map a repository to a project (Owner/Admin)
+         * @description Cross-team mappings are unrepresentable (composite foreign keys); a foreign project yields 404.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                    repository_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MappingCreate"];
+                };
+            };
+            responses: {
+                /** @description Mapping created. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Mapping"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/integrations/{integration_id}/repositories/{repository_id}/mappings/{mapping_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a repository→project mapping (Owner/Admin) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                    repository_id: string;
+                    mapping_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Removed. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            status?: string;
+                        };
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/integrations/{integration_id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List webhook deliveries (Owner/Admin)
+         * @description Bounded metadata projection — webhook payloads are never returned by the management API.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    page?: components["parameters"]["Page"];
+                    page_size?: components["parameters"]["PageSize"];
+                    status?: "pending" | "processing" | "processed" | "retryable_failed" | "dead_letter" | "unsupported";
+                };
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Paginated delivery metadata. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeliveryPage"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                422: components["responses"]["Problem422"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/integrations/{integration_id}/deliveries/{delivery_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Delivery details (Owner/Admin) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                    delivery_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Delivery metadata (no payload). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Delivery"];
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/teams/{team_id}/integrations/{integration_id}/deliveries/{delivery_id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay a dead-lettered delivery (Owner/Admin)
+         * @description Only `dead_letter` deliveries replay; the transition is CAS-guarded and audited (who, when, why) with the original history preserved and a fresh retry budget.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    team_id: components["parameters"]["TeamId"];
+                    integration_id: components["parameters"]["IntegrationId"];
+                    delivery_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["DeliveryReplay"];
+                };
+            };
+            responses: {
+                /** @description The delivery re-entered the queue. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            status?: string;
+                        };
+                    };
+                };
+                403: components["responses"]["Problem403"];
+                404: components["responses"]["Problem404"];
+                409: components["responses"]["Problem409"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        IntegrationCreate: {
+            name: string;
+            description?: string | null;
+            /** @enum {string} */
+            provider: "github" | "gitlab";
+        };
+        Integration: {
+            id?: string;
+            team_id?: string;
+            /** @enum {string} */
+            provider?: "github" | "gitlab";
+            name?: string;
+            description?: string | null;
+            enabled?: boolean;
+            created_by?: string;
+            created_at?: number;
+            updated_at?: number;
+            archived_at?: number | null;
+            /** @description The provider-facing intake path for this integration. */
+            webhook_url_path?: string;
+            credential?: {
+                credential_version?: number;
+                revoked_at?: number | null;
+                active?: boolean;
+            } | null;
+        };
+        IntegrationWithSecret: components["schemas"]["Integration"] & {
+            /** @description The plaintext webhook secret — returned exactly once, at creation/rotation/re-provisioning, and never again. */
+            webhook_secret?: string;
+        };
+        IntegrationUpdate: {
+            name?: string;
+            description?: string | null;
+        };
+        SecretRotate: {
+            /** @description The current credential version (optimistic concurrency). */
+            expected_version: number;
+            /** @description Optional explicit secret; generated when omitted. */
+            new_secret?: string;
+        };
+        RepositoryRegister: {
+            external_repo_id: string;
+            full_name: string;
+        };
+        Repository: {
+            id?: string;
+            integration_id?: string;
+            external_repo_id?: string;
+            full_name?: string;
+            created_at?: number;
+        };
+        RepositoryPage: {
+            items?: components["schemas"]["Repository"][];
+            page?: number;
+            page_size?: number;
+            total?: number;
+        };
+        MappingCreate: {
+            project_id: string;
+        };
+        Mapping: {
+            id?: string;
+            repository_id?: string;
+            project_id?: string;
+            project_name?: string;
+            mapped_by?: string;
+            created_at?: number;
+        };
+        /** @description Bounded delivery metadata; payloads are never served. */
+        Delivery: {
+            id?: string;
+            /** @description The provider delivery identifier. */
+            delivery_id?: string;
+            event_type?: string;
+            /** @enum {string} */
+            status?: "pending" | "processing" | "processed" | "retryable_failed" | "dead_letter" | "unsupported";
+            attempts?: number;
+            next_attempt_at?: number;
+            created_at?: number;
+            updated_at?: number;
+            completed_at?: number | null;
+            last_error_category?: string | null;
+            last_error_detail?: string | null;
+        };
+        DeliveryPage: {
+            items?: components["schemas"]["Delivery"][];
+            page?: number;
+            page_size?: number;
+            total?: number;
+        };
+        DeliveryReplay: {
+            reason?: string | null;
+        };
+        IntegrationPage: {
+            items?: components["schemas"]["Integration"][];
+            page?: number;
+            page_size?: number;
+            total?: number;
+        };
         /** @description RFC 9457 Problem Details with a field-error extension. */
         Problem: {
             /**
@@ -6466,6 +7350,7 @@ export interface components {
         };
     };
     parameters: {
+        IntegrationId: string;
         TeamId: string;
         ProjectId: string;
         TaskId: string;

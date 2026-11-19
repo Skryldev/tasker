@@ -704,6 +704,24 @@ pub struct EvalContext<'a> {
     pub event_trigger: super::TriggerType,
     pub event_origin: super::EventOrigin,
     pub event_causing_execution_id: Option<&'a str>,
+    /// Taskless integration context (Phase 8B, Task 5): present ONLY on the
+    /// integration-event evaluation path, where namespace-consistency
+    /// validation guarantees integration rules never read task fields.
+    pub integration: Option<IntegrationEvalContext<'a>>,
+}
+
+/// The `integration.*` condition values for one integration event, resolved
+/// from the normalized snapshot the webhook worker persisted. Numeric fields
+/// (`commit_count`) arrive as their string form — condition scalars are
+/// bounded text.
+#[derive(Debug, Clone, Copy)]
+pub struct IntegrationEvalContext<'a> {
+    pub provider: &'a str,
+    pub event_type: &'a str,
+    pub branch: Option<&'a str>,
+    pub repository: Option<&'a str>,
+    pub actor: Option<&'a str>,
+    pub commit_count: Option<&'a str>,
 }
 
 impl EvalContext<'_> {
@@ -718,15 +736,15 @@ impl EvalContext<'_> {
             Field::EventNewStatus => self.event_new_status,
             Field::EventPreviousPriority => self.event_previous_priority,
             Field::EventNewPriority => self.event_new_priority,
-            // Integration fields (Phase 8B) are resolved from the
-            // normalized event payload on the integration trigger path; the
-            // rules-engine context carries no value for them yet.
-            Field::IntegrationProvider
-            | Field::IntegrationEventType
-            | Field::IntegrationBranch
-            | Field::IntegrationRepository
-            | Field::IntegrationActor
-            | Field::IntegrationCommitCount => None,
+            // Integration fields (Phase 8B, Task 5) resolve from the
+            // normalized snapshot carried on the integration path; absent
+            // there, they evaluate to missing (None semantics).
+            Field::IntegrationProvider => self.integration.as_ref().map(|i| i.provider),
+            Field::IntegrationEventType => self.integration.as_ref().map(|i| i.event_type),
+            Field::IntegrationBranch => self.integration.as_ref().and_then(|i| i.branch),
+            Field::IntegrationRepository => self.integration.as_ref().and_then(|i| i.repository),
+            Field::IntegrationActor => self.integration.as_ref().and_then(|i| i.actor),
+            Field::IntegrationCommitCount => self.integration.as_ref().and_then(|i| i.commit_count),
         }
     }
 }
@@ -753,6 +771,7 @@ mod tests {
             event_trigger: super::super::TriggerType::TaskStatusChanged,
             event_origin: super::super::EventOrigin::User,
             event_causing_execution_id: None,
+            integration: None,
         }
     }
 
@@ -1133,5 +1152,110 @@ mod namespace_tests {
         let c = Condition::from_json_str_for(json, TriggerNamespace::Integration)
             .expect("valid IN list");
         assert!(c.to_json_str().contains("octocat/hello-world"));
+    }
+
+    // ---- Evaluation with the taskless integration context (Task 5) ----
+
+    fn integration_ctx() -> EvalContext<'static> {
+        EvalContext {
+            task_status: "",
+            task_priority: "",
+            task_assignee_id: None,
+            task_reporter_id: None,
+            event_actor_id: None, // external actors never become Tasker users
+            event_previous_status: None,
+            event_new_status: None,
+            event_previous_priority: None,
+            event_new_priority: None,
+            event_trigger: super::super::TriggerType::TaskStatusChanged, // unused on this path
+            event_origin: super::super::EventOrigin::Integration,
+            event_causing_execution_id: None,
+            integration: Some(IntegrationEvalContext {
+                provider: "github",
+                event_type: "push",
+                branch: Some("feature/login"),
+                repository: Some("octocat/tasker"),
+                actor: Some("octocat"),
+                commit_count: Some("3"),
+            }),
+        }
+    }
+
+    #[test]
+    fn integration_fields_evaluate_from_the_snapshot_context() {
+        let provider = Condition::from_json_str_for(
+            r#"{"field":"integration.provider","op":"EQ","value":"github"}"#,
+            TriggerNamespace::Integration,
+        )
+        .expect("condition");
+        assert!(provider.evaluate(&integration_ctx()));
+        let branch = Condition::from_json_str_for(
+            r#"{"field":"integration.branch","op":"EQ","value":"feature/login"}"#,
+            TriggerNamespace::Integration,
+        )
+        .expect("condition");
+        assert!(branch.evaluate(&integration_ctx()));
+        let branch_other = Condition::from_json_str_for(
+            r#"{"field":"integration.branch","op":"EQ","value":"other"}"#,
+            TriggerNamespace::Integration,
+        )
+        .expect("condition");
+        assert!(!branch_other.evaluate(&integration_ctx()));
+        let commits = Condition::from_json_str_for(
+            r#"{"field":"integration.commit_count","op":"EQ","value":"3"}"#,
+            TriggerNamespace::Integration,
+        )
+        .expect("condition");
+        assert!(commits.evaluate(&integration_ctx()));
+        let repo_in = Condition::from_json_str_for(
+            r#"{"field":"integration.repository","op":"IN",
+                "values":["octocat/tasker","group/other"]}"#,
+            TriggerNamespace::Integration,
+        )
+        .expect("condition");
+        assert!(repo_in.evaluate(&integration_ctx()));
+    }
+
+    #[test]
+    fn missing_integration_values_evaluate_to_none() {
+        // A field absent from the snapshot (e.g. a release event has no
+        // branch) evaluates to missing: EQ against any value is false.
+        let json = r#"{"field":"integration.branch","op":"EQ","value":"feature/login"}"#;
+        let c = Condition::from_json_str_for(json, TriggerNamespace::Integration).expect("c");
+        let mut ctx = integration_ctx();
+        ctx.integration = Some(IntegrationEvalContext {
+            provider: "github",
+            event_type: "release",
+            branch: None,
+            repository: None,
+            actor: Some("releaser"),
+            commit_count: None,
+        });
+        assert!(!c.evaluate(&ctx));
+    }
+
+    #[test]
+    fn integration_fields_are_missing_without_a_task_context() {
+        // On the task path (integration: None) integration conditions
+        // evaluate to missing — defensive; namespace validation keeps such
+        // rules from existing.
+        let json = r#"{"field":"integration.provider","op":"EQ","value":"github"}"#;
+        let c = Condition::from_json_str_for(json, TriggerNamespace::Integration).expect("c");
+        let task_ctx = EvalContext {
+            task_status: "todo",
+            task_priority: "high",
+            task_assignee_id: None,
+            task_reporter_id: None,
+            event_actor_id: None,
+            event_previous_status: None,
+            event_new_status: None,
+            event_previous_priority: None,
+            event_new_priority: None,
+            event_trigger: super::super::TriggerType::TaskStatusChanged,
+            event_origin: super::super::EventOrigin::User,
+            event_causing_execution_id: None,
+            integration: None,
+        };
+        assert!(!c.evaluate(&task_ctx));
     }
 }

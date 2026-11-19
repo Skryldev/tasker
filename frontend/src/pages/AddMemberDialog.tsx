@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { api, ApiError } from "@/api/client";
 import { adminApi } from "@/api/admin-client";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { roleLabel } from "@/lib/utils";
+import { roleLabelKey } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
 
 /**
@@ -41,6 +42,7 @@ export function AddMemberDialog({
   onOpenChange: (v: boolean) => void;
   teamId: string;
 }) {
+  const { t } = useTranslation();
   const { push } = useToast();
   const qc = useQueryClient();
   const [query, setQuery] = useState("");
@@ -76,13 +78,13 @@ export function AddMemberDialog({
     mutationFn: (email: string) =>
       api.addMember(teamId, { email, role }),
     onSuccess: (_member, email) => {
-      push("success", "Member added", email);
+      push("success", t("settings:addMember.added"), email);
       void qc.invalidateQueries({ queryKey: ["members", teamId] });
       void qc.invalidateQueries({ queryKey: ["eligible-members", teamId] });
       onOpenChange(false);
     },
     onError: (err) =>
-      setError(err instanceof ApiError ? err.message : "Could not add the member."),
+      setError(err instanceof ApiError ? err.message : t("settings:addMember.errors.add")),
   });
 
   const items = eligible.data?.items ?? [];
@@ -104,21 +106,21 @@ export function AddMemberDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add member</DialogTitle>
+          <DialogTitle>{t("settings:addMember.title")}</DialogTitle>
           <DialogDescription>
-            Pick an existing Tasker account. Accounts are created by an Owner on the
-            Users page — team membership is a separate assignment.
+            {t("settings:addMember.description")}
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3" data-testid="add-member-form">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="member-search-input">Find a user</Label>
+            <Label htmlFor="member-search-input">{t("settings:addMember.findUser")}</Label>
             <Input
+              dir="auto"
               id="member-search-input"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="Search by name, email or username…"
+              placeholder={t("settings:addMember.searchPlaceholder")}
               autoFocus
               role="combobox"
               aria-expanded
@@ -129,7 +131,7 @@ export function AddMemberDialog({
           <ul
             id="eligible-members-list"
             role="listbox"
-            aria-label="Eligible users"
+            aria-label={t("settings:addMember.eligibleAria")}
             className="flex max-h-56 flex-col overflow-y-auto rounded-md border p-1 scrollbar-thin"
             data-testid="eligible-members-list"
           >
@@ -140,15 +142,15 @@ export function AddMemberDialog({
               </li>
             ) : eligible.isError ? (
               <li className="flex items-center justify-between gap-2 p-2 text-xs text-muted-foreground" role="alert">
-                Could not load users.
+                {t("settings:addMember.errors.load")}
                 <Button variant="outline" size="sm" onClick={() => void eligible.refetch()}>
-                  Retry
+                  {t("settings:actions.retry")}
                 </Button>
               </li>
             ) : items.length === 0 ? (
               <li className="p-3 text-center text-xs text-muted-foreground" aria-live="polite" data-testid="eligible-empty">
-                No existing Tasker user matches this search.{" "}
-                <span className="underline decoration-dotted">Ask an Owner to create the account.</span>
+                {t("settings:addMember.noMatch")}{" "}
+                <span className="underline decoration-dotted">{t("settings:addMember.askOwner")}</span>
               </li>
             ) : (
               items.map((u, i) => (
@@ -159,7 +161,7 @@ export function AddMemberDialog({
                     aria-selected={i === activeIndex}
                     onClick={() => add.mutate(u.email)}
                     onMouseEnter={() => setActiveIndex(i)}
-                    className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm ${i === activeIndex ? "bg-accent" : ""}`}
+                    className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-start text-sm ${i === activeIndex ? "bg-accent" : ""}`}
                   >
                     <span className="min-w-0 flex-1 truncate">
                       <span className="font-medium">{u.display_name}</span>{" "}
@@ -174,7 +176,7 @@ export function AddMemberDialog({
             )}
           </ul>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="member-role">Role</Label>
+            <Label htmlFor="member-role">{t("settings:addMember.role")}</Label>
             <Select value={role} onValueChange={setRole}>
               <SelectTrigger id="member-role" data-testid="member-role">
                 <SelectValue />
@@ -182,7 +184,7 @@ export function AddMemberDialog({
               <SelectContent>
                 {ROLES.map((r) => (
                   <SelectItem key={r} value={r}>
-                    {roleLabel(r)}
+                    {t(roleLabelKey(r))}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -191,7 +193,7 @@ export function AddMemberDialog({
           {error ? <p className="text-2xs text-destructive" role="alert">{error}</p> : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("settings:actions.cancel")}
             </Button>
           </DialogFooter>
         </div>

@@ -5,7 +5,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { roleLabel } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
+import { roleLabelKey } from "@/lib/utils";
 import { switchTeamLocation } from "@/lib/workspace";
 
 /**
@@ -23,6 +24,7 @@ export function TeamSwitcherMenu({
   activeTeamId: string | undefined;
   onNavigated?: () => void;
 }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   return (
@@ -32,7 +34,7 @@ export function TeamSwitcherMenu({
       align="start"
       className="w-56 max-h-[min(24rem,60vh)] overflow-y-auto scrollbar-thin"
     >
-      <DropdownMenuLabel>Teams</DropdownMenuLabel>
+      <DropdownMenuLabel>{t("team.label")}</DropdownMenuLabel>
       {teams.map((team) => (
         <DropdownMenuItem
           key={team.id}
@@ -47,11 +49,11 @@ export function TeamSwitcherMenu({
           className="justify-between"
         >
           <span className="truncate">{team.name}</span>
-          <span className="text-2xs text-muted-foreground">{roleLabel(team.my_role ?? "")}</span>
+          <span className="text-2xs text-muted-foreground">{t(roleLabelKey(team.my_role ?? ""))}</span>
         </DropdownMenuItem>
       ))}
       {teams.length === 0 ? (
-        <DropdownMenuItem disabled>No teams yet</DropdownMenuItem>
+        <DropdownMenuItem disabled>{t("team.noneYet")}</DropdownMenuItem>
       ) : null}
       <DropdownMenuSeparator />
       <DropdownMenuItem
@@ -60,7 +62,7 @@ export function TeamSwitcherMenu({
           onNavigated?.();
         }}
       >
-        Create team…
+        {t("team.create")}
       </DropdownMenuItem>
       {activeTeamId ? null : null}
     </DropdownMenuContent>

@@ -294,6 +294,100 @@ pub async fn list_repository_projects(
         .collect())
 }
 
+/// List a repository's project mappings with metadata (management API).
+pub async fn list_mappings_with_meta(
+    conn: &mut Conn<'_>,
+    repository_id: &str,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let mut args = Args::new();
+    args.s(repository_id);
+    let rows = conn
+        .fetch_all(
+            "SELECT m.id, m.project_id, m.mapped_by, m.created_at, p.name AS project_name              FROM integration_repository_projects m              JOIN projects p ON p.id = m.project_id              WHERE m.repository_id = ? ORDER BY m.created_at, m.id",
+            args,
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.try_get::<String, _>("id").unwrap_or_default(),
+                "project_id": r.try_get::<String, _>("project_id").unwrap_or_default(),
+                "project_name": r.try_get::<String, _>("project_name").unwrap_or_default(),
+                "mapped_by": r.try_get::<String, _>("mapped_by").unwrap_or_default(),
+                "created_at": r.try_get::<i64, _>("created_at").unwrap_or_default(),
+            })
+        })
+        .collect())
+}
+
+/// Delete one mapping. Guarded by the repository id (which itself anchors
+/// the team), so a caller cannot delete another team's mapping even with a
+/// guessed mapping id.
+pub async fn delete_mapping(
+    conn: &mut Conn<'_>,
+    repository_id: &str,
+    mapping_id: &str,
+) -> Result<bool, AppError> {
+    let mut args = Args::new();
+    args.s(mapping_id).s(repository_id);
+    let affected = conn
+        .execute(
+            "DELETE FROM integration_repository_projects WHERE id = ? AND repository_id = ?",
+            args,
+        )
+        .await?;
+    Ok(affected > 0)
+}
+
+/// List an integration's repositories (management API pagination).
+pub async fn list_repositories(
+    conn: &mut Conn<'_>,
+    integration_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Repository>, AppError> {
+    let mut args = Args::new();
+    args.s(integration_id).i(limit).i(offset);
+    let rows = conn
+        .fetch_all(
+            "SELECT id, integration_id, external_repo_id, full_name, created_at              FROM integration_repositories WHERE integration_id = ?              ORDER BY created_at, id LIMIT ? OFFSET ?",
+            args,
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| Repository {
+            id: r.try_get("id").unwrap_or_default(),
+            integration_id: r.try_get("integration_id").unwrap_or_default(),
+            external_repo_id: r.try_get("external_repo_id").unwrap_or_default(),
+            full_name: r.try_get("full_name").unwrap_or_default(),
+            created_at: r.try_get("created_at").unwrap_or_default(),
+        })
+        .collect())
+}
+
+/// Remove a registered repository. Mappings reference it with ON DELETE
+/// RESTRICT: a repository with mappings cannot be removed until its mappings
+/// are (the unique violation from the RESTRICT FK surfaces as an error the
+/// API maps to a 409). Returns false when the repository does not belong to
+/// this integration.
+pub async fn delete_repository(
+    conn: &mut Conn<'_>,
+    integration_id: &str,
+    repository_id: &str,
+) -> Result<bool, AppError> {
+    let mut args = Args::new();
+    args.s(repository_id).s(integration_id);
+    let affected = conn
+        .execute(
+            "DELETE FROM integration_repositories WHERE id = ? AND integration_id = ?",
+            args,
+        )
+        .await?;
+    Ok(affected > 0)
+}
+
 /// Durable webhook delivery record (schema-only in Task 1; intake writes it,
 /// the Task 2 worker processes it). Kept here so the intake path and the
 /// future worker share one insert contract.

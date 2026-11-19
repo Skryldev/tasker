@@ -191,9 +191,122 @@ intake resolves it through the production registry (`production_registry()`).
 - **Setup**: the webhook secret is the integration's credential
   (provision/rotate/revoke lifecycle from Task 1; management UI in Task 6).
 
+## GitLab adapter (Task 4)
+
+`src/integrations/gitlab.rs` — same engine, GitLab semantics:
+
+- **Verification**: `X-Gitlab-Token` (the secret verbatim) compared
+  constant-time over SHA-256 digests — never ordinary string equality.
+- **Identity**: `X-Gitlab-Webhook-UUID` (GitLab ≥ 13.x) + `X-Gitlab-Event`.
+  Event names contain spaces (`"Push Event"`) — allowed by the bounded
+  event-header validation.
+- **Classification**: GitLab reports branch creation/deletion *inside* the
+  Push Event via all-zero `before`/`after` SHAs (length-agnostic across
+  SHA-1/SHA-256 repositories):
+
+| GitLab event | Vocabulary | Notes |
+|---|---|---|
+| `Push Event` (ordinary) | `git_push` | `branch`, `commit_count`, `head_sha` |
+| `Push Event` (zero `before`) | `git_branch_created` | |
+| `Push Event` (zero `after`) | `git_branch_deleted` | |
+| `Merge Request Event` open/reopen | `git_pull_request_opened` | |
+| `Merge Request Event` merge | `git_pull_request_merged` | |
+| `Merge Request Event` close | `git_pull_request_closed` | |
+| `Merge Request Event` other actions | — | durably `unsupported` |
+| `Release Event` publish | `git_release_published` | `release_tag` |
+| everything else (Tag Push, Issue, Note, Pipeline, URL Test, …) | — | durably `unsupported` |
+
+- **Normalization**: identical snapshot keys to the GitHub adapter
+  (`pr_number` = MR iid, `pr_author_id` = GitLab's numeric author id, …).
+
+## Taskless automation (Task 5)
+
+Integration events evaluate through the **shared** Rules Engine — one
+evaluation model, no provider-specific rules:
+
+- The webhook worker persists the normalized domain event, evaluates matching
+  integration rules, and completes the delivery **in one transaction**:
+  crash-safe and duplicate-safe (execution uniqueness per (rule, event), the
+  provenance uniqueness per delivery).
+- `rule_executions.task_id` and `automation_outbox.task_id` are **nullable**
+  (migration 0024): integration executions are taskless by design. External
+  actors never become Tasker users; the Automation Principal performs all
+  effects.
+- **Action compatibility is decided at execution time**, on the durable
+  record:
+  - `send_notification` with **explicit recipients** — the taskless action:
+    recipients revalidated as team members, notifications created with
+    `task_id NULL`, summaries citing the integration event, preference
+    gating and dedup identical to the task path;
+  - `add_comment`, and selector-based notification recipients (assignee /
+    reporter) — task-scoped: the intent **dead-letters immediately**
+    (category `permanent`, diagnosable detail) instead of retrying;
+  - `send_message` — external, unchanged (stays pending for the future
+    external dispatcher).
+  Rule-authoring validation (Task 6 API) rejects incompatible combinations
+  up front; the execution-time behavior is the safety net.
+- Conditions are re-validated in the integration namespace at evaluation
+  time and evaluated against the normalized snapshot's `integration.*`
+  fields; missing snapshot fields evaluate to missing (never a silent
+  match).
+
+## Deployment & operations (Task 7)
+
+### Configuration checklist
+
+- **`TASKER_INTEGRATIONS_KEY`** (required for integrations): exactly 64 hex
+  characters (32 bytes), the AES-256-GCM envelope key for webhook secrets.
+  Absent => every credential operation fails closed (integrations cannot be
+  created or verified); present-but-malformed => startup aborts. Keep it in
+  the same secret store class as `TASKER_MFA_ENCRYPTION_KEY` — separate
+  compromise domains, never derived from each other.
+- **`TASKER_WEBHOOK_WORKER_*`** — see the Configuration section above;
+  defaults match the Rules dispatcher and are safe for single-node self-hosted
+  deployments.
+
+### Webhook setup (per integration)
+
+1. Create the integration (Owner/Admin → integrations API): the response
+   contains the plaintext webhook secret **once** — store it immediately.
+2. In GitHub/GitLab, add a webhook pointing to
+   `https://<your-tasker-host>/api/v1/webhooks/{provider}/{integration_id}`,
+   content type `application/json`, secret = the stored value. Payloads are
+   bounded at 15,000 bytes.
+3. Register the repositories the integration listens to and map them to
+   projects (mappings decide where normalized events surface; cross-team
+   mappings are unrepresentable).
+4. Rotating the secret: rotate (version CAS) → paste the new value into the
+   provider → old secret stops verifying immediately. Revocation cuts
+   verification off instantly; re-provisioning reactivates with a new
+   secret.
+
+### Operational runbook
+
+- **Intake rejected (4xx)**: check the `reason` class in the response body
+  and the `tasker_webhook_intake_rejected_total{reason}` counters. 401
+  classes are intentionally indistinguishable — verify the stored secret
+  version and the provider-side secret match after rotations.
+- **Deliveries stuck `pending`**: the worker is enabled?
+  (`TASKER_WEBHOOK_WORKER_ENABLED`); check `tasker_webhook_deliveries_claimed_total`
+  advancing. Stuck `processing`: worker crash — leases expire after
+  `LEASE_MS` and re-queue without burning attempts
+  (`tasker_webhook_leases_recovered_total`).
+- **Dead letters**: inspect via the deliveries API (status filter
+  `dead_letter`); `last_error_category` distinguishes `permanent`
+  (misconfiguration — fix the rule/integration), `exhausted` (repeated
+  transient failures — check the DB), and `expired` (age). Replay from the
+  API is audited and resets the retry budget.
+- **Rules not firing**: integration rules are team-scoped with
+  `git_*` triggers; execution records exist per matched rule
+  (taskless — `task_id` NULL). Task-scoped actions on integration events
+  dead-letter by design with `requires a task context` in the detail.
+- **Secret hygiene**: plaintext secrets exist only inside the verification
+  call frame; they are never logged, never persisted, and served exactly
+  once per lifecycle operation. The activity trail records every lifecycle
+  operation with version numbers only.
+
 ## Later tasks (8B)
 
-- Task 4: GitLab adapter (secret-token verification).
 - Task 5: core delivery — shared evaluation core, execution-context and
   action-compatibility decisions (nullable execution/outbox task ids).
 - Task 6: integration management API + OpenAPI (and intake-adjacent

@@ -282,6 +282,10 @@ const POSTGRES_MIGRATIONS: &[(&str, &str)] = &[
         "0023_webhook_delivery_infrastructure",
         include_str!("../migrations/postgres/0023_webhook_delivery_infrastructure.sql"),
     ),
+    (
+        "0024_taskless_automation",
+        include_str!("../migrations/postgres/0024_taskless_automation.sql"),
+    ),
 ];
 const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -368,6 +372,10 @@ const MYSQL_MIGRATIONS: &[(&str, &str)] = &[
         "0023_webhook_delivery_infrastructure",
         include_str!("../migrations/mysql/0023_webhook_delivery_infrastructure.sql"),
     ),
+    (
+        "0024_taskless_automation",
+        include_str!("../migrations/mysql/0024_taskless_automation.sql"),
+    ),
 ];
 const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -449,6 +457,10 @@ const SQLITE_MIGRATIONS: &[(&str, &str)] = &[
     (
         "0023_webhook_delivery_infrastructure",
         include_str!("../migrations/sqlite/0023_webhook_delivery_infrastructure.sql"),
+    ),
+    (
+        "0024_taskless_automation",
+        include_str!("../migrations/sqlite/0024_taskless_automation.sql"),
     ),
 ];
 
@@ -1019,7 +1031,7 @@ mod tests {
         .await
         .unwrap();
         let migrations = migrations_for(Driver::Sqlite);
-        assert_eq!(migrations.len(), 20, "expected migrations 0001..0023");
+        assert_eq!(migrations.len(), 21, "expected migrations 0001..0024");
         // Build the PRE-0005 schema: 0001..0004 only.
         for (version, sql) in &migrations[..4] {
             for statement in split_statements(sql) {

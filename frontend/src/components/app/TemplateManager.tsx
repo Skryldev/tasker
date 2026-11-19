@@ -153,7 +153,7 @@ export function TemplateManager({ projectId }: { projectId: string }) {
           {templates.data!.items.map((template) => (
             <li
               key={template.id}
-              className="flex items-center gap-3 rounded-lg border px-3.5 py-2.5"
+              className="flex items-center gap-3 rounded-sg border px-3.5 py-2.5"
               data-testid={`template-${template.id}`}
             >
               <div className="min-w-0 flex-1">

@@ -51,7 +51,7 @@ const DialogContent = React.forwardRef<
           else if (forwardedRef) forwardedRef.current = node;
         }}
         className={cn(
-          "fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-y-auto rounded-lg border bg-card p-5 shadow-xl focus:outline-none",
+          "fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-y-auto rounded-sg border bg-card p-5 shadow-xl focus:outline-none",
           "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
           wide ? "max-w-2xl" : "max-w-md",
           className,
@@ -62,7 +62,7 @@ const DialogContent = React.forwardRef<
           {children}
           <DialogPrimitive.Close
             aria-label="Close dialog"
-            className="absolute right-3.5 top-3.5 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="absolute end-3.5 top-3.5 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <X className="h-4 w-4" />
           </DialogPrimitive.Close>

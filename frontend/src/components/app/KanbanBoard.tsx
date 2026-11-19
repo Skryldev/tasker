@@ -77,13 +77,13 @@ const TaskCard = memo(function TaskCard({
       }}
       onClick={() => onOpen?.(task)}
       className={cn(
-        "cursor-grab rounded-lg border bg-card p-3 shadow-sm transition-[box-shadow,transform] duration-150 ease-out hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "cursor-grab rounded-sg border bg-card p-3 shadow-sm transition-[box-shadow,transform] duration-150 ease-out hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         overlay && "scale-[1.02] shadow-lg",
         isDragging && "opacity-40",
       )}
       data-testid={`kanban-card-${task.id}`}
     >
-      <p className="line-clamp-2 text-sm font-medium leading-snug">{task.title}</p>
+      <p className="line-clamp-2 text-sm font-medium leading-snug"><bdi>{task.title}</bdi></p>
       {/* Whitespace between the visible spans so textContent matches the
           accessible name (Label-in-Name substring check). Renders as nothing. */}
       {" "}
@@ -131,7 +131,7 @@ function progressPill(task: Task) {
   const closed = subs.filter((s) => s.status === "closed").length;
   return (
     <span
-      className="ml-auto inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-2xs tabular-nums text-muted-foreground"
+      className="ms-auto inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-2xs tabular-nums text-muted-foreground"
       title={`${closed} of ${subs.length} subtasks closed`}
     >
       <ListChecks className="h-2.5 w-2.5" aria-hidden />
@@ -154,7 +154,7 @@ function KanbanColumn({
   return (
     <section
       aria-label={`${STATUS_LABELS[status] ?? column.status} column`}
-      className="flex w-[270px] shrink-0 flex-col rounded-lg bg-muted/40"
+      className="flex w-[270px] shrink-0 flex-col rounded-sg bg-muted/40"
     >
       <header className="flex items-center gap-2 px-3 pb-1 pt-3">
         <span className={cn("h-2 w-2 rounded-full", statusToClass(column.status))} />
@@ -169,7 +169,7 @@ function KanbanColumn({
         <Button
           variant="ghost"
           size="icon-sm"
-          className="ml-auto"
+          className="ms-auto"
           aria-label={`Add task to ${STATUS_LABELS[status] ?? column.status}`}
           onClick={() => onAdd(column.status)}
         >
@@ -182,7 +182,7 @@ function KanbanColumn({
           className={cn(
             "flex min-h-[80px] flex-1 flex-col gap-2 overflow-y-auto scrollbar-thin p-2 transition-colors",
             // WS7: the drop target flashes a dashed green outline.
-            isOver && "rounded-lg border-2 border-dashed border-success bg-success/5",
+            isOver && "rounded-sg border-2 border-dashed border-success bg-success/5",
           )}
         >
         {column.items.map((task) => (

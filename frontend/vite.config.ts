@@ -21,6 +21,9 @@ export default defineConfig({
     },
   },
   build: {
+    // Top-level await drives the i18n bootstrap before first render
+    // (Phase 15, ADR-0024).
+    target: "es2022",
     sourcemap: false,
     rollupOptions: {
       output: {

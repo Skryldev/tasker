@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { QRCodeSVG } from "qrcode.react";
 import { KeyRound, ShieldCheck, ShieldOff } from "lucide-react";
 import { api, ApiError } from "@/api/client";
@@ -26,6 +27,7 @@ function formatCode(value: string): string {
 }
 
 export function MfaSettings({ enabled }: { enabled: boolean }) {
+  const { t } = useTranslation("settings");
   const { push } = useToast();
   const qc = useQueryClient();
   const [setup, setSetup] = useState<SetupState>(null);
@@ -52,7 +54,7 @@ export function MfaSettings({ enabled }: { enabled: boolean }) {
       setFormError(null);
     },
     onError: (err) =>
-      push("error", "Could not start 2FA setup", err instanceof ApiError ? err.message : undefined),
+      push("error", t("mfa.errors.start"), err instanceof ApiError ? err.message : undefined),
   });
 
   const enable = useMutation({
@@ -66,7 +68,7 @@ export function MfaSettings({ enabled }: { enabled: boolean }) {
     onError: (err) =>
       setFormError(
         err instanceof ApiError && err.status === 401
-          ? "That code is not valid. Make sure your authenticator clock is correct and try the current code."
+          ? t("mfa.errors.invalidCode")
           : err.message,
       ),
   });
@@ -74,13 +76,13 @@ export function MfaSettings({ enabled }: { enabled: boolean }) {
   const disable = useMutation({
     mutationFn: () => api.mfaDisable(password),
     onSuccess: () => {
-      push("success", "Two-factor authentication disabled");
+      push("success", t("mfa.disabledToast"));
       setPassword("");
       setDisableOpen(false);
       void qc.invalidateQueries({ queryKey: ["me"] });
     },
     onError: (err) =>
-      setFormError(err instanceof ApiError ? err.message : "Could not disable 2FA."),
+      setFormError(err instanceof ApiError ? err.message : t("mfa.errors.disable")),
   });
 
   const regenerate = useMutation({
@@ -93,25 +95,25 @@ export function MfaSettings({ enabled }: { enabled: boolean }) {
       setFormError(null);
     },
     onError: (err) =>
-      setFormError(err instanceof ApiError ? err.message : "Could not regenerate recovery codes."),
+      setFormError(err instanceof ApiError ? err.message : t("mfa.errors.regenerate")),
   });
 
   return (
-    <section aria-label="Two-factor authentication" className="rounded-lg border p-4">
+    <section aria-label={t("mfa.title")} className="rounded-sg border p-4">
       <h2 className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
-        <ShieldCheck className="h-4 w-4" /> Two-factor authentication
+        <ShieldCheck className="h-4 w-4" /> {t("mfa.title")}
       </h2>
       <p className="mb-3 text-xs text-muted-foreground">
         {enabled
-          ? "Enabled. Signing in requires a code from your authenticator app."
-          : "Add a second factor with any TOTP app (Google Authenticator, Aegis, 1Password…)."}
+          ? t("mfa.subtitleEnabled")
+          : t("mfa.subtitleDisabled")}
       </p>
 
       {enabled && !recoveryCodes ? (
         <div className="flex flex-col gap-2" data-testid="mfa-enabled">
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={() => { setFormError(null); setRegenOpen(true); }} data-testid="mfa-regenerate">
-              <KeyRound /> New recovery codes
+              <KeyRound /> {t("mfa.newRecoveryCodes")}
             </Button>
             <Button
               size="sm"
@@ -120,7 +122,7 @@ export function MfaSettings({ enabled }: { enabled: boolean }) {
               onClick={() => { setFormError(null); setDisableOpen(true); }}
               data-testid="mfa-disable"
             >
-              <ShieldOff /> Disable 2FA
+              <ShieldOff /> {t("mfa.disable2fa")}
             </Button>
           </div>
         </div>
@@ -133,26 +135,26 @@ export function MfaSettings({ enabled }: { enabled: boolean }) {
           disabled={startSetup.isPending}
           data-testid="mfa-start"
         >
-          {startSetup.isPending ? "Preparing…" : "Enable 2FA"}
+          {startSetup.isPending ? t("mfa.preparing") : t("mfa.enable2fa")}
         </Button>
       ) : null}
 
       {setup ? (
         <div className="flex flex-col gap-3" data-testid="mfa-setup">
           <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
-            <div className="rounded-lg border bg-white p-2" aria-hidden>
+            <div className="rounded-sg border bg-white p-2" aria-hidden>
               <QRCodeSVG value={setup.uri} size={148} level="M" data-testid="mfa-qr" />
             </div>
             <div className="min-w-0 flex-1 text-xs">
-              <p className="font-medium">1. Scan with your authenticator app</p>
+              <p className="font-medium">{t("mfa.scanTitle")}</p>
               <p className="mt-1 text-muted-foreground">
-                Or enter the secret manually:
+                {t("mfa.manualEntry")}
                 <button
                   type="button"
-                  className="ml-1 underline underline-offset-2"
+                  className="ms-1 underline underline-offset-2"
                   onClick={() => setManualEntry((v) => !v)}
                 >
-                  {manualEntry ? "hide" : "show"}
+                  {manualEntry ? t("mfa.hide") : t("mfa.show")}
                 </button>
               </p>
               {manualEntry ? (
@@ -170,14 +172,14 @@ export function MfaSettings({ enabled }: { enabled: boolean }) {
             onSubmit={(e) => {
               e.preventDefault();
               if (formatCode(code).length !== 6) {
-                setFormError("Enter the six-digit code from your app.");
+                setFormError(t("mfa.errors.enterCode"));
                 return;
               }
               enable.mutate();
             }}
             noValidate
           >
-            <Label htmlFor="mfa-code">2. Enter the six-digit code</Label>
+            <Label htmlFor="mfa-code">{t("mfa.codeLabel")}</Label>
             <Input
               id="mfa-code"
               inputMode="numeric"
@@ -201,10 +203,10 @@ export function MfaSettings({ enabled }: { enabled: boolean }) {
                 disabled={formatCode(code).length !== 6 || enable.isPending}
                 data-testid="mfa-enable-submit"
               >
-                {enable.isPending ? "Verifying…" : "Verify & enable"}
+                {enable.isPending ? t("mfa.verifying") : t("mfa.verifyEnable")}
               </Button>
               <Button type="button" size="sm" variant="ghost" onClick={resetSetup}>
-                Cancel
+                {t("actions.cancel")}
               </Button>
             </div>
           </form>
@@ -218,12 +220,10 @@ export function MfaSettings({ enabled }: { enabled: boolean }) {
             role="alert"
           >
             <p className="font-medium text-warning-foreground">
-              Store these recovery codes somewhere safe — they are shown only
-              this once.
+              {t("mfa.recoveryWarning")}
             </p>
             <p className="mt-1 text-muted-foreground">
-              Each code works once instead of an authenticator code. Without a
-              code or a recovery code you cannot sign in.
+              {t("mfa.recoveryInfo")}
             </p>
           </div>
           <ul
@@ -246,8 +246,7 @@ export function MfaSettings({ enabled }: { enabled: boolean }) {
               className="mt-0.5 h-3.5 w-3.5 accent-[hsl(var(--primary))]"
               data-testid="mfa-recovery-ack"
             />
-            I stored these codes somewhere safe (a password manager or printed
-            copy). They will not be shown again.
+            {t("mfa.ackLabel")}
           </label>
           <Button
             size="sm"
@@ -256,7 +255,7 @@ export function MfaSettings({ enabled }: { enabled: boolean }) {
             onClick={() => setRecoveryCodes(null)}
             data-testid="mfa-recovery-done"
           >
-            I have stored my recovery codes
+            {t("mfa.ackButton")}
           </Button>
         </div>
       ) : null}
@@ -265,14 +264,14 @@ export function MfaSettings({ enabled }: { enabled: boolean }) {
       <ConfirmDialog
         open={disableOpen}
         onOpenChange={setDisableOpen}
-        title="Disable two-factor authentication?"
-        description="Your authenticator and all recovery codes stop working immediately."
-        confirmLabel="Disable 2FA"
+        title={t("mfa.disableConfirm.title")}
+        description={t("mfa.disableConfirm.description")}
+        confirmLabel={t("mfa.disable2fa")}
         pending={disable.isPending}
         onConfirm={() => disable.mutate()}
       >
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="mfa-disable-password">Current password</Label>
+          <Label htmlFor="mfa-disable-password">{t("password.current")}</Label>
           <Input
             id="mfa-disable-password"
             type="password"
@@ -292,15 +291,15 @@ export function MfaSettings({ enabled }: { enabled: boolean }) {
       <ConfirmDialog
         open={regenOpen}
         onOpenChange={setRegenOpen}
-        title="Generate new recovery codes?"
-        description="Every previously issued recovery code stops working."
-        confirmLabel="Generate codes"
+        title={t("mfa.regenConfirm.title")}
+        description={t("mfa.regenConfirm.description")}
+        confirmLabel={t("mfa.regenConfirm.confirm")}
         destructive={false}
         pending={regenerate.isPending}
         onConfirm={() => regenerate.mutate()}
       >
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="mfa-regen-password">Current password</Label>
+          <Label htmlFor="mfa-regen-password">{t("password.current")}</Label>
           <Input
             id="mfa-regen-password"
             type="password"

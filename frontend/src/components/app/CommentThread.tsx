@@ -89,7 +89,7 @@ export function CommentThread({
 
       {/* Replies: nested list, 32px indent with a left rule. */}
       {replies.length > 0 ? (
-        <ul className="ml-8 border-l pl-3" aria-label={`Replies to ${parent.author.display_name}`}>
+        <ul className="ms-8 border-s ps-3" aria-label={`Replies to ${parent.author.display_name}`}>
           {visibleReplies.map((reply) => (
             <li key={reply.id} className="py-2 first:pt-1" data-testid={`reply-${reply.id}`}>
               <CommentRow
@@ -110,7 +110,7 @@ export function CommentThread({
       {collapsed ? (
         <button
           type="button"
-          className="ml-8 mt-1 text-2xs text-primary hover:underline"
+          className="ms-8 mt-1 text-2xs text-primary hover:underline"
           onClick={() => setShowAll(true)}
           data-testid="show-replies"
         >
@@ -122,7 +122,7 @@ export function CommentThread({
       {/* Inline reply composer: 150ms slide-down + fade (transform/opacity). */}
       <div
         className={cn(
-          "ml-8 origin-top transition-all duration-150 ease-out",
+          "ms-8 origin-top transition-all duration-150 ease-out",
           replyOpen ? "visible translate-y-0 opacity-100" : "invisible -translate-y-1 opacity-0",
         )}
       >
@@ -217,7 +217,7 @@ function CommentRow({
         {comment.created_at !== comment.updated_at ? (
           <span className="text-muted-foreground">(edited)</span>
         ) : null}
-        <span className="ml-auto flex gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+        <span className="ms-auto flex gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
           {onReplyClick ? (
             <button
               type="button"

@@ -224,23 +224,23 @@ function TaskPageInner({
             onClick={() => navigate(-1)}
             data-testid="task-page-back"
           >
-            <ArrowLeft />
+            <ArrowLeft className="rtl:rotate-180" />
           </Button>
           <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
             <Link to={`/teams/${teamId}`} className="truncate hover:text-foreground hover:underline">
               Team
             </Link>
-            <ChevronRight className="h-3 w-3 shrink-0" aria-hidden />
+            <ChevronRight className="h-3 w-3 shrink-0 rtl:rotate-180" aria-hidden />
             <Link
               to={`/projects/${projectId}?team=${teamId}`}
               className="truncate hover:text-foreground hover:underline"
             >
               {projectName}
             </Link>
-            <ChevronRight className="h-3 w-3 shrink-0" aria-hidden />
-            <span className="truncate font-medium text-foreground">{initialTask.title}</span>
+            <ChevronRight className="h-3 w-3 shrink-0 rtl:rotate-180" aria-hidden />
+            <bdi className="truncate font-medium text-foreground">{initialTask.title}</bdi>
           </nav>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ms-auto flex items-center gap-2">
             <StatusControl task={initialTask} />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -320,7 +320,7 @@ function TaskPageInner({
                     setTitleEditing(true);
                   }}
                   disabled={isClosed}
-                  className="min-w-0 flex-1 text-left hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:hover:bg-transparent"
+                  className="min-w-0 flex-1 text-start hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:hover:bg-transparent"
                   aria-label="Rename task"
                   data-testid="task-page-title"
                 >
@@ -339,7 +339,7 @@ function TaskPageInner({
 
         {/* Metadata rail: the same shared MetadataBand the quick view uses. */}
         <aside
-          className="shrink-0 border-t bg-muted/20 p-4 lg:w-[340px] lg:border-l lg:border-t-0"
+          className="shrink-0 border-t bg-muted/20 p-4 lg:w-[340px] lg:border-s lg:border-t-0"
           data-testid="task-page-rail"
           aria-label="Task metadata"
         >

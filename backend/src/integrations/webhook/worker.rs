@@ -204,6 +204,7 @@ async fn process_claimed(
                 event_type,
                 occurred_at,
                 &state_json,
+                &state,
                 started,
             )
             .await;
@@ -237,6 +238,7 @@ async fn process_event(
     event_type: crate::rules::events::IntegrationTriggerType,
     occurred_at: i64,
     state_json: &str,
+    state: &serde_json::Value,
     started: Instant,
 ) {
     let mut tx = match db.begin().await {
@@ -327,7 +329,7 @@ async fn process_event(
         }
     }
 
-    match delivery::insert_integration_domain_event(
+    let event_id = match delivery::insert_integration_domain_event(
         &mut tx,
         &delivery_claim,
         event_type,
@@ -336,12 +338,28 @@ async fn process_event(
     )
     .await
     {
-        Ok(()) => {}
+        Ok(event_id) => event_id,
         Err(err) => {
             tx.rollback().await;
             handle_post_rollback(db, config, worker_id, metrics, delivery_claim, err).await;
             return;
         }
+    };
+
+    // Shared Rules Engine evaluation (Phase 8B, Task 5), in the SAME
+    // transaction: matched integration rules persist executions and action
+    // intents atomically with the event and the delivery completion. The
+    // snapshot value carries the integration.* condition fields.
+    let eval_ctx = crate::rules::engine::IntegrationEventContext {
+        team_id: &delivery_claim.team_id,
+        event_id: &event_id,
+        trigger: event_type,
+        state,
+    };
+    if let Err(err) = crate::rules::engine::evaluate_integration_event(&mut tx, &eval_ctx).await {
+        tx.rollback().await;
+        handle_post_rollback(db, config, worker_id, metrics, delivery_claim, err).await;
+        return;
     }
 
     match delivery::complete_processed(

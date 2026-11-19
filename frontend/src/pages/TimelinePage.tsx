@@ -223,7 +223,7 @@ export function TimelinePage({ projectId: projectIdProp }: { projectId?: string 
         </p>
         <div className="flex items-center gap-2">
           <div
-            className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5"
+            className="flex items-center gap-0.5 rounded-sg bg-muted p-0.5"
             role="tablist"
             aria-label="Timeline zoom"
           >
@@ -259,7 +259,7 @@ export function TimelinePage({ projectId: projectIdProp }: { projectId?: string 
       </header>
 
       {tasks.isLoading ? (
-        <div className="m-4 flex-1 animate-pulse rounded-lg bg-muted" />
+        <div className="m-4 flex-1 animate-pulse rounded-sg bg-muted" />
       ) : items.length === 0 ? (
         <EmptyState
           icon={<CalendarRange className="h-8 w-8" />}
@@ -275,7 +275,7 @@ export function TimelinePage({ projectId: projectIdProp }: { projectId?: string 
         >
           <div className="flex min-w-fit">
             {/* Sticky task list (left) */}
-            <div className="sticky left-0 z-10 w-60 shrink-0 border-r bg-card">
+            <div className="sticky start-0 z-10 w-60 shrink-0 border-e bg-card">
               <div className="h-10 border-b" />
               {rows.map((row, i) => {
                 if (i < visibleRows.start || i >= visibleRows.end) {
@@ -298,12 +298,12 @@ export function TimelinePage({ projectId: projectIdProp }: { projectId?: string 
                     key={row.key}
                     type="button"
                     onClick={() => navigate(`/tasks/${t.id}`)}
-                    className="flex w-full items-center gap-2 border-b px-3 text-left hover:bg-accent/50"
+                    className="flex w-full items-center gap-2 border-b px-3 text-start hover:bg-accent/50"
                     style={{ height: ROW_H }}
                     data-testid={`timeline-row-${t.id}`}
                   >
                     <StatusDot status={t.status} />
-                    <span className="min-w-0 flex-1 truncate text-xs font-medium">{t.title}</span>
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium"><bdi>{t.title}</bdi></span>
                     <Avatar name={t.assignee?.display_name ?? "?"} size="xs" />
                   </button>
                 );
@@ -316,7 +316,7 @@ export function TimelinePage({ projectId: projectIdProp }: { projectId?: string 
                 {columns.map((c, i) => (
                   <div
                     key={i}
-                    className="shrink-0 border-r px-2 pt-2.5 text-2xs text-muted-foreground"
+                    className="shrink-0 border-e px-2 pt-2.5 text-2xs text-muted-foreground"
                     style={{ width: columnWidth }}
                   >
                     {c.label}
@@ -326,10 +326,10 @@ export function TimelinePage({ projectId: projectIdProp }: { projectId?: string 
               {/* Today line */}
               <div
                 className="pointer-events-none absolute bottom-0 top-10 z-[5] w-px bg-primary"
-                style={{ left: ((todayX - range.start) / (zoomDays(zoom) * DAY_MS)) * columnWidth }}
+                style={{ insetInlineStart: ((todayX - range.start) / (zoomDays(zoom) * DAY_MS)) * columnWidth }}
                 data-testid="timeline-today"
               >
-                <span className="absolute -top-0.5 left-1 rounded-sm bg-primary px-1 text-[9px] font-semibold leading-4 text-primary-foreground">
+                <span className="absolute -top-0.5 start-1 rounded-sm bg-primary px-1 text-[9px] font-semibold leading-4 text-primary-foreground">
                   Today
                 </span>
               </div>
@@ -379,7 +379,7 @@ export function TimelinePage({ projectId: projectIdProp }: { projectId?: string 
                     {columns.map((_c, i) => (
                       <div
                         key={i}
-                        className="h-full shrink-0 border-r border-border/50"
+                        className="h-full shrink-0 border-e border-border/50"
                         style={{ width: columnWidth }}
                       />
                     ))}
@@ -426,16 +426,16 @@ export function TimelinePage({ projectId: projectIdProp }: { projectId?: string 
                       }}
                       onClick={() => navigate(`/tasks/${t.id}`)}
                       className={cn(
-                        "absolute top-1.5 h-7 cursor-grab overflow-hidden rounded border px-2 text-left text-2xs font-medium text-foreground transition-shadow duration-150 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        "absolute top-1.5 h-7 cursor-grab overflow-hidden rounded border px-2 text-start text-2xs font-medium text-foreground transition-shadow duration-150 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         STATUS_BAR[t.status],
                       )}
-                      style={{ left, width }}
+                      style={{ insetInlineStart: left, width }}
                       data-testid={`timeline-bar-${t.id}`}
                     >
                       {/* Progress segment */}
                       {progress !== null ? (
                         <span
-                          className="absolute inset-y-0 left-0 bg-foreground/10"
+                          className="absolute inset-y-0 start-0 bg-foreground/10"
                           style={{ width: `${progress}%` }}
                           aria-hidden
                         />
@@ -444,14 +444,14 @@ export function TimelinePage({ projectId: projectIdProp }: { projectId?: string 
                         {t.assignee ? (
                           <Avatar name={t.assignee.display_name} size="xs" className="h-4 w-4" />
                         ) : null}
-                        <span className="truncate">{t.title}</span>
+                        <bdi className="truncate">{t.title}</bdi>
                       </span>
                     </button>
                     {/* Deadline diamond */}
                     {deadlineLeft !== null ? (
                       <span
                         className="absolute top-3 h-3 w-3 rotate-45 border border-destructive/60 bg-destructive/20"
-                        style={{ left: deadlineLeft - 6 }}
+                        style={{ insetInlineStart: deadlineLeft - 6 }}
                         title={`Deadline ${t.deadline}`}
                         aria-label={`Deadline ${t.deadline}`}
                         data-testid={`timeline-deadline-${t.id}`}

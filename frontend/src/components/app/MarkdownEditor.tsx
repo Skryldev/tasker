@@ -252,7 +252,7 @@ export function MarkdownEditor({
           <ul
             role="listbox"
             aria-label="Insert markdown block"
-            className="absolute left-2 top-2 z-10 max-h-48 w-56 overflow-y-auto rounded-md border bg-popover p-1 shadow-md"
+            className="absolute start-2 top-2 z-10 max-h-48 w-56 overflow-y-auto rounded-md border bg-popover p-1 shadow-md"
             data-testid="slash-menu"
           >
             {filtered.map((c, i) => (
@@ -266,7 +266,7 @@ export function MarkdownEditor({
                     apply(String(c.id), true);
                   }}
                   className={cn(
-                    "flex w-full items-center rounded px-2 py-1.5 text-left text-sm transition-colors duration-100",
+                    "flex w-full items-center rounded px-2 py-1.5 text-start text-sm transition-colors duration-100",
                     i === slashIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
                   )}
                 >

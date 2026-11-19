@@ -39,7 +39,7 @@ function Column({
       <p
         className={cn(
           "text-2xs uppercase tracking-wide text-muted-foreground",
-          align === "right" && "text-right",
+          align === "right" && "text-end",
         )}
       >
         {title}
@@ -93,7 +93,7 @@ export function DependencyGraphModal({ task, onClose }: { task: Task; onClose: (
         role="dialog"
         aria-modal
         aria-label={`Dependency graph for ${task.title}`}
-        className="w-full max-w-2xl rounded-lg border bg-popover p-4 shadow-lg"
+        className="w-full max-w-2xl rounded-sg border bg-popover p-4 shadow-lg"
         data-testid="dependency-graph-modal"
       >
         <div className="mb-3 flex items-center justify-between">

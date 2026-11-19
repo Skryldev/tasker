@@ -110,7 +110,7 @@ export function CapacityPage() {
         <>
           {/* Summary row */}
           <div
-            className="mb-6 grid grid-cols-3 gap-3 rounded-lg border bg-card p-4"
+            className="mb-6 grid grid-cols-3 gap-3 rounded-sg border bg-card p-4"
             data-testid="capacity-summary"
           >
             <SummaryTile label="Open tasks" value={summary?.total_open_tasks ?? 0} />
@@ -154,7 +154,7 @@ export function CapacityPage() {
             <div className="overflow-x-auto" data-testid="capacity-table">
               <table className="w-full min-w-[640px] border-collapse text-sm">
                 <thead>
-                  <tr className="border-b bg-muted/50 text-left">
+                  <tr className="border-b bg-muted/50 text-start">
                     {["Member", "Open", "Overdue", window === "week" ? "Due this week" : "Due this month", "Capacity", "Utilization"].map((h) => (
                       <th
                         key={h}

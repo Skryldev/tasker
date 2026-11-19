@@ -12,6 +12,7 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { api, ApiError, type Label as LabelData, type Member, type TrashProject } from "@/api/client";
 import {
   useLabels,
@@ -53,12 +54,13 @@ import { useToast } from "@/components/ui/toast";
 import { useWorkspace, useIsAdmin } from "@/lib/workspace";
 import { fileToAvatarDataUrl, AvatarError } from "@/lib/avatar";
 import { setTeamAvatarVersion, teamAvatarUrl } from "@/lib/avatar-version";
-import { cn, roleLabel, timeAgo } from "@/lib/utils";
+import { cn, roleLabelKey, timeAgo } from "@/lib/utils";
 import { LABEL_PALETTE } from "@/lib/label-palette";
 
 const ROLES = ["owner", "admin", "manager", "member"] as const;
 
 export function TeamSettingsPage() {
+  const { t } = useTranslation("settings");
   const { teamId } = useWorkspace();
   const team = useTeam(teamId);
   // Guest permission scopes come from the team's projects (Phase 13).
@@ -78,8 +80,8 @@ export function TeamSettingsPage() {
     return (
       <EmptyState
         icon={<Users className="h-8 w-8" />}
-        title="Team unavailable"
-        description="Select a valid team from the switcher."
+        title={t("team.unavailable")}
+        description={t("team.unavailableHint")}
       />
     );
   }
@@ -89,23 +91,23 @@ export function TeamSettingsPage() {
       <header className="mb-6">
         <div>
           <h1 className="flex items-center gap-2 text-lg font-semibold">
-            {team.data?.name ?? "Team"} settings
+            {t("team.settingsTitle", { name: team.data?.name ?? t("team.fallbackName") })}
             {archived ? (
               <Badge variant="muted" data-testid="team-archived-badge">
-                Archived
+                {t("team.archived")}
               </Badge>
             ) : null}
           </h1>
           <p className="text-xs text-muted-foreground">
-            {team.data?.description || "Manage members, roles, and labels."}
+            {team.data?.description || t("team.manageHint")}
           </p>
         </div>
       </header>
 
       {isAdmin && team.data ? (
         <>
-          <section aria-label="Team details" className="mb-8">
-            <h2 className="mb-3 text-sm font-semibold">Team details</h2>
+          <section aria-label={t("team.details")} className="mb-8">
+            <h2 className="mb-3 text-sm font-semibold">{t("team.details")}</h2>
             <TeamDetailsForm
               teamId={teamId}
               initialName={team.data.name}
@@ -160,6 +162,7 @@ function TeamDetailsForm({
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
   const [timezone, setTimezone] = useState(initialTimezone || "none");
+  const { t } = useTranslation("settings");
   const { push } = useToast();
   const qc = useQueryClient();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -173,11 +176,11 @@ function TeamDetailsForm({
         timezone: timezoneValue(timezone) ?? undefined,
       }),
     onSuccess: () => {
-      push("success", "Team updated");
+      push("success", t("team.updated"));
       void qc.invalidateQueries({ queryKey: ["teams"] });
       void qc.invalidateQueries({ queryKey: ["team", teamId] });
     },
-    onError: (error) => push("error", "Could not update team", error.message),
+    onError: (error) => push("error", t("team.errors.update"), error.message),
   });
 
   const onPickFile = async (file: File | undefined) => {
@@ -188,7 +191,7 @@ function TeamDetailsForm({
       api
         .updateTeam(teamId, { avatar: dataUrl })
         .then(() => {
-          push("success", "Team avatar updated");
+          push("success", t("team.avatarUpdated"));
           void qc.invalidateQueries({ queryKey: ["team", teamId] });
           // Bug 8: cache-bust the team avatar across every surface (same
           // pattern as the profile avatar, Phase 12.5).
@@ -196,11 +199,11 @@ function TeamDetailsForm({
         })
         .catch((error) =>
           setLocalError(
-            error instanceof ApiError ? error.message : "Could not upload the avatar.",
+            error instanceof ApiError ? error.message : t("avatar.errors.upload"),
           ),
         );
     } catch (error) {
-      setLocalError(error instanceof AvatarError ? error.message : "Could not read that file.");
+      setLocalError(error instanceof AvatarError ? error.message : t("avatar.errors.read"));
     }
   };
 
@@ -217,12 +220,12 @@ function TeamDetailsForm({
           <Avatar
             name={name || "?"}
             size="md"
-            className="h-14 w-14 rounded-lg"
+            className="h-14 w-14 rounded-sg"
             src={teamAvatarUrl(teamId)}
           />
           <div className="flex flex-col gap-1">
             <Label htmlFor="team-avatar-upload" className="text-xs">
-              Team avatar — square JPG, PNG or WebP, up to 2 MB.
+              {t("team.avatarLabel")}
             </Label>
             <input
               id="team-avatar-upload"
@@ -243,7 +246,7 @@ function TeamDetailsForm({
                 onClick={() => fileInput.current?.click()}
                 data-testid="team-avatar-pick"
               >
-                Upload…
+                {t("actions.upload")}
               </Button>
               <Button
                 type="button"
@@ -253,23 +256,23 @@ function TeamDetailsForm({
                   api
                     .updateTeam(teamId, { avatar: null })
                     .then(() => {
-                      push("success", "Team avatar removed");
+                      push("success", t("team.avatarRemoved"));
                       void qc.invalidateQueries({ queryKey: ["team", teamId] });
                     })
-                    .catch(() => push("error", "Could not remove the avatar"))
+                    .catch(() => push("error", t("team.errors.avatarRemove")))
                 }
               >
-                Remove
+                {t("actions.remove")}
               </Button>
             </div>
           </div>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="team-name">Name</Label>
+          <Label htmlFor="team-name">{t("team.name")}</Label>
           <Input id="team-name" value={name} onChange={(e) => setName(e.target.value)} className="max-w-sm" />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="team-description">Description</Label>
+          <Label htmlFor="team-description">{t("team.description")}</Label>
           <Input
             id="team-description"
             value={description}
@@ -278,7 +281,7 @@ function TeamDetailsForm({
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="team-timezone">Default timezone</Label>
+          <Label htmlFor="team-timezone">{t("team.timezone")}</Label>
           <div className="max-w-sm" data-testid="team-timezone-select">
             <TimezoneSelect
               id="team-timezone"
@@ -291,7 +294,7 @@ function TeamDetailsForm({
           <p className="text-2xs text-destructive" role="alert">{localError}</p>
         ) : null}
         <Button type="submit" size="sm" className="self-start" disabled={save.isPending || !name.trim()}>
-          {save.isPending ? "Saving…" : "Save"}
+          {save.isPending ? t("actions.saving") : t("team.save")}
         </Button>
       </form>
     </div>
@@ -303,6 +306,7 @@ function TeamDetailsForm({
 // ---------------------------------------------------------------------------
 
 function MembersSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }) {
+  const { t } = useTranslation();
   const members = useMembers(teamId);
   const { push } = useToast();
   const qc = useQueryClient();
@@ -317,28 +321,28 @@ function MembersSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean 
     mutationFn: ({ userId, role }: { userId: string; role: string }) =>
       api.changeMemberRole(teamId, userId, role),
     onSuccess: () => {
-      push("success", "Role updated");
+      push("success", t("settings:members.roleUpdated"));
       invalidate();
     },
     onError: (error) =>
-      push("error", "Could not change role", error instanceof ApiError ? error.message : error.message),
+      push("error", t("settings:members.errors.roleChange"), error instanceof ApiError ? error.message : error.message),
   });
 
   const removeMember = useMutation({
     mutationFn: (userId: string) => api.removeMember(teamId, userId),
     onSuccess: () => {
-      push("info", "Member removed");
+      push("info", t("settings:members.removed"));
       invalidate();
     },
     onError: (error) =>
-      push("error", "Could not remove member", error instanceof ApiError ? error.message : error.message),
+      push("error", t("settings:members.errors.remove"), error instanceof ApiError ? error.message : error.message),
   });
 
   const confirmRemove = (member: Member) => {
     confirm({
-      title: "Remove this member?",
-      description: `${member.user.display_name} loses access to the team and its projects; their task assignments are cleared.`,
-      confirmLabel: "Remove member",
+      title: t("settings:members.removeConfirm.title"),
+      description: t("settings:members.removeConfirm.description", { name: member.user.display_name }),
+      confirmLabel: t("settings:members.removeConfirm.confirm"),
       action: () => removeMember.mutate(member.user.id),
     });
   };
@@ -358,37 +362,38 @@ function MembersSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean 
   }, [members.data, roleFilter, search]);
 
   return (
-    <section aria-label="Team members">
+    <section aria-label={t("settings:members.sectionAria")}>
       {confirmElement}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold">Members ({visible.length})</h2>
+        <h2 className="text-sm font-semibold">{t("settings:members.title", { total: visible.length })}</h2>
         {isAdmin ? (
           <Button size="sm" variant="outline" onClick={() => setAddOpen(true)} data-testid="add-member">
-            <UserPlus /> Add member
+            <UserPlus /> {t("settings:members.add")}
           </Button>
         ) : null}
       </div>
       <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="member-filters">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute start-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, email or @username…"
-            className="w-56 pl-7"
-            aria-label="Search members"
+            placeholder={t("settings:members.searchPlaceholder")}
+            className="w-56 ps-7"
+            aria-label={t("settings:members.searchAria")}
+            dir="auto"
             data-testid="member-search"
           />
         </div>
         <Select value={roleFilter} onValueChange={setRoleFilter}>
-          <SelectTrigger className="w-auto min-w-[8.5rem]" aria-label="Filter by role" data-testid="member-role-filter">
-            <SelectValue placeholder="Role" />
+          <SelectTrigger className="w-auto min-w-[8.5rem]" aria-label={t("settings:members.filterByRole")} data-testid="member-role-filter">
+            <SelectValue placeholder={t("settings:members.role")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All roles</SelectItem>
+            <SelectItem value="all">{t("settings:members.allRoles")}</SelectItem>
             {ROLES.map((r) => (
               <SelectItem key={r} value={r}>
-                {roleLabel(r)}
+                {t(roleLabelKey(r))}
               </SelectItem>
             ))}
           </SelectContent>
@@ -398,10 +403,10 @@ function MembersSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean 
         <Skeleton className="h-24 w-full" />
       ) : visible.length === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="members-empty">
-          No members match the current filters.
+          {t("settings:members.empty")}
         </p>
       ) : (
-        <ul className="overflow-hidden rounded-lg border" data-testid="member-list">
+        <ul className="overflow-hidden rounded-sg border" data-testid="member-list">
           {visible.map((member) => (
             <li key={member.user.id} className="flex items-center gap-3 border-b px-4 py-2.5 last:border-0">
               <Avatar name={member.user.display_name} size="md" />
@@ -409,14 +414,14 @@ function MembersSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean 
                 <p className="truncate text-sm font-medium">
                   {member.user.display_name}
                   {member.username ? (
-                    <span className="ml-1.5 font-mono text-2xs text-muted-foreground">
+                    <span className="ms-1.5 font-mono text-2xs text-muted-foreground">
                       @{member.username}
                     </span>
                   ) : null}
-                  <RoleBadge role={member.role} className="ml-2" />
+                  <RoleBadge role={member.role} className="ms-2" />
                 </p>
                 <p className="truncate text-2xs text-muted-foreground">
-                  {member.user.email} · joined {timeAgo(member.created_at)}
+                  {t("settings:members.joinedAgo", { email: member.user.email, time: timeAgo(member.created_at) })}
                 </p>
               </div>
               {isAdmin ? (
@@ -444,10 +449,11 @@ function MemberRowMenu({
   changeRole: { mutate: (vars: { userId: string; role: string }) => void };
   confirmRemove: (member: Member) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label={`Manage ${member.user.display_name}`}>
+        <Button variant="ghost" size="icon-sm" aria-label={t("settings:members.manageAria", { name: member.user.display_name })}>
           <MoreHorizontal />
         </Button>
       </DropdownMenuTrigger>
@@ -457,11 +463,11 @@ function MemberRowMenu({
             key={role}
             onSelect={() => changeRole.mutate({ userId: member.user.id, role })}
           >
-            Make {roleLabel(role)}
+            {t("settings:members.makeRole", { role: t(roleLabelKey(role)) })}
           </DropdownMenuItem>
         ))}
         <DropdownMenuItem destructive onSelect={() => confirmRemove(member)}>
-          <Trash2 /> Remove from team
+          <Trash2 /> {t("settings:members.removeFromTeam")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -481,6 +487,7 @@ import { LABEL_ICON_MAP } from "@/components/app/TaskBadges";
 // ---------------------------------------------------------------------------
 
 function GuestsSection({ teamId, canManage }: { teamId: string; canManage: boolean }) {
+  const { t } = useTranslation("settings");
   const guests = useTeamGuests(teamId);
   const revoke = useRevokeTeamGuest(teamId);
   const { push } = useToast();
@@ -488,16 +495,16 @@ function GuestsSection({ teamId, canManage }: { teamId: string; canManage: boole
 
   const confirmRevoke = (userName: string, userId: string) => {
     confirm({
-      title: "Revoke guest access?",
-      description: `${userName} loses viewer access to every project in this team.`,
-      confirmLabel: "Revoke access",
+      title: t("guests.revokeConfirm.title"),
+      description: t("guests.revokeConfirm.viewerDescription", { name: userName }),
+      confirmLabel: t("guests.revokeConfirm.confirm"),
       action: () =>
         revoke.mutate(userId, {
-          onSuccess: () => push("success", "Guest access revoked"),
+          onSuccess: () => push("success", t("guests.accessRevoked")),
           onError: (error) =>
             push(
               "error",
-              "Could not revoke access",
+              t("guests.errors.revoke"),
               error instanceof ApiError ? error.message : undefined,
             ),
         }),
@@ -505,20 +512,20 @@ function GuestsSection({ teamId, canManage }: { teamId: string; canManage: boole
   };
 
   return (
-    <section aria-label="Guests">
+    <section aria-label={t("guests.title")}>
       {confirmElement}
-      <h2 className="mb-1 text-sm font-semibold">Guests</h2>
+      <h2 className="mb-1 text-sm font-semibold">{t("guests.title")}</h2>
       <p className="mb-3 text-xs text-muted-foreground">
-        People with read-only viewer access to projects in this team.
+        {t("guests.subtitle")}
       </p>
       {guests.isLoading ? (
         <Skeleton className="h-16 w-full" />
       ) : (guests.data?.items.length ?? 0) === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="guests-empty">
-          No guests. Grant viewer access from a project's guest page.
+          {t("guests.empty")}
         </p>
       ) : (
-        <ul className="overflow-hidden rounded-lg border" data-testid="guest-list">
+        <ul className="overflow-hidden rounded-sg border" data-testid="guest-list">
           {guests.data?.items.map((guest) => (
             <li
               key={`${guest.project_id}-${guest.user.id}`}
@@ -528,13 +535,14 @@ function GuestsSection({ teamId, canManage }: { teamId: string; canManage: boole
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">
                   {guest.user.display_name}
-                  <span className="ml-1.5 truncate text-2xs text-muted-foreground">
+                  <span className="ms-1.5 truncate text-2xs text-muted-foreground">
                     {guest.user.email}
                   </span>
                 </p>
                 <p className="truncate text-2xs text-muted-foreground">
-                  Viewer of <span className="font-medium">{guest.project_name}</span> · granted{" "}
-                  {timeAgo(guest.created_at)}
+                  {t("guests.viewerOf")}{" "}
+                  <span className="font-medium">{guest.project_name}</span> ·{" "}
+                  {t("guests.grantedAgo", { time: timeAgo(guest.created_at) })}
                 </p>
               </div>
               {canManage ? (
@@ -545,7 +553,7 @@ function GuestsSection({ teamId, canManage }: { teamId: string; canManage: boole
                   onClick={() => confirmRevoke(guest.user.display_name, guest.user.id)}
                   data-testid={`revoke-guest-${guest.user.id}`}
                 >
-                  Revoke
+                  {t("actions.revoke")}
                 </Button>
               ) : null}
             </li>
@@ -570,6 +578,7 @@ function DangerZoneSection({
   archived: boolean;
 }) {
   const { myRole } = useWorkspace();
+  const { t } = useTranslation("settings");
   const { push } = useToast();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -583,11 +592,11 @@ function DangerZoneSection({
 
   const doArchive = () => {
     (archived ? unarchiveTeam : archiveTeam).mutate(undefined, {
-      onSuccess: () => push("success", archived ? "Team restored" : "Team archived"),
+      onSuccess: () => push("success", archived ? t("dangerZone.restoredToast") : t("dangerZone.archivedToast")),
       onError: (error) =>
         push(
           "error",
-          archived ? "Could not restore the team" : "Could not archive the team",
+          archived ? t("dangerZone.errors.restore") : t("dangerZone.errors.archive"),
           error instanceof ApiError ? error.message : undefined,
         ),
     });
@@ -596,11 +605,11 @@ function DangerZoneSection({
   const { confirm, element: archiveConfirm } = useConfirmDialog();
   const requestArchive = () => {
     confirm({
-      title: archived ? "Restore this team?" : "Archive this team?",
+      title: archived ? t("dangerZone.restoreConfirmTitle") : t("dangerZone.archiveConfirmTitle"),
       description: archived
-        ? "The team becomes fully active again."
-        : "The team is marked as archived. You can restore it at any time.",
-      confirmLabel: archived ? "Restore team" : "Archive team",
+        ? t("dangerZone.restoreConfirmDescription")
+        : t("dangerZone.archiveConfirmDescription"),
+      confirmLabel: archived ? t("dangerZone.restoreTeam") : t("dangerZone.archiveTeam"),
       destructive: !archived,
       action: doArchive,
     });
@@ -609,33 +618,33 @@ function DangerZoneSection({
   const deleteTeam = useMutation({
     mutationFn: () => api.deleteTeam(teamId, confirmName.trim(), deletePassword),
     onSuccess: () => {
-      push("info", "Team deleted", `${teamName} and all of its data were removed.`);
+      push("info", t("dangerZone.deletedToast"), t("dangerZone.deletedBody", { name: teamName }));
       void qc.invalidateQueries({ queryKey: ["teams"] });
       void qc.clear();
       navigate("/", { replace: true });
     },
     onError: (error) =>
-      setDeleteError(error instanceof ApiError ? error.message : "Could not delete the team."),
+      setDeleteError(error instanceof ApiError ? error.message : t("dangerZone.errors.delete")),
   });
 
   return (
     <section
-      aria-label="Danger zone"
-      className="rounded-lg border border-destructive/40 p-4"
+      aria-label={t("dangerZone.title")}
+      className="rounded-sg border border-destructive/40 p-4"
       data-testid="danger-zone"
     >
       {archiveConfirm}
       <h2 className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-destructive">
-        <ShieldAlert className="h-4 w-4" /> Danger zone
+        <ShieldAlert className="h-4 w-4" /> {t("dangerZone.title")}
       </h2>
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-medium">{archived ? "Restore team" : "Archive team"}</p>
+            <p className="text-sm font-medium">{archived ? t("dangerZone.restoreTeam") : t("dangerZone.archiveTeam")}</p>
             <p className="text-2xs text-muted-foreground">
               {archived
-                ? "The team is currently archived."
-                : "Marks the team as archived; reversible at any time."}
+                ? t("dangerZone.archivedNote")
+                : t("dangerZone.archiveNote")}
             </p>
           </div>
           <Button
@@ -645,23 +654,22 @@ function DangerZoneSection({
             onClick={requestArchive}
             data-testid="archive-team"
           >
-            <Archive /> {archived ? "Restore" : "Archive"}
+            <Archive /> {archived ? t("dangerZone.restore") : t("dangerZone.archive")}
           </Button>
         </div>
         <Separator />
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-medium">Delete team</p>
+            <p className="text-sm font-medium">{t("dangerZone.deleteTeam")}</p>
             <p className="text-2xs text-muted-foreground">
-              Permanently deletes the team, all of its projects, tasks, and automation history.
-              Owner only — type the team name and your password.
+              {t("dangerZone.deleteNote")}
             </p>
           </div>
           <Button
             variant="destructive"
             size="sm"
             disabled={!isOwner}
-            title={isOwner ? undefined : "Only the team owner can delete the team"}
+            title={isOwner ? undefined : t("dangerZone.ownerOnlyTitle")}
             onClick={() => {
               setConfirmName("");
               setDeletePassword("");
@@ -670,7 +678,7 @@ function DangerZoneSection({
             }}
             data-testid="delete-team"
           >
-            <Trash2 /> Delete
+            <Trash2 /> {t("dangerZone.delete")}
           </Button>
         </div>
       </div>
@@ -714,16 +722,17 @@ function DeleteTeamDialog({
   pending: boolean;
   onSubmit: () => void;
 }) {
+  const { t } = useTranslation("settings");
   const ready = confirmName.trim() === teamName && deletePassword.length > 0;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent role="alertdialog">
         <DialogHeader>
-          <DialogTitle className="text-destructive">Delete this team permanently?</DialogTitle>
+          <DialogTitle className="text-destructive">{t("dangerZone.deleteConfirm.title")}</DialogTitle>
           <DialogDescription>
-            This is irreversible: every project, task, comment, and automation of{" "}
-            <span className="font-semibold">{teamName}</span> will be deleted. Type the team name
-            and your current password to confirm.
+            {t("dangerZone.deleteConfirm.before")}{" "}
+            <span className="font-semibold">{teamName}</span>{" "}
+            {t("dangerZone.deleteConfirm.after")}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -736,7 +745,7 @@ function DeleteTeamDialog({
           data-testid="delete-team-form"
         >
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="delete-confirm-name">Team name</Label>
+            <Label htmlFor="delete-confirm-name">{t("dangerZone.teamNameLabel")}</Label>
             <Input
               id="delete-confirm-name"
               value={confirmName}
@@ -747,7 +756,7 @@ function DeleteTeamDialog({
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="delete-confirm-password">Your current password</Label>
+            <Label htmlFor="delete-confirm-password">{t("actions.currentPassword")}</Label>
             <Input
               id="delete-confirm-password"
               type="password"
@@ -760,7 +769,7 @@ function DeleteTeamDialog({
           {error ? <p className="text-2xs text-destructive" role="alert">{error}</p> : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
-              Cancel
+              {t("actions.cancel")}
             </Button>
             <Button
               variant="destructive"
@@ -768,7 +777,7 @@ function DeleteTeamDialog({
               disabled={!ready || pending}
               data-testid="delete-team-submit"
             >
-              {pending ? "Deleting…" : "Delete team forever"}
+              {pending ? t("dangerZone.deleting") : t("dangerZone.deleteForever")}
             </Button>
           </DialogFooter>
         </form>
@@ -782,6 +791,7 @@ function DeleteTeamDialog({
 // ---------------------------------------------------------------------------
 
 function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }) {
+  const { t } = useTranslation("settings");
   const labels = useLabels(teamId);
   const { push } = useToast();
   const qc = useQueryClient();
@@ -798,13 +808,13 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
   const create = useMutation({
     mutationFn: () => api.createLabel(teamId, name, color, icon || undefined),
     onSuccess: () => {
-      push("success", "Label created");
+      push("success", t("labels.created"));
       void qc.invalidateQueries({ queryKey: ["labels", teamId] });
       setName("");
       setIcon("");
     },
     onError: (error) =>
-      push("error", "Could not create label", error instanceof ApiError ? error.message : undefined),
+      push("error", t("labels.errors.create"), error instanceof ApiError ? error.message : undefined),
   });
 
   const update = useMutation({
@@ -815,23 +825,23 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
         icon: vars.icon,
       }),
     onSuccess: () => {
-      push("success", "Label updated");
+      push("success", t("labels.updated"));
       void qc.invalidateQueries({ queryKey: ["labels", teamId] });
       setEditing(null);
     },
     onError: (error) =>
-      push("error", "Could not update label", error instanceof Error ? error.message : undefined),
+      push("error", t("labels.errors.update"), error instanceof Error ? error.message : undefined),
   });
 
   const remove = useMutation({
     mutationFn: (id: string) => api.deleteLabel(teamId, id),
     onSuccess: () => {
-      push("success", "Label deleted");
+      push("success", t("labels.deleted"));
       void qc.invalidateQueries({ queryKey: ["labels", teamId] });
       setEditing(null);
     },
     onError: (error) =>
-      push("error", "Could not delete label", error instanceof Error ? error.message : undefined),
+      push("error", t("labels.errors.delete"), error instanceof Error ? error.message : undefined),
   });
 
   const iconEntries = Object.entries(LABEL_ICON_MAP).filter(([key]) =>
@@ -845,22 +855,23 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
     >
       {/* Live preview */}
       <div className="flex items-center gap-2">
-        <span className="text-2xs text-muted-foreground">Preview</span>
+        <span className="text-2xs text-muted-foreground">{t("labels.preview")}</span>
         {name.trim() ? (
           <LabelChip name={name.trim()} color={color} icon={icon || null} />
         ) : (
-          <span className="text-2xs text-muted-foreground">Type a name to preview</span>
+          <span className="text-2xs text-muted-foreground">{t("labels.previewHint")}</span>
         )}
       </div>
       <div className="flex items-end gap-2">
         <div className="flex flex-1 flex-col gap-1.5">
-          <Label htmlFor="label-name">Label name</Label>
+          <Label htmlFor="label-name">{t("labels.name")}</Label>
           <Input
             id="label-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="New label name"
-            aria-label="Label name"
+            placeholder={t("labels.namePlaceholder")}
+            aria-label={t("labels.name")}
+            dir="auto"
             data-testid="label-name-input"
           />
         </div>
@@ -872,19 +883,19 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
           onClick={() => create.mutate()}
           data-testid="label-add"
         >
-          {create.isPending ? "Adding…" : "Add"}
+          {create.isPending ? t("labels.adding") : t("labels.add")}
         </Button>
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label>Color</Label>
-        <div className="flex gap-1.5" role="radiogroup" aria-label="Label color">
+        <Label>{t("labels.color")}</Label>
+        <div className="flex gap-1.5" role="radiogroup" aria-label={t("labels.colorAria")}>
           {LABEL_PALETTE.map((c) => (
             <button
               key={c}
               type="button"
               role="radio"
               aria-checked={color === c}
-              aria-label={`Color ${c}`}
+              aria-label={t("labels.colorSwatchAria", { color: c })}
               onClick={() => setColor(c)}
               className={cn(
                 "h-7 w-7 rounded-full border-2 transition-transform duration-100",
@@ -897,19 +908,19 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
         </div>
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="label-icon-search">Icon (optional)</Label>
+        <Label htmlFor="label-icon-search">{t("labels.iconOptional")}</Label>
         <Input
           id="label-icon-search"
           value={iconSearch}
           onChange={(e) => setIconSearch(e.target.value)}
-          placeholder="Search icons…"
+          placeholder={t("labels.iconSearch")}
           className="w-44"
           data-testid="label-icon-search"
         />
         <div
           className="flex max-h-32 flex-wrap gap-1 overflow-y-auto rounded-md border p-1.5 scrollbar-thin"
           role="listbox"
-          aria-label="Label icon"
+          aria-label={t("labels.iconAria")}
           data-testid="label-icon-grid"
         >
           <button
@@ -921,7 +932,7 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
               "flex h-7 w-7 items-center justify-center rounded border text-2xs",
               icon === "" ? "border-primary bg-primary/10" : "border-transparent hover:bg-accent",
             )}
-            aria-label="No icon"
+            aria-label={t("labels.noIcon")}
           >
             ×
           </button>
@@ -950,17 +961,17 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
   ) : null;
 
   return (
-    <section aria-label="Labels">
+    <section aria-label={t("labels.title")}>
       <h2 className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
-        <Tags className="h-4 w-4" /> Labels
+        <Tags className="h-4 w-4" /> {t("labels.title")}
       </h2>
       <p className="mb-3 text-xs text-muted-foreground">
-        Categorize tasks. Members with the Manager role or above can create them.
+        {t("labels.subtitle")}
       </p>
       {labels.isLoading ? <Skeleton className="h-16 w-full" /> : null}
       {labels.data && labels.data.items.length === 0 && !labels.isLoading ? (
         <p className="text-xs text-muted-foreground" data-testid="labels-empty">
-          No labels yet.
+          {t("labels.empty")}
         </p>
       ) : null}
       <div className="mb-4 flex flex-wrap gap-2" data-testid="label-list">
@@ -976,7 +987,7 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
                 setEditIcon(label.icon ?? "");
               }}
               className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={`Edit label ${label.name}`}
+              aria-label={t("labels.editAria", { name: label.name })}
               data-testid={`label-edit-${label.id}`}
             >
               <LabelChip name={label.name} color={label.color} icon={label.icon} />
@@ -992,18 +1003,18 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
       <Dialog open={editing !== null} onOpenChange={(v) => !v && setEditing(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit label</DialogTitle>
+            <DialogTitle>{t("labels.editTitle")}</DialogTitle>
             <DialogDescription>
-              Update the name, color or icon. Changes apply everywhere the label is used.
+              {t("labels.editDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
-              <span className="text-2xs text-muted-foreground">Preview</span>
-              <LabelChip name={editName || "Label"} color={editColor} icon={editIcon || null} />
+              <span className="text-2xs text-muted-foreground">{t("labels.preview")}</span>
+              <LabelChip name={editName || t("labels.fallbackName")} color={editColor} icon={editIcon || null} />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="edit-label-name">Name</Label>
+              <Label htmlFor="edit-label-name">{t("labels.editName")}</Label>
               <Input
                 id="edit-label-name"
                 value={editName}
@@ -1012,15 +1023,15 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label>Color</Label>
-              <div className="flex gap-1.5" role="radiogroup" aria-label="Label color">
+              <Label>{t("labels.color")}</Label>
+              <div className="flex gap-1.5" role="radiogroup" aria-label={t("labels.colorAria")}>
                 {LABEL_PALETTE.map((c) => (
                   <button
                     key={c}
                     type="button"
                     role="radio"
                     aria-checked={editColor === c}
-                    aria-label={`Color ${c}`}
+                    aria-label={t("labels.colorSwatchAria", { color: c })}
                     onClick={() => setEditColor(c)}
                     className={cn(
                       "h-7 w-7 rounded-full border-2 transition-transform duration-100",
@@ -1034,7 +1045,7 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
               </div>
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label>Icon</Label>
+              <Label>{t("labels.icon")}</Label>
               <div className="flex max-h-32 flex-wrap gap-1 overflow-y-auto rounded-md border p-1.5 scrollbar-thin">
                 <button
                   type="button"
@@ -1045,7 +1056,7 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
                       ? "border-primary bg-primary/10"
                       : "border-transparent hover:bg-accent",
                   )}
-                  aria-label="No icon"
+                  aria-label={t("labels.noIcon")}
                 >
                   ×
                 </button>
@@ -1075,12 +1086,12 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
               onClick={() => editing && remove.mutate(editing.id)}
               data-testid="label-delete"
             >
-              <Trash2 /> Delete label
+              <Trash2 /> {t("labels.delete")}
             </Button>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditing(null)}>
-              Cancel
+              {t("actions.cancel")}
             </Button>
             <Button
               disabled={!editName.trim() || update.isPending}
@@ -1095,7 +1106,7 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
               }
               data-testid="label-save"
             >
-              {update.isPending ? "Saving…" : "Save"}
+              {update.isPending ? t("actions.saving") : t("labels.save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1105,6 +1116,7 @@ function LabelsSection({ teamId, isAdmin }: { teamId: string; isAdmin: boolean }
 }
 
 function ProjectTrashSection({ teamId }: { teamId: string }) {
+  const { t } = useTranslation("settings");
   const trash = useQuery({
     queryKey: ["project-trash", teamId],
     queryFn: () => api.projectTrash(teamId),
@@ -1125,11 +1137,11 @@ function ProjectTrashSection({ teamId }: { teamId: string }) {
   const restore = useMutation({
     mutationFn: (id: string) => api.restoreProject(id),
     onSuccess: () => {
-      push("success", "Project restored");
+      push("success", t("trash.restored"));
       invalidate();
     },
     onError: (error) =>
-      push("error", "Could not restore project", error instanceof ApiError ? error.message : undefined),
+      push("error", t("trash.errors.restore"), error instanceof ApiError ? error.message : undefined),
   });
 
   const purge = useMutation({
@@ -1138,41 +1150,43 @@ function ProjectTrashSection({ teamId }: { teamId: string }) {
         ? api.purgeProject(purgeTarget.id, confirmName.trim(), purgePassword)
         : Promise.reject(new Error("no project selected")),
     onSuccess: () => {
-      push("info", "Project permanently deleted");
+      push("info", t("trash.purged"));
       setPurgeOpen(false);
       setPurgeTarget(null);
       invalidate();
     },
     onError: (error) =>
-      setPurgeError(error instanceof ApiError ? error.message : "Could not purge the project."),
+      setPurgeError(error instanceof ApiError ? error.message : t("trash.errors.purge")),
   });
 
   const purgeReady = purgeTarget !== null && confirmName.trim() === purgeTarget.name && purgePassword.length > 0;
 
   return (
-    <section aria-label="Deleted projects" data-testid="project-trash">
+    <section aria-label={t("trash.title")} data-testid="project-trash">
       <h2 className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
-        <Trash2 className="h-4 w-4" /> Deleted projects
+        <Trash2 className="h-4 w-4" /> {t("trash.title")}
       </h2>
       <p className="mb-3 text-xs text-muted-foreground">
-        Projects stay here for 30 days before they can only be purged permanently.
+        {t("trash.subtitle")}
       </p>
       {trash.isLoading ? (
         <Skeleton className="h-16 w-full" />
       ) : (trash.data?.items.length ?? 0) === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="trash-empty">
-          Nothing here — no deleted projects.
+          {t("trash.empty")}
         </p>
       ) : (
-        <ul className="overflow-hidden rounded-lg border" data-testid="trash-list">
+        <ul className="overflow-hidden rounded-sg border" data-testid="trash-list">
           {trash.data?.items.map((item) => (
             <li key={item.id} className="flex flex-wrap items-center gap-3 border-b px-4 py-2.5 last:border-0">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{item.name}</p>
                 <p className="truncate text-2xs text-muted-foreground">
-                  {item.task_count} task{item.task_count === 1 ? "" : "s"} · deleted{" "}
-                  {timeAgo(item.deleted_at)} · retention ends{" "}
-                  {item.retention_expires_at ? timeAgo(item.retention_expires_at) : "—"}
+                  {t("trash.taskCount", {
+                    count: item.task_count,
+                    deleted: timeAgo(item.deleted_at),
+                    ends: item.retention_expires_at ? timeAgo(item.retention_expires_at) : "—",
+                  })}
                 </p>
               </div>
               <Button
@@ -1182,7 +1196,7 @@ function ProjectTrashSection({ teamId }: { teamId: string }) {
                 onClick={() => restore.mutate(item.id)}
                 data-testid={`restore-project-${item.id}`}
               >
-                Restore
+                {t("trash.restore")}
               </Button>
               <Button
                 variant="destructive"
@@ -1197,7 +1211,7 @@ function ProjectTrashSection({ teamId }: { teamId: string }) {
                 }}
                 data-testid={`purge-project-${item.id}`}
               >
-                Purge
+                {t("trash.purge")}
               </Button>
             </li>
           ))}
@@ -1207,11 +1221,11 @@ function ProjectTrashSection({ teamId }: { teamId: string }) {
       <Dialog open={purgeOpen} onOpenChange={setPurgeOpen}>
         <DialogContent role="alertdialog">
           <DialogHeader>
-            <DialogTitle className="text-destructive">Purge this project permanently?</DialogTitle>
+            <DialogTitle className="text-destructive">{t("trash.purgeConfirm.title")}</DialogTitle>
             <DialogDescription>
-              This is irreversible: every task, comment, and dependency of{" "}
-              <span className="font-semibold">{purgeTarget?.name}</span> is deleted forever. Type the
-              project name and your current password to confirm.
+              {t("trash.purgeConfirm.before")}{" "}
+              <span className="font-semibold">{purgeTarget?.name}</span>{" "}
+              {t("trash.purgeConfirm.after")}
             </DialogDescription>
           </DialogHeader>
           <form
@@ -1224,7 +1238,7 @@ function ProjectTrashSection({ teamId }: { teamId: string }) {
             data-testid="purge-form"
           >
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="purge-confirm-name">Project name</Label>
+              <Label htmlFor="purge-confirm-name">{t("trash.projectName")}</Label>
               <Input
                 id="purge-confirm-name"
                 value={confirmName}
@@ -1235,7 +1249,7 @@ function ProjectTrashSection({ teamId }: { teamId: string }) {
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="purge-password">Your current password</Label>
+              <Label htmlFor="purge-password">{t("actions.currentPassword")}</Label>
               <Input
                 id="purge-password"
                 type="password"
@@ -1248,7 +1262,7 @@ function ProjectTrashSection({ teamId }: { teamId: string }) {
             {purgeError ? <p className="text-2xs text-destructive" role="alert">{purgeError}</p> : null}
             <DialogFooter>
               <Button variant="outline" onClick={() => setPurgeOpen(false)} disabled={purge.isPending}>
-                Cancel
+                {t("actions.cancel")}
               </Button>
               <Button
                 variant="destructive"
@@ -1256,7 +1270,7 @@ function ProjectTrashSection({ teamId }: { teamId: string }) {
                 disabled={!purgeReady || purge.isPending}
                 data-testid="purge-submit"
               >
-                {purge.isPending ? "Purging…" : "Delete forever"}
+                {purge.isPending ? t("trash.purging") : t("trash.deleteForever")}
               </Button>
             </DialogFooter>
           </form>

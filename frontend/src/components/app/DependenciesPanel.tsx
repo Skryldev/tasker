@@ -108,7 +108,7 @@ function DependencyCard({
           At Risk
         </Badge>
       ) : null}
-      <span className="ml-auto shrink-0 text-2xs text-muted-foreground">
+      <span className="ms-auto shrink-0 text-2xs text-muted-foreground">
         {direction === "blocked_by" ? "must finish first" : "waits on this"}
         {" · "}
         {STATUS_LABELS[dep.status as TaskStatus] ?? dep.status}
@@ -197,7 +197,7 @@ function TaskPicker({
                 onClick={() => onPick(c.id)}
                 onMouseEnter={() => setActive(i)}
                 className={cn(
-                  "flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-accent",
+                  "flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-start text-xs hover:bg-accent",
                   i === active && "bg-accent",
                 )}
               >
@@ -291,7 +291,7 @@ export function DependenciesPanel({ task }: { task: Task }) {
         <h3 className="flex items-center gap-1.5 text-xs font-semibold">
           <Link2 className="h-3.5 w-3.5" /> Dependencies
           {openBlockers > 0 ? (
-            <Badge className="ml-1 bg-destructive/10 text-destructive" data-testid="blocked-count">
+            <Badge className="ms-1 bg-destructive/10 text-destructive" data-testid="blocked-count">
               {openBlockers} open blocker{openBlockers === 1 ? "" : "s"}
             </Badge>
           ) : null}
